@@ -1,6 +1,6 @@
 {
   "name": "gitgraph",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A Git Graph pane beside the chat: commit graph with lanes, refs, commit details, auto-refresh and quick actions",
   "types": "./types/index.d.ts",
   "keywords": [
@@ -21,5 +21,11 @@
         "square"
       ]
     }
-  }
+  },
+  "license": "MIT",
+  "author": {
+    "name": "Giovanni Franco"
+  },
+  "repository": "https://github.com/giovannifranco1/claude-code-gitgraph",
+  "homepage": "https://github.com/giovannifranco1/claude-code-gitgraph"
 }
