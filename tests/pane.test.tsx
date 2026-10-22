@@ -27,6 +27,8 @@ type Fake = {
   branch?: string
   conflictOn?: string
   isConflicted?: boolean
+  // A push waits on this, so a test can look at the pane while the action runs.
+  hold?: Promise<void>
   // `-c` settings a call carried, as `<verb>: <key=value>`.
   configs: string[]
 }
@@ -131,8 +133,9 @@ async function setup($: Engine, on: On, fake: Fake, copied: string[] = [], toast
     copied.push(e.text)
     return { value: { isCopied: true } }
   })
-  on('process.run', (_, e) => {
+  on('process.run', async (_, e) => {
     fake.envs.push({ ...(e.init?.env ?? {}) })
+    if (fake.hold && e.argv.includes('push')) await fake.hold
     return { value: answer(fake, e.argv) }
   })
   on('session.start', (_, e) => ({ cwd: e.cwd }))
@@ -849,5 +852,22 @@ test('GG-12 a long branch menu grows rows instead of hiding items: Delete branch
   expect(rows.length).toBeGreaterThan(2)
   expect(await ui.find({ type: 'Button', key: 'menu-delete' })).toBeDefined()
   expect(await ui.find({ type: 'Button', key: 'menu-copy' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('GG-12 while a push runs from the branch menu the pane draws, each spinner with its own key', async ($, on) => {
+  let release = () => {}
+  const fake = newFake({ hold: new Promise<void>(r => (release = r)) })
+  await setup($, on, fake)
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.pointer({ type: 'down', x: 1, y: 0, button: 'right', in: `pill:${B}:0` })
+  await ui.press({ key: 'menu-push' })
+  const pushing = ui.press({ key: 'push-run' })
+  for (let i = 0; i < 20 && !(await ui.find({ type: 'Text', text: /Pushing feat/ })); i++) await Promise.resolve()
+  expect(await ui.find({ type: 'Text', text: /Pushing feat/ })).toBeDefined()
+  const keys = (await ui.findAll({ type: 'Client' })).map(c => c.key).filter(k => !String(k).startsWith('pill:'))
+  expect(new Set(keys).size).toBe(keys.length)
+  release()
+  await pushing
   await ui.unmount()
 })
