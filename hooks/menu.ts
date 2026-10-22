@@ -1,4 +1,5 @@
-import type { Badge } from '../types'
+import type { Badge, FlowConfig, FlowTopic } from '../types'
+import { flowMenuFor } from './flow'
 
 export type MenuItem = {
   id: string
@@ -10,6 +11,10 @@ export type MenuItem = {
   isRename?: boolean
   // A push: its argv with REMOTE where each chosen remote goes (see pushRuns).
   pushArgs?: string[]
+  // A git flow action on a work branch (./flow.ts), run with the flow's environment.
+  flow?: { action: 'finish' | 'update' | 'publish'; topic: FlowTopic }
+  // A local branch's delete, which asks whether to force it.
+  deleteBranch?: string
 }
 
 export const REMOTE = '<remote>'
@@ -21,6 +26,9 @@ export function splitRemote(ref: string, remotes: string[]): { remote: string; b
 }
 
 export const renameArgs = (from: string, to: string) => ['branch', '-m', from, to]
+
+// `-D` deletes a branch whose work is merged nowhere; `-d` refuses to.
+export const deleteBranchArgs = (name: string, isForce: boolean) => ['branch', isForce ? '-D' : '-d', name]
 
 const act = (id: string, label: string, args: string[], isNetwork = false): MenuItem => ({
   id,
@@ -53,8 +61,9 @@ export function checkoutArgs(badge: Badge): string[] | null {
   return null
 }
 
-// The ref's context menu, as the VS Code Git Graph offers it.
-export function menuFor(badge: Badge, remotes: string[]): MenuItem[] {
+// The ref's context menu, as the VS Code Git Graph offers it; a git flow work branch's
+// leads with its flow actions.
+export function menuFor(badge: Badge, remotes: string[], flow: FlowConfig | null = null): MenuItem[] {
   const name = badge.label
   const copy: MenuItem = { id: 'copy', label: 'Copy name', copy: name }
   switch (badge.kind) {
@@ -62,6 +71,7 @@ export function menuFor(badge: Badge, remotes: string[]): MenuItem[] {
     case 'branch': {
       const isHead = badge.kind === 'head'
       return [
+        ...flowMenuFor(name, flow),
         ...(isHead ? [] : [act('checkout', 'Checkout', checkoutArgs(badge) ?? [])]),
         { id: 'rename', label: 'Rename…', isRename: true },
         ...pushItem(remotes, ['push', '-u', REMOTE, name]),
@@ -70,7 +80,7 @@ export function menuFor(badge: Badge, remotes: string[]): MenuItem[] {
           : [
               act('merge', 'Merge into current branch', ['merge', name]),
               act('rebase', 'Rebase current branch on this', ['rebase', name]),
-              act('delete', 'Delete', ['branch', '-d', name]),
+              { id: 'delete', label: 'Delete branch…', deleteBranch: name },
             ]),
         copy,
       ]
