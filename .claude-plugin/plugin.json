@@ -1,6 +1,6 @@
 {
   "name": "gitgraph",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "A Git Graph pane beside the chat: commit graph with lanes, refs, commit details, auto-refresh and quick actions",
   "types": "./types/index.d.ts",
   "keywords": [

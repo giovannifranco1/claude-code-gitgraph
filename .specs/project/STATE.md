@@ -1,6 +1,7 @@
 # STATE — gitgraph
 
 ## Decisões
+- 2026-10-22: release 1.0.0 (tag `1.0.0`), repositório `giovannifranco1/claude-code-gitgraph`.
 - 2026-10-22: painel abre só via `/gitgraph` (não disputa espaço com /filetree e /flow).
 - 2026-10-22: grafo mostra todas as branches (`--all`) por padrão, com toggle para só a atual.
 - 2026-10-22: gitflow clássico (git-flow-next) no repositório do mod.
