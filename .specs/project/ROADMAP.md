@@ -1,6 +1,6 @@
 # ROADMAP — gitgraph
 
-## M1 — MVP (2026-10-22)
+## M1 — MVP (2026-10-22) — lançado como 1.0.0
 - [x] F1 `2026-10-22-git-graph-pane` — painel com grafo, labels, detalhes do commit, auto-refresh e ações (checkout, criar branch, cherry-pick, copiar hash)
 - [x] F1 extensão (GG-11..GG-17) — pílulas arredondadas, menu de ref (botão direito/duplo clique), push por remote, loading, configurações (usuário/remotes), busca por hash, scroll virtualizado, refresh com feedback, UI em inglês
 
