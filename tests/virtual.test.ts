@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { findByHash, isHashQuery, topOf, visibleRange } from '../hooks/virtual'
+import { findByHash, isHashQuery, topOf, visibleRange, wrapRows } from '../hooks/virtual'
 
 const ones = (n: number) => Array.from({ length: n }, () => 1)
 
@@ -28,4 +28,11 @@ test('GG-16 a hash prefix finds the first loaded commit it starts', async () => 
   expect(findByHash(hashes, 'F46E')).toBe('f46e2320')
   expect(findByHash(hashes, 'f46e99')).toBe('f46e9999')
   expect(findByHash(hashes, 'dead')).toBeUndefined()
+})
+
+test('GF-01 bar items wrap onto the next row when the pane is too narrow', async () => {
+  expect(wrapRows([1, 9, 8], 30, 2)).toEqual([[0, 1, 2]])
+  expect(wrapRows([1, 9, 8, 9, 8], 25, 2)).toEqual([[0, 1, 2], [3, 4]])
+  expect(wrapRows([1, 40, 3], 20, 2)).toEqual([[0], [1], [2]])
+  expect(wrapRows([], 20, 2)).toEqual([])
 })

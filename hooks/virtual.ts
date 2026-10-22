@@ -42,3 +42,21 @@ export function findByHash(hashes: string[], query: string): string | undefined 
   const prefix = query.toLowerCase()
   return hashes.find(h => h.startsWith(prefix))
 }
+
+// Items of the given widths laid out in rows of at most `cols`, `gap` apart, in order:
+// the indices of each row. An item wider than a row gets a row of its own.
+export function wrapRows(widths: number[], cols: number, gap: number): number[][] {
+  const rows: number[][] = []
+  let used = 0
+  widths.forEach((w, i) => {
+    const row = rows[rows.length - 1]
+    if (row && used + gap + w <= cols) {
+      row.push(i)
+      used += gap + w
+    } else {
+      rows.push([i])
+      used = w
+    }
+  })
+  return rows
+}
