@@ -1,6 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
-import { checkoutArgs, defaultPushRemotes, menuFor, pushRuns, renameArgs, splitRemote } from '../hooks/menu'
+import type { FlowConfig } from '../types'
+import { checkoutArgs, deleteBranchArgs, defaultPushRemotes, menuFor, pushRuns, renameArgs, splitRemote } from '../hooks/menu'
 
 const ids = (items: { id: string }[]) => items.map(i => i.id)
 
@@ -13,7 +14,8 @@ test('GG-12 a local branch gets the full branch menu', async () => {
   expect(pushRuns(by.push!, ['origin'])).toEqual([['push', '-u', 'origin', 'feat']])
   expect(by.merge?.runs?.[0]).toEqual(['merge', 'feat'])
   expect(by.rebase?.runs?.[0]).toEqual(['rebase', 'feat'])
-  expect(by.delete?.runs?.[0]).toEqual(['branch', '-d', 'feat'])
+  expect(by.delete?.label).toBe('Delete branch…')
+  expect(by.delete?.deleteBranch).toBe('feat')
   expect(by.copy?.copy).toBe('feat')
 })
 
@@ -81,4 +83,17 @@ test('GG-14 a double click checks out a local branch, tracks a remote one, and l
   expect(checkoutArgs({ kind: 'head', label: 'main', remotes: [] })).toBeNull()
   expect(checkoutArgs({ kind: 'tag', label: 'v1', remotes: [] })).toBeNull()
   expect(checkoutArgs({ kind: 'detached', label: 'HEAD', remotes: [] })).toBeNull()
+})
+
+test('GF-07 a git flow work branch menu leads with its flow actions; other refs do not get them', async () => {
+  const config: FlowConfig = { types: [{ kind: 'feature', prefix: 'feature/', parent: 'develop', startpoint: 'develop', isTagged: false, strategy: 'rebase' }], bases: [], remote: 'origin' }
+  expect(ids(menuFor({ kind: 'branch', label: 'feature/login', remotes: [] }, [], config))).toEqual(['flow-finish', 'flow-update', 'flow-publish', 'checkout', 'rename', 'merge', 'rebase', 'delete', 'copy'])
+  expect(ids(menuFor({ kind: 'head', label: 'feature/login', remotes: [] }, [], config)).slice(0, 3)).toEqual(['flow-finish', 'flow-update', 'flow-publish'])
+  expect(ids(menuFor({ kind: 'remote', label: 'origin/feature/login', remotes: [] }, ['origin'], config))).not.toContain('flow-finish')
+  expect(ids(menuFor({ kind: 'branch', label: 'feature/login', remotes: [] }, []))).not.toContain('flow-finish')
+})
+
+test('GG-12 a branch is deleted with -d, or -D when force is ticked', async () => {
+  expect(deleteBranchArgs('feat', false)).toEqual(['branch', '-d', 'feat'])
+  expect(deleteBranchArgs('feat', true)).toEqual(['branch', '-D', 'feat'])
 })

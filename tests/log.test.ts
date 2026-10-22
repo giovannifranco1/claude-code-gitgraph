@@ -73,11 +73,12 @@ test('GG-08 parses commit detail with numstat and binary files', async () => {
   })
 })
 
-test('GG-07 porcelain v2 status gives HEAD, branch and the dirty count', async () => {
+test('GG-07 GF-06 porcelain v2 status gives HEAD, branch, the dirty count and the conflicts', async () => {
   const out = '# branch.oid abc123\n# branch.head main\n# branch.upstream origin/main\n1 .M N... 100644 100644 100644 x y src/a.ts\n? new.txt\n'
-  expect(parseStatus(out)).toEqual({ head: 'abc123', branch: 'main', dirty: 2 })
-  expect(parseStatus('# branch.oid (initial)\n# branch.head main\n')).toEqual({ head: '', branch: 'main', dirty: 0 })
-  expect(parseStatus('# branch.oid abc\n# branch.head (detached)\n')).toEqual({ head: 'abc', branch: '', dirty: 0 })
+  expect(parseStatus(out)).toEqual({ head: 'abc123', branch: 'main', dirty: 2, conflicts: 0 })
+  expect(parseStatus('# branch.oid (initial)\n# branch.head main\n')).toEqual({ head: '', branch: 'main', dirty: 0, conflicts: 0 })
+  expect(parseStatus('# branch.oid abc\n# branch.head (detached)\n')).toEqual({ head: 'abc', branch: '', dirty: 0, conflicts: 0 })
+  expect(parseStatus('# branch.head x\nu UU N... 100644 100644 100644 100644 a b c src/a.ts\n1 .M N... 100644 100644 100644 x y src/b.ts\n').conflicts).toBe(1)
 })
 
 test('GG-04 remote names come from the remote-tracking refs', async () => {

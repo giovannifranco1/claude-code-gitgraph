@@ -10,7 +10,49 @@ const A = 'bbbbbbb2'
 const B = 'ccccccc3'
 const R = 'ddddddd4'
 
-type Fake = { isRepo: boolean; extra: number; rev: number; calls: string[][]; envs: Record<string, string>[]; headRefs?: string; remotes?: string[]; failPush?: string; clock?: ReturnType<typeof mock.clock> }
+type Fake = {
+  isRepo: boolean
+  extra: number
+  rev: number
+  calls: string[][]
+  envs: Record<string, string>[]
+  headRefs?: string
+  remotes?: string[]
+  failPush?: string
+  clock?: ReturnType<typeof mock.clock>
+  // Git Flow: which CLI answers `git flow`, the repository's gitflow.* config, the branch
+  // checked out, and a flow verb that stops on a conflict.
+  flow?: 'next' | 'other' | 'none'
+  flowConfig?: string
+  branch?: string
+  conflictOn?: string
+  isConflicted?: boolean
+  // `-c` settings a call carried, as `<verb>: <key=value>`.
+  configs: string[]
+}
+
+const FLOW_CONFIG = [
+  'gitflow.branch.main.type base',
+  'gitflow.branch.develop.type base',
+  'gitflow.branch.develop.parent main',
+  'gitflow.branch.develop.autoupdate true',
+  'gitflow.branch.feature.type topic',
+  'gitflow.branch.feature.parent develop',
+  'gitflow.branch.feature.startpoint develop',
+  'gitflow.branch.feature.downstreamstrategy rebase',
+  'gitflow.branch.feature.prefix feature/',
+  'gitflow.branch.release.type topic',
+  'gitflow.branch.release.parent main',
+  'gitflow.branch.release.startpoint develop',
+  'gitflow.branch.release.prefix release/',
+  'gitflow.branch.release.tag true',
+  'gitflow.branch.hotfix.type topic',
+  'gitflow.branch.hotfix.parent main',
+  'gitflow.branch.hotfix.startpoint main',
+  'gitflow.branch.hotfix.prefix hotfix/',
+  'gitflow.branch.hotfix.tag true',
+  '',
+].join('\n')
 
 function logOf(fake: Fake): string {
   const row = (...f: string[]) => f.join(US) + RS + '\n'
@@ -27,7 +69,11 @@ function logOf(fake: Fake): string {
   return out + row(parent, '', '', 'Ana', '1600000000', 'Initial')
 }
 
-function answer(fake: Fake, argv: readonly string[]) {
+function answer(fake: Fake, raw: readonly string[]) {
+  // `git -c key=value …`: the config is kept apart, the call recorded without it.
+  const hasConfig = raw[0] === 'git' && raw[1] === '-c'
+  const argv = hasConfig ? ['git', ...raw.slice(3)] : raw
+  if (hasConfig) fake.configs.push(`${argv[1]}: ${raw[2]}`)
   fake.calls.push([...argv])
   const ok = (stdout = '') => ({ exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false })
   const fail = (stderr: string) => ({ ...ok(), exitCode: 128, stderr })
@@ -37,7 +83,20 @@ function answer(fake: Fake, argv: readonly string[]) {
     case 'log':
       return ok(logOf(fake))
     case 'status':
-      return ok(`# branch.oid ${M}\n# branch.head main\n1 .M N... 100644 100644 100644 x y src/a.ts\n`)
+      return ok(`# branch.oid ${M}\n# branch.head ${fake.branch ?? 'main'}\n1 .M N... 100644 100644 100644 x y src/a.ts\n${fake.isConflicted ? 'u UU N... 100644 100644 100644 100644 a b c src/b.ts\n' : ''}`)
+    case 'flow': {
+      const cli = fake.flow ?? 'next'
+      if (cli === 'none') return { ...fail("git: 'flow' is not a git command."), exitCode: 1 }
+      if (rest[0] === 'version') return ok(cli === 'next' ? 'git-flow-next version 1.1.0\n' : '1.12.3 (AVH Edition)\n')
+      if (rest.includes('--continue') || rest.includes('--abort')) fake.isConflicted = false
+      else if (rest[1] === fake.conflictOn) {
+        fake.isConflicted = true
+        return fail('CONFLICT (content): Merge conflict in src/b.ts')
+      }
+      return ok()
+    }
+    case 'tag':
+      return ok('1.0.0\n1.0.1\n')
     case 'for-each-ref':
       return ok(`${M} refs/heads/main\n${B} refs/heads/feat\n${(fake.remotes ?? ['origin']).map(r => `${M} refs/remotes/${r}/main\n`).join('')}rev${fake.rev} refs/heads/moving\n`)
     case 'show':
@@ -45,6 +104,7 @@ function answer(fake: Fake, argv: readonly string[]) {
     case 'push':
       return rest.includes(fake.failPush ?? '\0') ? fail('fatal: could not read Username') : ok()
     case 'config': {
+      if (rest[0] === '--get-regexp') return fake.flowConfig === '' ? fail('') : ok(fake.flowConfig ?? FLOW_CONFIG)
       const values: Record<string, string> = { '--local user.name': 'Gio Local', '--global user.name': 'Gio', '--global user.email': 'gio@x.io' }
       return rest.includes('--get') ? ok(`${values[`${rest[0]} ${rest[2]}`] ?? ''}\n`) : ok()
     }
@@ -53,7 +113,7 @@ function answer(fake: Fake, argv: readonly string[]) {
     case 'rev-parse':
       return rest[2] === `${'dead'}^{commit}` ? fail('') : ok(`${M}\n`)
     case 'check-ref-format':
-      return /^[a-z-]+$/.test(rest[1] ?? '') ? ok(`${rest[1]}\n`) : fail('fatal: not a valid branch name')
+      return /^[a-z][a-z0-9./-]*$/.test(rest[1] ?? '') ? ok(`${rest[1]}\n`) : fail('fatal: not a valid branch name')
     default:
       return ok()
   }
@@ -98,7 +158,7 @@ const pane = <S extends 'terminal' | 'desktop' | 'vscode'>(surface: S, bodyColum
     },
   }) as const
 
-const newFake = (over: Partial<Fake> = {}): Fake => ({ isRepo: true, extra: 0, rev: 0, calls: [], envs: [], ...over })
+const newFake = (over: Partial<Fake> = {}): Fake => ({ isRepo: true, extra: 0, rev: 0, calls: [], envs: [], configs: [], ...over })
 const gitCalls = (fake: Fake) => fake.calls.filter(c => c[0] === 'git')
 const logCalls = (fake: Fake) => gitCalls(fake).filter(c => c[1] === 'log')
 
@@ -176,7 +236,8 @@ test('GG-09 after a Bash call the pane reloads only if the repository changed', 
 test('GG-09 a load runs git in one parallel batch of three processes', async ($, on) => {
   const fake = newFake()
   await setup($, on, fake)
-  expect(gitCalls(fake).map(c => c[1]).sort()).toEqual(['for-each-ref', 'log', 'status'])
+  const flow = ['flow', 'config', 'tag']
+  expect(gitCalls(fake).map(c => c[1] ?? '').filter(v => !flow.includes(v)).sort()).toEqual(['for-each-ref', 'log', 'status'])
 })
 
 test('GG-10 checkout and cherry-pick run only on the second press', async ($, on) => {
@@ -247,7 +308,7 @@ test('GG-12 a right click on a pill opens its branch menu; push asks for the rem
   await ui.press({ key: 'push-run' })
   const at = callOf(fake, ['push', '-u', 'origin', 'feat'])
   expect(at).toBeGreaterThan(-1)
-  expect(fake.envs[at]).toEqual({ GIT_TERMINAL_PROMPT: '0' })
+  expect(fake.envs[at]).toEqual(GIT_ENV)
   await ui.unmount()
 })
 
@@ -494,5 +555,299 @@ test('GG-13 adding a remote with only a URL names it origin, and says why when i
   await ui.input({ key: 'remote-new-name', text: 'github', kind: 'change' })
   await ui.input({ key: 'remote-new-url', text: url })
   expect(toasts.at(-1)).toBe('Remote "github" already exists')
+  await ui.unmount()
+})
+
+const flowCalls = (fake: Fake) => gitCalls(fake).filter(c => c[1] === 'flow' && c[2] !== 'version')
+const envOf = (fake: Fake, argv: string[]) => fake.envs[callOf(fake, argv)]
+const GIT_ENV = { GIT_TERMINAL_PROMPT: '0', GIT_EDITOR: 'true', GIT_MERGE_AUTOEDIT: 'no' }
+
+test('GF-01 the footer bar shows the git flow actions as icons, with no base names', async ($, on) => {
+  await setup($, on, newFake())
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount(pane(surface))
+    for (const kind of ['feature', 'release', 'hotfix']) {
+      const text = (await ui.find({ type: 'Button', key: `flow-start-${kind}` }))?.text ?? ''
+      expect(text).toContain(kind)
+      expect(text).not.toContain('←')
+    }
+    expect(await ui.find({ key: 'flow-finish' })).toBeUndefined()
+    expect(await ui.find({ key: 'flow-name' })).toBeUndefined()
+    await ui.unmount()
+  }
+})
+
+test('GF-01 on a docked terminal pane the footer is pinned to the bottom of the window', async ($, on) => {
+  await setup($, on, newFake({ extra: 100 }))
+  const ui = await $.ui.mount(pane('terminal', 100, 30))
+  expect((await ui.find({ type: 'Box', key: 'flow-footer' }))?.props).toMatchObject({ position: 'absolute', top: 30 + 40 - 2 })
+  await ui.unmount()
+})
+
+test('GF-01 a form grows the pinned footer by its rows, keeping it on the bottom edge', async ($, on) => {
+  await setup($, on, newFake())
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: 'flow-start-feature' })
+  expect((await ui.find({ type: 'Box', key: 'flow-footer' }))?.props).toMatchObject({ top: 40 - 3, height: 3 })
+  await ui.unmount()
+})
+
+test('GF-01 elsewhere (other surfaces, an inline pane) the footer closes the list, after the last commit', async ($, on) => {
+  await setup($, on, newFake())
+  const ui = await $.ui.mount(pane('desktop'))
+  expect(await ui.find({ type: 'Box', key: 'flow-footer' })).toBeUndefined()
+  await ui.unmount()
+  const inline = await $.ui.mount({ ...pane('terminal'), props: { ...pane('terminal').props, placement: 'inline' } })
+  expect(await inline.find({ type: 'Box', key: 'flow-footer' })).toBeUndefined()
+  await inline.unmount()
+  const ui2 = await $.ui.mount(pane('desktop'))
+  expect(await ui2.find({ type: 'Button', key: 'flow-start-feature' })).toBeDefined()
+  await ui2.unmount()
+})
+
+for (const [over, text, name] of [
+  [{ flow: 'none' }, /git flow is not installed/, 'not installed'],
+  [{ flow: 'other' }, /need git-flow-next/, 'another git flow'],
+  [{ flowConfig: '' }, /main · develop · feature\//, 'not set up'],
+] as const)
+  test(`GF-02 the drawer says when git flow is ${name}, with no actions`, async ($, on) => {
+    await setup($, on, newFake(over))
+    const ui = await $.ui.mount(pane('terminal'))
+    expect(await ui.find({ type: 'Text', text })).toBeDefined()
+    expect(await ui.find({ key: 'flow-start-feature' })).toBeUndefined()
+    await ui.unmount()
+  })
+
+test('GF-02 Start git flow sets it up with the standard names (git flow init -d) on the second press', async ($, on) => {
+  const fake = newFake({ flowConfig: '' })
+  await setup($, on, fake)
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: 'flow-init' })
+  expect(flowCalls(fake)).toEqual([])
+  await ui.press({ key: 'flow-init' })
+  expect(flowCalls(fake)).toEqual([['git', 'flow', 'init', '-d']])
+  await ui.unmount()
+})
+
+test('GF-03 start validates the full branch name and passes the name as its own argument', async ($, on) => {
+  const fake = newFake()
+  await setup($, on, fake)
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: 'flow-start-feature' })
+  await ui.input({ key: 'flow-name', text: 'Bad Name' })
+  await ui.input({ key: 'flow-name', text: '$(rm -rf)' })
+  expect(flowCalls(fake)).toEqual([])
+  await ui.input({ key: 'flow-name', text: 'login' })
+  expect(callOf(fake, ['check-ref-format', '--branch', 'feature/login'])).toBeGreaterThan(-1)
+  expect(flowCalls(fake)).toEqual([['git', 'flow', 'feature', 'start', 'login']])
+  expect(envOf(fake, ['flow', 'feature', 'start', 'login'])).toEqual(GIT_ENV)
+  await ui.unmount()
+})
+
+test('GF-03 a release starts with the next version filled in', async ($, on) => {
+  await setup($, on, newFake())
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: 'flow-start-release' })
+  expect((await ui.find({ type: 'Input', key: 'flow-name' }))?.props).toMatchObject({ value: '1.1.0' })
+  await ui.press({ key: 'flow-start-hotfix' })
+  expect((await ui.find({ type: 'Input', key: 'flow-name' }))?.props).toMatchObject({ value: '1.0.2' })
+  await ui.unmount()
+})
+
+test('GF-04 on a work branch the drawer offers update (confirmed) and publish', async ($, on) => {
+  const fake = newFake({ branch: 'feature/login' })
+  await setup($, on, fake)
+  const ui = await $.ui.mount(pane('terminal'))
+  expect(await ui.find({ type: 'Text', text: /feature\/login/ })).toBeDefined()
+  expect((await ui.find({ type: 'Button', key: 'flow-update' }))?.text).toContain('rebase')
+  await ui.press({ key: 'flow-update' })
+  expect(flowCalls(fake)).toEqual([])
+  await ui.press({ key: 'flow-update' })
+  await ui.press({ key: 'flow-publish' })
+  await ui.press({ key: 'flow-publish' })
+  expect(flowCalls(fake)).toEqual([
+    ['git', 'flow', 'feature', 'update', 'login'],
+    ['git', 'flow', 'feature', 'publish', 'login'],
+  ])
+  await ui.unmount()
+})
+
+test('GF-05 finish follows the switches, then pushes the parent with the tags', async ($, on) => {
+  const fake = newFake({ branch: 'feature/login' })
+  await setup($, on, fake)
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: 'flow-finish' })
+  expect(flowCalls(fake)).toEqual([])
+  await ui.press({ key: 'flow-opt-keep' })
+  await ui.press({ key: 'flow-finish-run' })
+  await ui.press({ key: 'flow-finish-run' })
+  const finish = ['flow', 'feature', 'finish', 'login', '--no-ff', '--no-keep']
+  expect(callOf(fake, finish)).toBeGreaterThan(-1)
+  expect(envOf(fake, finish)).toEqual(GIT_ENV)
+  expect(callOf(fake, ['push', '--follow-tags', 'origin', 'develop'])).toBeGreaterThan(callOf(fake, finish))
+  await ui.unmount()
+})
+
+test('GF-05 a release finish carries its tag message; a failed push says the finish was done', async ($, on) => {
+  const toasts: string[] = []
+  const fake = newFake({ branch: 'release/1.1.0', failPush: 'origin' })
+  await setup($, on, fake, [], toasts)
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: 'flow-finish' })
+  expect((await ui.find({ type: 'Input', key: 'flow-tag' }))?.props).toMatchObject({ value: 'Release 1.1.0' })
+  await ui.input({ key: 'flow-tag', text: 'Big release', kind: 'change' })
+  await ui.press({ key: 'flow-finish-run' })
+  await ui.press({ key: 'flow-finish-run' })
+  expect(callOf(fake, ['flow', 'release', 'finish', '1.1.0', '--no-ff', '--keep', '-m', 'Big release'])).toBeGreaterThan(-1)
+  expect(callOf(fake, ['push', '--follow-tags', 'origin', 'main', 'develop'])).toBeGreaterThan(-1)
+  expect(toasts.at(-1)).toMatch(/^Finished release\/1\.1\.0, but the push to origin failed: fatal/)
+  await ui.unmount()
+})
+
+test('GF-05 a failed finish does not push', async ($, on) => {
+  const fake = newFake({ branch: 'feature/login', conflictOn: 'finish' })
+  await setup($, on, fake)
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: 'flow-finish' })
+  await ui.press({ key: 'flow-finish-run' })
+  await ui.press({ key: 'flow-finish-run' })
+  expect(fake.calls.some(c => c[1] === 'push')).toBe(false)
+  await ui.unmount()
+})
+
+test('GF-06 a finish stopped by a conflict offers continue and abort', async ($, on) => {
+  const fake = newFake({ branch: 'feature/login', conflictOn: 'finish' })
+  await setup($, on, fake)
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: 'flow-finish' })
+  await ui.press({ key: 'flow-finish-run' })
+  await ui.press({ key: 'flow-finish-run' })
+  expect(await ui.find({ type: 'Text', text: /Conflict/ })).toBeDefined()
+  await ui.press({ key: 'flow-continue' })
+  expect(callOf(fake, ['flow', 'feature', 'finish', '--continue', 'login'])).toBeGreaterThan(-1)
+  expect(await ui.find({ type: 'Text', text: /Conflict/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('GF-06 an update stopped by a conflict aborts the rebase on the second press', async ($, on) => {
+  const fake = newFake({ branch: 'feature/login', conflictOn: 'update' })
+  await setup($, on, fake)
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: 'flow-update' })
+  await ui.press({ key: 'flow-update' })
+  await ui.press({ key: 'flow-abort' })
+  await ui.press({ key: 'flow-abort' })
+  expect(callOf(fake, ['rebase', '--abort'])).toBeGreaterThan(-1)
+  await ui.unmount()
+})
+
+test('GF-07 a right click on a work branch offers its git flow actions; finish opens the drawer', async ($, on) => {
+  const fake = newFake({ headRefs: 'HEAD -> main, feature/login' })
+  await setup($, on, fake)
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.pointer({ type: 'down', x: 1, y: 0, button: 'right', in: `pill:${M}:1` })
+  expect((await ui.find({ type: 'Button', key: 'menu-flow-update' }))?.text).toContain('Rebase on develop')
+  await ui.press({ key: 'menu-flow-finish' })
+  expect(await ui.find({ key: 'flow-finish-run' })).toBeDefined()
+  await ui.press({ key: 'flow-finish-run' })
+  await ui.press({ key: 'flow-finish-run' })
+  expect(callOf(fake, ['flow', 'feature', 'finish', 'login', '--no-ff', '--keep'])).toBeGreaterThan(-1)
+  await ui.unmount()
+})
+
+test('GF-01 on a narrow pane the bar goes on in a second row; a wide one keeps one row', async ($, on) => {
+  await setup($, on, newFake({ branch: 'feature/login' }))
+  const narrow = await $.ui.mount(pane('terminal', 40))
+  expect((await narrow.find({ type: 'Box', key: 'flow-footer' }))?.props).toMatchObject({ height: 3 })
+  expect(await narrow.find({ type: 'Button', key: 'flow-publish' })).toBeDefined()
+  await narrow.unmount()
+  const wide = await $.ui.mount(pane('terminal', 100))
+  expect((await wide.find({ type: 'Box', key: 'flow-footer' }))?.props).toMatchObject({ height: 2 })
+  await wide.unmount()
+})
+
+test('GF-02 a repository with git flow AVH config gets the actions, not an empty bar', async ($, on) => {
+  const avh = 'gitflow.branch.master main\ngitflow.branch.develop develop\ngitflow.prefix.feature feature/\ngitflow.prefix.hotfix hotfix/\n'
+  await setup($, on, newFake({ flowConfig: avh }))
+  const ui = await $.ui.mount(pane('terminal'))
+  expect(await ui.find({ type: 'Button', key: 'flow-start-feature' })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'flow-start-hotfix' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('GF-08 git flow runs with an empty hooks folder of the mod: repo hooks stay off and git-flow-next finds no hook', async ($, on) => {
+  const fake = newFake({ branch: 'feature/login' })
+  await setup($, on, fake)
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: 'flow-start-feature' })
+  await ui.input({ key: 'flow-name', text: 'search' })
+  await ui.press({ key: 'flow-publish' })
+  await ui.press({ key: 'flow-publish' })
+  const flows = fake.configs.filter(c => c.startsWith('flow:'))
+  expect(flows.length).toBe(2)
+  expect(flows.every(c => /^flow: core\.hooksPath=.+\/nohooks$/.test(c))).toBe(true)
+  expect(fake.configs.filter(c => !c.startsWith('flow:'))).toEqual([])
+  await ui.unmount()
+})
+
+test('GF-08 publish and finish run only on a second press, in the bar and in the branch menu', async ($, on) => {
+  const fake = newFake({ branch: 'feature/login', headRefs: 'HEAD -> feature/login' })
+  await setup($, on, fake)
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: 'flow-publish' })
+  await ui.press({ key: 'flow-finish' })
+  await ui.press({ key: 'flow-finish-run' })
+  expect(flowCalls(fake)).toEqual([])
+  await ui.pointer({ type: 'down', x: 1, y: 0, button: 'right', in: `pill:${M}:0` })
+  await ui.press({ key: 'menu-flow-publish' })
+  expect(flowCalls(fake)).toEqual([])
+  await ui.press({ key: 'menu-flow-publish' })
+  expect(flowCalls(fake)).toEqual([['git', 'flow', 'feature', 'publish', 'login']])
+  await ui.unmount()
+})
+
+
+test('GF-01 the bar is always showing: no title to open, and finish, rebase and publish as words', async ($, on) => {
+  await setup($, on, newFake({ branch: 'feature/login' }))
+  const ui = await $.ui.mount(pane('terminal'))
+  expect(await ui.find({ key: 'flow-toggle' })).toBeUndefined()
+  for (const key of ['flow-finish', 'flow-update', 'flow-publish']) expect((await ui.find({ type: 'Button', key }))?.text).toMatch(/^(finish|rebase|publish)$/)
+  expect(await ui.find({ key: 'flow-delete' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('GG-12 Delete branch asks with force off; it runs on a second press, -D only when force is ticked', async ($, on) => {
+  const fake = newFake()
+  await setup($, on, fake)
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.pointer({ type: 'down', x: 1, y: 0, button: 'right', in: `pill:${B}:0` })
+  expect((await ui.find({ type: 'Button', key: 'menu-delete' }))?.text).toBe('Delete branch…')
+  await ui.press({ key: 'menu-delete' })
+  expect((await ui.find({ type: 'Button', key: 'menu-opt-force' }))?.text).toContain('\uf204')
+  await ui.press({ key: 'menu-delete-run' })
+  expect(callOf(fake, ['branch', '-d', 'feat'])).toBe(-1)
+  await ui.press({ key: 'menu-delete-run' })
+  expect(callOf(fake, ['branch', '-d', 'feat'])).toBeGreaterThan(-1)
+  await ui.pointer({ type: 'down', x: 1, y: 0, button: 'right', in: `pill:${B}:0` })
+  await ui.press({ key: 'menu-delete' })
+  await ui.press({ key: 'menu-opt-force' })
+  await ui.press({ key: 'menu-delete-run' })
+  await ui.press({ key: 'menu-delete-run' })
+  expect(callOf(fake, ['branch', '-D', 'feat'])).toBeGreaterThan(-1)
+  await ui.unmount()
+})
+
+test('GG-12 a long branch menu grows rows instead of hiding items: Delete branch and Copy name stay', async ($, on) => {
+  await setup($, on, newFake({ headRefs: 'HEAD -> main, feature/login' }))
+  const ui = await $.ui.mount(pane('terminal', 70))
+  await ui.pointer({ type: 'down', x: 1, y: 0, button: 'right', in: `pill:${M}:1` })
+  const rows = []
+  for (let n = 0; n < 8; n++) {
+    const row = await ui.find({ type: 'Box', key: `menu-items-${n}` })
+    if (row) rows.push(row)
+  }
+  expect(rows.length).toBeGreaterThan(2)
+  expect(await ui.find({ type: 'Button', key: 'menu-delete' })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'menu-copy' })).toBeDefined()
   await ui.unmount()
 })

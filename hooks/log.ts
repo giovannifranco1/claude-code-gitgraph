@@ -42,7 +42,7 @@ export function parseLog(stdout: string, remotes?: string[]): Commit[] {
 }
 
 // `git status --porcelain=v2 --branch`: headers start with `#`, every other line is a change.
-export function parseStatus(stdout: string): { head: string; branch: string; dirty: number } {
+export function parseStatus(stdout: string): { head: string; branch: string; dirty: number; conflicts: number } {
   const header = (name: string) => stdout.match(new RegExp(`^# branch\\.${name} (.+)$`, 'm'))?.[1] ?? ''
   const head = header('oid')
   const branch = header('head')
@@ -50,6 +50,7 @@ export function parseStatus(stdout: string): { head: string; branch: string; dir
     head: head === '(initial)' ? '' : head,
     branch: branch === '(detached)' ? '' : branch,
     dirty: stdout.split('\n').filter(l => l !== '' && !l.startsWith('#')).length,
+    conflicts: stdout.split('\n').filter(l => l.startsWith('u ')).length,
   }
 }
 
