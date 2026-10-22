@@ -1,0 +1,3 @@
+# INTEGRATIONS
+- **git CLI** do host (`$.process.run`): `log`, `status --porcelain=v2 --branch`, `for-each-ref`, `show`, `checkout`, `switch --track`, `branch` (`-m`, `-d`), `merge`, `rebase`, `cherry-pick`, `push` (por remote, `--delete`, tags), `fetch`, `tag -d`, `remote` (`-v`, `add`, `set-url`, `remove`), `config` (`--local`/`--global` `user.*`), `rev-parse --verify`, `check-ref-format`. Rede com `GIT_TERMINAL_PROMPT=0`.
+- **Claude Code engine:** comandos (`$.command.register`), painéis (`$.ui.open`), clipboard (`$.ui.copy`), toasts (`$.ui.toast`), eventos `tool.call` (Bash) e `$.clock.every` para auto-refresh por assinatura.
