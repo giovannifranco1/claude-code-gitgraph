@@ -1,5 +1,7 @@
 import { expect, test } from 'claude-code/testing'
-import type { Engine, On } from 'claude-code/testing'
+import type { Engine, TestBody } from 'claude-code/testing'
+
+type On = Parameters<TestBody>[1]
 
 const US = '\x1f'
 const RS = '\x1e'
@@ -8,7 +10,7 @@ const A = 'bbbbbbb2'
 const B = 'ccccccc3'
 const R = 'ddddddd4'
 
-type Fake = { isRepo: boolean; extra: number; calls: string[][] }
+type Fake = { isRepo: boolean; extra: number; rev: number; calls: string[][] }
 
 function logOf(fake: Fake): string {
   const row = (...f: string[]) => f.join(US) + RS + '\n'
@@ -32,16 +34,12 @@ function answer(fake: Fake, argv: readonly string[]) {
   const [, verb, ...rest] = argv
   if (!fake.isRepo) return fail('fatal: not a git repository')
   switch (verb) {
-    case 'rev-parse':
-      return ok(rest[0] === '--show-toplevel' ? '/repo\n' : `${M}\n`)
     case 'log':
       return ok(logOf(fake))
-    case 'branch':
-      return ok(rest[0] === '--show-current' ? 'main\n' : '')
     case 'status':
-      return ok(' M src/a.ts\n')
-    case 'remote':
-      return ok('origin\n')
+      return ok(`# branch.oid ${M}\n# branch.head main\n1 .M N... 100644 100644 100644 x y src/a.ts\n`)
+    case 'for-each-ref':
+      return ok(`${M} refs/heads/main\n${B} refs/heads/feat\n${M} refs/remotes/origin/main\nrev${fake.rev} refs/heads/moving\n`)
     case 'show':
       return ok([B, 'Bia', 'bia@x.io', '1699980000', 'Work on feat\n\nDetails here\n'].join(US) + RS + '\n\n3\t1\tsrc/feat.ts\n')
     case 'check-ref-format':
@@ -83,7 +81,7 @@ const pane = (surface: 'terminal' | 'desktop') =>
     },
   }) as const
 
-const newFake = (over: Partial<Fake> = {}): Fake => ({ isRepo: true, extra: 0, calls: [], ...over })
+const newFake = (over: Partial<Fake> = {}): Fake => ({ isRepo: true, extra: 0, rev: 0, calls: [], ...over })
 const logCalls = (fake: Fake) => fake.calls.filter(c => c[1] === 'log')
 
 test('GG-01 /gitgraph opens the pane and draws commits, refs and the graph', async ($, on) => {
@@ -145,14 +143,21 @@ test('GG-08 pressing a commit expands its details and files', async ($, on) => {
   await ui.unmount()
 })
 
-test('GG-09 a mutating git command from Claude reloads; a read-only one does not', async ($, on) => {
+test('GG-09 after a Bash call the pane reloads only if the repository changed', async ($, on) => {
   const fake = newFake()
   await setup($, on, fake)
   const before = logCalls(fake).length
   await $.tool.call({ tool: 'Bash', command: 'git status' })
   expect(logCalls(fake).length).toBe(before)
+  fake.rev++ // what `git commit` does to the refs
   await $.tool.call({ tool: 'Bash', command: 'git add . && git commit -m x' })
   expect(logCalls(fake).length).toBe(before + 1)
+})
+
+test('GG-09 a load runs git in one parallel batch of three processes', async ($, on) => {
+  const fake = newFake()
+  await setup($, on, fake)
+  expect(fake.calls.map(c => c[1]).sort()).toEqual(['for-each-ref', 'log', 'status'])
 })
 
 test('GG-10 checkout and cherry-pick run only on the second press', async ($, on) => {

@@ -40,6 +40,24 @@ export function parseLog(stdout: string, remotes?: string[]): Commit[] {
   return commits
 }
 
+// `git status --porcelain=v2 --branch`: headers start with `#`, every other line is a change.
+export function parseStatus(stdout: string): { head: string; branch: string; dirty: number } {
+  const header = (name: string) => stdout.match(new RegExp(`^# branch\\.${name} (.+)$`, 'm'))?.[1] ?? ''
+  const head = header('oid')
+  const branch = header('head')
+  return {
+    head: head === '(initial)' ? '' : head,
+    branch: branch === '(detached)' ? '' : branch,
+    dirty: stdout.split('\n').filter(l => l !== '' && !l.startsWith('#')).length,
+  }
+}
+
+// Remote names, read from `git for-each-ref` lines (`<oid> refs/remotes/<remote>/<branch>`).
+export function remotesOf(forEachRef: string): string[] {
+  const names = [...forEachRef.matchAll(/ refs\/remotes\/([^/\n]+)\//g)].map(m => m[1] ?? '')
+  return [...new Set(names)]
+}
+
 export function withUncommitted(commits: Commit[], head: string, dirty: number): Commit[] {
   if (dirty <= 0) return commits
   const pseudo: Commit = {

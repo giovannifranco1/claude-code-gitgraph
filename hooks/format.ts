@@ -24,6 +24,8 @@ export function fitGraph(cells: Cell[], max: number): Cell[] {
   return [...cells.slice(0, Math.max(0, max - 1)), { ch: '…', color: cells[max - 1]?.color ?? 0 }]
 }
 
+export const short = (hash: string) => hash.slice(0, 7)
+
 export function truncate(text: string, max: number): string {
   if (max <= 0) return ''
   return text.length <= max ? text : `${text.slice(0, max - 1)}…`

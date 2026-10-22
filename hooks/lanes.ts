@@ -1,12 +1,19 @@
 import type { Cell, Commit } from '../types'
 import { UNCOMMITTED } from './log'
 
-type Link = { lane: number; kind: 'end' | 'new' | 'join'; color: number }
+const UP = 1
+const DOWN = 2
+const LEFT = 4
+const RIGHT = 8
 
-const CORNER = {
-  end: { right: '╯', left: '╰', through: '┴' },
-  new: { right: '╮', left: '╭', through: '┬' },
-  join: { right: '┤', left: '├', through: '┼' },
+// The box-drawing glyph for the directions a lane cell connects to.
+const GLYPH: Record<number, string> = {
+  [UP]: '│', [DOWN]: '│', [UP | DOWN]: '│',
+  [LEFT]: '─', [RIGHT]: '─', [LEFT | RIGHT]: '─',
+  [UP | LEFT]: '╯', [UP | RIGHT]: '╰', [DOWN | LEFT]: '╮', [DOWN | RIGHT]: '╭',
+  [UP | DOWN | LEFT]: '┤', [UP | DOWN | RIGHT]: '├',
+  [UP | LEFT | RIGHT]: '┴', [DOWN | LEFT | RIGHT]: '┬',
+  [UP | DOWN | LEFT | RIGHT]: '┼',
 }
 
 function free(lanes: (string | null)[], from: number): number {
@@ -15,14 +22,15 @@ function free(lanes: (string | null)[], from: number): number {
 }
 
 // One row of glyphs per commit, two characters per lane: the lane's glyph, then
-// a horizontal or a space. Lanes hold the hash they expect next.
+// a horizontal or a space. Lanes hold the hash they expect next; each lane cell
+// is drawn from the directions it connects to, so crossings need no special case.
 export function layout(commits: Commit[]): Cell[][] {
   const lanes: (string | null)[] = []
   const colors: number[] = []
   let nextColor = 0
-  const rows: Cell[][] = []
+  const colorOf = (i: number) => colors[i] ?? 0
 
-  for (const commit of commits) {
+  return commits.map(commit => {
     const before = [...lanes]
     let col = lanes.indexOf(commit.hash)
     if (col < 0) {
@@ -31,55 +39,40 @@ export function layout(commits: Commit[]): Cell[][] {
       colors[col] = nextColor++
     }
 
-    const links: Link[] = []
+    // Lanes joined to the commit's dot by a horizontal: converging children, extra parents.
+    const links: number[] = []
     lanes.forEach((hash, i) => {
       if (i !== col && hash === commit.hash) {
         lanes[i] = null
-        links.push({ lane: i, kind: 'end', color: colors[i] ?? 0 })
+        links.push(i)
       }
     })
     lanes[col] = commit.parents[0] ?? null
     for (const parent of commit.parents.slice(1)) {
-      const at = lanes.indexOf(parent)
-      if (at >= 0 && at !== col) {
-        links.push({ lane: at, kind: 'join', color: colors[at] ?? 0 })
-        continue
+      let lane = lanes.indexOf(parent)
+      if (lane < 0 || lane === col) {
+        lane = free(lanes, col + 1)
+        lanes[lane] = parent
+        colors[lane] = nextColor++
       }
-      const lane = free(lanes, col + 1)
-      lanes[lane] = parent
-      colors[lane] = nextColor++
-      // A column freed by a lane that ended on this row already has a line from above.
-      const endedHere = links.findIndex(l => l.lane === lane && l.kind === 'end')
-      if (endedHere >= 0) links.splice(endedHere, 1)
-      links.push({ lane, kind: endedHere >= 0 ? 'join' : 'new', color: colors[lane] ?? 0 })
+      links.push(lane)
     }
 
     const width = Math.max(lanes.length, before.length, col + 1)
-    const cells: Cell[] = Array.from({ length: width * 2 }, () => ({ ch: ' ', color: 0 }))
-    const ended = new Set(links.filter(l => l.kind === 'end').map(l => l.lane))
-    before.forEach((hash, i) => {
-      if (hash !== null && hash !== undefined && i !== col && !ended.has(i)) cells[i * 2] = { ch: '│', color: colors[i] ?? 0 }
+    const dirs = Array.from({ length: width }, (_, i) => (before[i] != null ? UP : 0) | (lanes[i] != null ? DOWN : 0))
+    const cells: Cell[] = Array.from({ length: width * 2 }, (_, p) => ({ ch: ' ', color: colorOf(p >> 1) }))
+    for (const lane of links) {
+      const [lo, hi] = lane < col ? [lane, col] : [col, lane]
+      for (let i = lo; i <= hi; i++) dirs[i] = (dirs[i] ?? 0) | (i > lo ? LEFT : 0) | (i < hi ? RIGHT : 0)
+      for (let p = lo * 2 + 1; p < hi * 2; p += 2) cells[p] = { ch: '─', color: colorOf(lane) }
+    }
+    dirs.forEach((d, i) => {
+      if (d) cells[i * 2] = { ch: GLYPH[d] ?? ' ', color: colorOf(i) }
     })
-    cells[col * 2] = { ch: commit.hash === UNCOMMITTED ? '○' : '●', color: colors[col] ?? 0 }
-
-    const covered = new Set<number>()
-    for (const link of links) {
-      const [lo, hi] = link.lane < col ? [link.lane, col] : [col, link.lane]
-      for (let p = lo * 2 + 1; p < hi * 2; p++) {
-        const lanePos = p % 2 === 0
-        if (lanePos) covered.add(p / 2)
-        cells[p] = { ch: lanePos && cells[p]?.ch === '│' ? '┼' : '─', color: link.color }
-      }
-    }
-    for (const link of links) {
-      const glyph = CORNER[link.kind]
-      const ch = covered.has(link.lane) ? glyph.through : link.lane > col ? glyph.right : glyph.left
-      cells[link.lane * 2] = { ch, color: link.color }
-    }
+    cells[col * 2] = { ch: commit.hash === UNCOMMITTED ? '○' : '●', color: colorOf(col) }
 
     while (cells.length && cells[cells.length - 1]?.ch === ' ') cells.pop()
     while (lanes.length && lanes[lanes.length - 1] === null) lanes.pop()
-    rows.push(cells)
-  }
-  return rows
+    return cells
+  })
 }

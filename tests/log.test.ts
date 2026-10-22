@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { parseDetail, parseLog, parseRefs, UNCOMMITTED, withUncommitted } from '../hooks/log'
+import { parseDetail, parseLog, parseRefs, parseStatus, remotesOf, UNCOMMITTED, withUncommitted } from '../hooks/log'
 
 const US = '\x1f'
 const RS = '\x1e'
@@ -71,4 +71,17 @@ test('GG-08 parses commit detail with numstat and binary files', async () => {
       { path: 'docs/{old => new}.md', adds: 0, dels: 5 },
     ],
   })
+})
+
+test('GG-07 porcelain v2 status gives HEAD, branch and the dirty count', async () => {
+  const out = '# branch.oid abc123\n# branch.head main\n# branch.upstream origin/main\n1 .M N... 100644 100644 100644 x y src/a.ts\n? new.txt\n'
+  expect(parseStatus(out)).toEqual({ head: 'abc123', branch: 'main', dirty: 2 })
+  expect(parseStatus('# branch.oid (initial)\n# branch.head main\n')).toEqual({ head: '', branch: 'main', dirty: 0 })
+  expect(parseStatus('# branch.oid abc\n# branch.head (detached)\n')).toEqual({ head: 'abc', branch: '', dirty: 0 })
+})
+
+test('GG-04 remote names come from the remote-tracking refs', async () => {
+  const refs = 'a refs/heads/main\nb refs/remotes/origin/main\nc refs/remotes/origin/HEAD\nd refs/remotes/up-stream/dev\ne refs/tags/v1\n'
+  expect(remotesOf(refs)).toEqual(['origin', 'up-stream'])
+  expect(remotesOf('')).toEqual([])
 })

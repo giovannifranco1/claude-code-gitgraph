@@ -1,11 +1,11 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Cell, CommitDetail, Graph, GraphRow, Ref, View } from '../types'
-import { isBranchNameCandidate, mutatesRepo } from './detect'
-import { absTime, fitGraph, relTime, truncate } from './format'
+import type { Cell, CommitDetail, Graph, GraphRow, Ref, RefKind, View } from '../types'
+import { isBranchNameCandidate } from './detect'
+import { absTime, fitGraph, relTime, short, truncate } from './format'
 import { layout } from './lanes'
-import { DETAIL_FORMAT, LOG_FORMAT, parseDetail, parseLog, UNCOMMITTED, withUncommitted } from './log'
+import { DETAIL_FORMAT, LOG_FORMAT, parseDetail, parseLog, parseStatus, remotesOf, UNCOMMITTED, withUncommitted } from './log'
 
 const PANE = 'gitgraph'
 const TITLE = 'Git Graph'
@@ -14,6 +14,9 @@ const POLL_MS = 5_000
 const GIT_TIMEOUT_MS = 15_000
 const MAX_FILES = 50
 const PALETTE = ['#4fc1ff', '#c586c0', '#ce9178', '#4ec9b0', '#dcdcaa', '#f48771', '#b5cea8', '#d7ba7d']
+const REF_COLOR: Record<RefKind, string | undefined> = { head: 'success', branch: '#89d185', tag: '#dcdcaa', remote: undefined }
+const STATUS_ARGS = ['status', '--porcelain=v2', '--branch']
+const REFS_ARGS = ['for-each-ref', '--format=%(objectname) %(refname)']
 
 const EMPTY_GRAPH: Graph = { status: 'idle', rows: [], head: '', branch: '', dirty: 0, hasMore: false }
 const DEFAULT_VIEW: View = { scope: 'all', limit: PAGE, selected: null, confirm: null, isOpen: false }
@@ -24,71 +27,64 @@ const detailState = atom({ plugin: 'gitgraph', key: 'detail' } as const, null as
 
 let generation = 0
 let signature = ''
-let polling = false
+let busy = false
 
-const lines = (text: string) => text.split('\n').filter(l => l.trim() !== '')
-const firstLine = (text: string) => lines(text)[0] ?? 'erro desconhecido'
+const firstLine = (text: string) => text.split('\n').find(l => l.trim() !== '') ?? 'erro desconhecido'
 
 function git($: EngineInterface, args: string[]) {
   return $.process.run(['git', ...args], { timeoutMs: GIT_TIMEOUT_MS })
 }
 
-async function repoSignature($: EngineInterface): Promise<string> {
-  const outs = await Promise.all([
-    git($, ['for-each-ref', '--format=%(objectname) %(refname)']),
-    git($, ['rev-parse', 'HEAD']),
-    git($, ['status', '--porcelain']),
-  ])
-  return outs.map(o => o.stdout).join('\0')
-}
+// What changes when commits, refs, HEAD or the working tree change.
+const signatureOf = (status: string, refs: string) => `${status}\0${refs}`
 
 async function load($: EngineInterface): Promise<void> {
   const gen = ++generation
-  const view = await read($, viewState)
   const isCurrent = () => gen === generation
+  const view = await read($, viewState)
+  busy = true
   try {
-    const root = await git($, ['rev-parse', '--show-toplevel'])
-    if (root.exitCode !== 0) {
-      if (isCurrent()) await update($, graphState, () => ({ ...EMPTY_GRAPH, status: 'no-repo' }))
+    const [log, status, refs] = await Promise.all([
+      git($, ['log', view.scope === 'all' ? '--all' : 'HEAD', '--date-order', `-n${view.limit + 1}`, LOG_FORMAT]),
+      git($, STATUS_ARGS),
+      git($, REFS_ARGS),
+    ])
+    if (!isCurrent()) return
+    if (status.exitCode !== 0) {
+      await update($, graphState, (): Graph => ({ ...EMPTY_GRAPH, status: 'no-repo' }))
       return
     }
-    const [log, head, branch, status, remotes, sig] = await Promise.all([
-      git($, ['log', view.scope === 'all' ? '--all' : 'HEAD', '--date-order', `-n${view.limit + 1}`, LOG_FORMAT]),
-      git($, ['rev-parse', 'HEAD']),
-      git($, ['branch', '--show-current']),
-      git($, ['status', '--porcelain']),
-      git($, ['remote']),
-      repoSignature($),
-    ])
-    const commits = parseLog(log.exitCode === 0 ? log.stdout : '', lines(remotes.stdout))
-    const headHash = head.exitCode === 0 ? head.stdout.trim() : ''
-    const dirty = lines(status.stdout).length
-    const shown = withUncommitted(commits.slice(0, view.limit), headHash, dirty)
+    const { head, branch, dirty } = parseStatus(status.stdout)
+    const commits = parseLog(log.exitCode === 0 ? log.stdout : '', remotesOf(refs.stdout))
+    const shown = withUncommitted(commits.slice(0, view.limit), head, dirty)
     const cells = layout(shown)
-    const rows: GraphRow[] = shown.map((commit, i) => ({ commit, cells: cells[i] ?? [] }))
-    if (!isCurrent()) return
-    signature = sig
+    signature = signatureOf(status.stdout, refs.stdout)
     await update($, graphState, (): Graph => ({
       status: 'ready',
-      rows,
-      head: headHash,
-      branch: branch.stdout.trim(),
+      rows: shown.map((commit, i) => ({ commit, cells: cells[i] ?? [] })),
+      head,
+      branch,
       dirty,
       hasMore: commits.length > view.limit,
     }))
   } catch (err) {
     if (isCurrent()) await update($, graphState, (g): Graph => ({ ...g, status: 'error', error: String(err) }))
+  } finally {
+    if (isCurrent()) busy = false
   }
 }
 
+// Reloads only when the repository changed since the last load.
 async function poll($: EngineInterface): Promise<void> {
-  if (polling || !(await read($, viewState)).isOpen) return
-  polling = true
+  if (busy || !(await read($, viewState)).isOpen) return
+  busy = true
   try {
-    if ((await repoSignature($)) !== signature) await load($)
+    const [status, refs] = await Promise.all([git($, STATUS_ARGS), git($, REFS_ARGS)])
+    if (signatureOf(status.stdout, refs.stdout) === signature) return
   } finally {
-    polling = false
+    busy = false
   }
+  await load($)
 }
 
 async function select($: EngineInterface, hash: string): Promise<void> {
@@ -108,30 +104,19 @@ async function runAction($: EngineInterface, args: string[], done: string): Prom
   await load($)
 }
 
-// Destructive actions run on the second press; the first arms them.
-async function confirmed($: EngineInterface, key: string): Promise<boolean> {
-  if ((await read($, viewState)).confirm === key) return true
-  await update($, viewState, v => ({ ...v, confirm: key }))
-  return false
-}
-
 async function createBranch($: EngineInterface, hash: string, value: string): Promise<void> {
   const name = value.trim()
-  if (!isBranchNameCandidate(name)) {
+  if (!isBranchNameCandidate(name) || (await git($, ['check-ref-format', '--branch', name])).exitCode !== 0) {
     $.ui.toast(`Nome de branch inválido: "${truncate(name, 40)}"`)
     return
   }
-  const check = await git($, ['check-ref-format', '--branch', name])
-  if (check.exitCode !== 0) {
-    $.ui.toast(`Nome de branch inválido: "${truncate(name, 40)}"`)
-    return
-  }
-  await runAction($, ['branch', name, hash], `Branch ${name} criada em ${hash.slice(0, 7)}`)
+  await runAction($, ['branch', name, hash], `Branch ${name} criada em ${short(hash)}`)
 }
 
-function localBranch(refs: Ref[]): string | undefined {
-  return refs.find(r => (r.kind === 'head' && r.name !== 'HEAD') || r.kind === 'branch')?.name
-}
+const localBranch = (refs: Ref[]) => refs.find(r => (r.kind === 'head' && r.name !== 'HEAD') || r.kind === 'branch')?.name
+const isCheckedOut = (refs: Ref[]) => refs.some(r => r.kind === 'head' && r.name !== 'HEAD')
+const refLabel = (ref: Ref) =>
+  ref.kind === 'head' ? (ref.name === 'HEAD' ? 'HEAD' : `HEAD → ${ref.name}`) : ref.kind === 'tag' ? `tag: ${ref.name}` : ref.name
 
 function groupCells(cells: Cell[]): { text: string; color: number }[] {
   const groups: { text: string; color: number }[] = []
@@ -143,9 +128,188 @@ function groupCells(cells: Cell[]): { text: string; color: number }[] {
   return groups
 }
 
-function refLabel(ref: Ref): string {
-  if (ref.kind === 'head') return ref.name === 'HEAD' ? 'HEAD' : `HEAD → ${ref.name}`
-  return ref.kind === 'tag' ? `tag: ${ref.name}` : ref.name
+type Ctx = {
+  els: ReturnType<EngineInterface['ui']['resolve']>
+  graph: Graph
+  view: View
+  detail: CommitDetail | null
+  cols: number
+  graphMax: number
+  graphWidth: number
+  now: number
+}
+
+function renderHeader($: EngineInterface, { els: { Box, Text, Button }, graph, view }: Ctx) {
+  return (
+    <Box flexDirection="row" gap={1}>
+      <Text weight="bold">⎇ {graph.branch || (graph.head ? short(graph.head) : '—')}</Text>
+      <Text dimColor>
+        {graph.rows.length - (graph.dirty ? 1 : 0)}
+        {graph.hasMore ? '+' : ''} commits
+      </Text>
+      <Button key="scope" hotkey="a" plain dimColor onPress={async () => {
+        await update($, viewState, (v): View => ({ ...v, scope: v.scope === 'all' ? 'head' : 'all', limit: PAGE, selected: null }))
+        await load($)
+      }}>
+        {view.scope === 'all' ? 'todas as branches' : 'só HEAD'}
+      </Button>
+      <Button key="refresh" hotkey="r" plain dimColor onPress={() => load($)}>
+        ↻
+      </Button>
+    </Box>
+  )
+}
+
+function renderRow($: EngineInterface, { els: { Text, Button }, view, cols, graphMax, graphWidth, now }: Ctx, { commit, cells }: GraphRow) {
+  const fitted = fitGraph(cells, graphMax)
+  const graphText = groupCells(fitted).map(g => <Text color={PALETTE[g.color % PALETTE.length]}>{g.text}</Text>)
+  const pad = ' '.repeat(graphWidth - fitted.length + 1)
+  if (commit.hash === UNCOMMITTED)
+    return (
+      <Text>
+        {graphText}
+        {pad}
+        <Text italic dimColor>
+          {commit.subject}
+        </Text>
+      </Text>
+    )
+  const labels = commit.refs.map(refLabel)
+  const meta = cols >= 70 ? ` ${truncate(commit.author, 14)} · ${relTime(now, commit.time)}` : ''
+  const room = cols - graphWidth - 1 - 8 - labels.reduce((n, l) => n + l.length + 3, 0) - meta.length
+  return (
+    <Button key={commit.hash} plain onPress={() => select($, commit.hash)}>
+      {graphText}
+      {pad}
+      <Text dimColor>{short(commit.hash)} </Text>
+      {commit.refs.map((ref, i) => (
+        <Text color={REF_COLOR[ref.kind]} dimColor={ref.kind === 'remote'} weight={ref.kind === 'head' ? 'bold' : undefined}>
+          [{labels[i]}]{' '}
+        </Text>
+      ))}
+      <Text weight={view.selected === commit.hash ? 'bold' : undefined}>{truncate(commit.subject, room)}</Text>
+      <Text dimColor>{meta}</Text>
+    </Button>
+  )
+}
+
+// A destructive action: the first press arms it, the second runs it.
+function confirmButton($: EngineInterface, { els: { Button }, view }: Ctx, key: string, label: string, args: string[], done: string) {
+  const armed = view.confirm === key
+  return (
+    <Button key={key.split(':')[0]} variant={armed ? 'primary' : undefined} onPress={async () => {
+      if (armed) await runAction($, args, done)
+      else await update($, viewState, v => ({ ...v, confirm: key }))
+    }}>
+      {armed ? `Confirmar ${label.toLowerCase()}?` : label}
+    </Button>
+  )
+}
+
+function renderDetail($: EngineInterface, ctx: Ctx, { commit }: GraphRow) {
+  const { els, detail, graph, cols } = ctx
+  const { Box, Text, Button } = els
+  const Input = 'Input' in els ? els.Input : undefined
+  const branch = localBranch(commit.refs)
+  return (
+    <Box flexDirection="column" borderStyle="round" paddingX={1}>
+      {detail === null ? (
+        <Text dimColor>Carregando detalhes…</Text>
+      ) : (
+        <Box flexDirection="column">
+          <Text>
+            <Text dimColor>commit </Text>
+            {detail.hash}
+          </Text>
+          <Text>
+            <Text dimColor>autor </Text>
+            {detail.author} &lt;{detail.email}&gt;
+          </Text>
+          <Text>
+            <Text dimColor>data </Text>
+            {absTime(detail.time)}
+          </Text>
+          <Text> </Text>
+          <Text>{detail.body}</Text>
+          <Text> </Text>
+          {detail.files.slice(0, MAX_FILES).map(f => (
+            <Text>
+              <Text color="#89d185">{f.adds === null ? ' bin' : `+${f.adds}`.padStart(5)}</Text>
+              <Text color="#f48771">{f.dels === null ? '    ' : ` -${f.dels}`.padEnd(6)}</Text> {truncate(f.path, cols - 16)}
+            </Text>
+          ))}
+          {detail.files.length > MAX_FILES && <Text dimColor>… e mais {detail.files.length - MAX_FILES} arquivos</Text>}
+        </Box>
+      )}
+      <Box flexDirection="row" gap={1} flexWrap="wrap">
+        <Button key="copy" hotkey="c" onPress={async pe => {
+          const res = await $.ui.copy({ text: commit.hash, surface: pe.surface })
+          $.ui.toast(res.isCopied ? `Hash ${short(commit.hash)} copiado` : 'Não foi possível copiar')
+        }}>
+          Copiar hash
+        </Button>
+        {!isCheckedOut(commit.refs) &&
+          confirmButton(
+            $,
+            ctx,
+            `checkout:${commit.hash}`,
+            `Checkout ${branch ?? '(detached)'}`,
+            branch ? ['checkout', branch] : ['checkout', '--detach', commit.hash],
+            `Checkout de ${branch ?? short(commit.hash)} feito`,
+          )}
+        {commit.hash !== graph.head &&
+          confirmButton($, ctx, `pick:${commit.hash}`, 'Cherry-pick', ['cherry-pick', commit.hash], `Cherry-pick de ${short(commit.hash)} feito`)}
+      </Box>
+      {Input && (
+        <Input
+          key="new-branch"
+          label="Nova branch aqui:"
+          placeholder="nome-da-branch"
+          submitLabel="criar"
+          onSubmit={value => createBranch($, commit.hash, value)}
+        />
+      )}
+    </Box>
+  )
+}
+
+async function renderPane($: EngineInterface, els: Ctx['els'], cols: number) {
+  const { Box, Text, Button } = els
+  const graph = await read($, graphState)
+  if (graph.status === 'no-repo') return <Text dimColor>Não é um repositório git.</Text>
+  if (graph.status === 'error') return <Text color="error">Erro ao ler o git: {graph.error ?? ''}</Text>
+
+  const graphMax = Math.max(6, Math.min(40, Math.floor(cols / 3)))
+  const ctx: Ctx = {
+    els,
+    graph,
+    view: await read($, viewState),
+    detail: await read($, detailState),
+    cols,
+    graphMax,
+    graphWidth: Math.min(graphMax, Math.max(1, ...graph.rows.map(r => r.cells.length))),
+    now: Math.floor(Date.now() / 1000),
+  }
+  return (
+    <Box flexDirection="column">
+      {renderHeader($, ctx)}
+      {graph.rows.length === 0 && <Text dimColor>{graph.status === 'ready' ? 'Sem commits ainda.' : 'Carregando…'}</Text>}
+      {graph.rows.map(row => (
+        <Box key={`row:${row.commit.hash}`} flexDirection="column">
+          {renderRow($, ctx, row)}
+          {ctx.view.selected === row.commit.hash && renderDetail($, ctx, row)}
+        </Box>
+      ))}
+      {graph.hasMore && (
+        <Button key="more" plain dimColor onPress={async () => {
+          await update($, viewState, v => ({ ...v, limit: v.limit + PAGE }))
+          await load($)
+        }}>
+          Carregar mais {PAGE}
+        </Button>
+      )}
+    </Box>
+  )
 }
 
 export const register: Register = on => {
@@ -168,190 +332,12 @@ export const register: Register = on => {
     return next(e)
   }).catch(($, e, next) => next(e))
 
+  // Any Bash call may have committed, switched or edited: the signature check decides.
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     const ran = await next(e)
-    if (mutatesRepo(e.command) && (await read($, viewState)).isOpen) await load($)
+    await poll($)
     return ran
   }).catch(($, e, next) => next(e))
 
-  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const els = $.ui.resolve(e)
-    const { Box, Text, Button } = els
-    const Input = 'Input' in els ? els.Input : undefined
-    const graph = await read($, graphState)
-    const view = await read($, viewState)
-    const detail = await read($, detailState)
-    const cols = e.props.bodyColumns
-    const now = Math.floor(Date.now() / 1000)
-
-    if (graph.status === 'no-repo') return <Text dimColor>Não é um repositório git.</Text>
-    if (graph.status === 'error') return <Text color="error">Erro ao ler o git: {graph.error ?? ''}</Text>
-
-    const graphMax = Math.max(6, Math.min(40, Math.floor(cols / 3)))
-    const graphWidth = Math.min(graphMax, Math.max(1, ...graph.rows.map(r => r.cells.length)))
-    const showMeta = cols >= 70
-
-    const header = (
-      <Box flexDirection="row" gap={1}>
-        <Text weight="bold">⎇ {graph.branch || (graph.head ? graph.head.slice(0, 7) : '—')}</Text>
-        <Text dimColor>
-          {graph.rows.length - (graph.dirty ? 1 : 0)}
-          {graph.hasMore ? '+' : ''} commits
-        </Text>
-        <Button key="scope" hotkey="a" plain dimColor onPress={async () => {
-          await update($, viewState, (v): View => ({ ...v, scope: v.scope === 'all' ? 'head' : 'all', limit: PAGE, selected: null }))
-          await load($)
-        }}>
-          {view.scope === 'all' ? 'todas as branches' : 'só HEAD'}
-        </Button>
-        <Button key="refresh" hotkey="r" plain dimColor onPress={() => load($)}>
-          ↻
-        </Button>
-      </Box>
-    )
-
-    if (graph.rows.length === 0)
-      return (
-        <Box flexDirection="column">
-          {header}
-          <Text dimColor>{graph.status === 'ready' ? 'Sem commits ainda.' : 'Carregando…'}</Text>
-        </Box>
-      )
-
-    const rowFor = ({ commit, cells }: GraphRow) => {
-      const graphText = groupCells(fitGraph(cells, graphMax)).map(g => (
-        <Text color={PALETTE[g.color % PALETTE.length]}>{g.text}</Text>
-      ))
-      const pad = ' '.repeat(Math.max(0, graphWidth - Math.min(cells.length, graphMax)) + 1)
-      if (commit.hash === UNCOMMITTED)
-        return (
-          <Text>
-            {graphText}
-            {pad}
-            <Text italic dimColor>
-              {commit.subject}
-            </Text>
-          </Text>
-        )
-      const badges = commit.refs.map(refLabel)
-      const meta = showMeta ? ` ${truncate(commit.author, 14)} · ${relTime(now, commit.time)}` : ''
-      const room = cols - graphWidth - 1 - 8 - badges.reduce((n, b) => n + b.length + 3, 0) - meta.length
-      const isSelected = view.selected === commit.hash
-      return (
-        <Button key={commit.hash} plain onPress={() => select($, commit.hash)}>
-          {graphText}
-          {pad}
-          <Text dimColor>{commit.hash.slice(0, 7)} </Text>
-          {commit.refs.map(ref => (
-            <Text
-              color={ref.kind === 'head' ? 'success' : ref.kind === 'branch' ? '#89d185' : ref.kind === 'tag' ? '#dcdcaa' : undefined}
-              dimColor={ref.kind === 'remote'}
-              weight={ref.kind === 'head' ? 'bold' : undefined}
-            >
-              [{refLabel(ref)}]{' '}
-            </Text>
-          ))}
-          <Text weight={isSelected ? 'bold' : undefined}>{truncate(commit.subject, room)}</Text>
-          <Text dimColor>{meta}</Text>
-        </Button>
-      )
-    }
-
-    const detailFor = (row: GraphRow) => {
-      const { commit } = row
-      const branchName = localBranch(commit.refs)
-      const isHead = commit.hash === graph.head
-      const checkoutKey = `checkout:${commit.hash}`
-      const pickKey = `pick:${commit.hash}`
-      return (
-        <Box flexDirection="column" borderStyle="round" paddingX={1}>
-          {detail === null ? (
-            <Text dimColor>Carregando detalhes…</Text>
-          ) : (
-            <Box flexDirection="column">
-              <Text>
-                <Text dimColor>commit </Text>
-                {detail.hash}
-              </Text>
-              <Text>
-                <Text dimColor>autor </Text>
-                {detail.author} &lt;{detail.email}&gt;
-              </Text>
-              <Text>
-                <Text dimColor>data </Text>
-                {absTime(detail.time)}
-              </Text>
-              <Text> </Text>
-              <Text>{detail.body}</Text>
-              <Text> </Text>
-              {detail.files.slice(0, MAX_FILES).map(f => (
-                <Text>
-                  <Text color="#89d185">{f.adds === null ? ' bin' : `+${f.adds}`.padStart(5)}</Text>
-                  <Text color="#f48771">{f.dels === null ? '    ' : ` -${f.dels}`.padEnd(6)}</Text> {truncate(f.path, cols - 16)}
-                </Text>
-              ))}
-              {detail.files.length > MAX_FILES && <Text dimColor>… e mais {detail.files.length - MAX_FILES} arquivos</Text>}
-            </Box>
-          )}
-          <Box flexDirection="row" gap={1} flexWrap="wrap">
-            <Button key="copy" hotkey="c" onPress={async pe => {
-              const res = await $.ui.copy({ text: commit.hash, surface: pe.surface })
-              $.ui.toast(res.isCopied ? `Hash ${commit.hash.slice(0, 7)} copiado` : 'Não foi possível copiar')
-            }}>
-              Copiar hash
-            </Button>
-            {!(isHead && branchName === graph.branch && graph.branch) && (
-              <Button key="checkout" variant={view.confirm === checkoutKey ? 'primary' : undefined} onPress={async () => {
-                if (!(await confirmed($, checkoutKey))) return
-                await runAction(
-                  $,
-                  branchName ? ['checkout', branchName] : ['checkout', '--detach', commit.hash],
-                  `Checkout de ${branchName ?? commit.hash.slice(0, 7)} feito`,
-                )
-              }}>
-                {view.confirm === checkoutKey ? 'Confirmar checkout?' : `Checkout ${branchName ?? '(detached)'}`}
-              </Button>
-            )}
-            {!isHead && (
-              <Button key="pick" variant={view.confirm === pickKey ? 'primary' : undefined} onPress={async () => {
-                if (!(await confirmed($, pickKey))) return
-                await runAction($, ['cherry-pick', commit.hash], `Cherry-pick de ${commit.hash.slice(0, 7)} feito`)
-              }}>
-                {view.confirm === pickKey ? 'Confirmar cherry-pick?' : 'Cherry-pick'}
-              </Button>
-            )}
-          </Box>
-          {Input && (
-            <Input
-              key="new-branch"
-              label="Nova branch aqui:"
-              placeholder="nome-da-branch"
-              submitLabel="criar"
-              onSubmit={value => createBranch($, commit.hash, value)}
-            />
-          )}
-        </Box>
-      )
-    }
-
-    return (
-      <Box flexDirection="column">
-        {header}
-        {graph.rows.map(row => (
-          <Box key={`row:${row.commit.hash}`} flexDirection="column">
-            {rowFor(row)}
-            {view.selected === row.commit.hash && detailFor(row)}
-          </Box>
-        ))}
-        {graph.hasMore && (
-          <Button key="more" plain dimColor onPress={async () => {
-            await update($, viewState, v => ({ ...v, limit: v.limit + PAGE }))
-            await load($)
-          }}>
-            Carregar mais {PAGE}
-          </Button>
-        )}
-      </Box>
-    )
-  })
+  on('ui.render', { component: 'Pane', requestId: PANE }, ($, e) => renderPane($, $.ui.resolve(e), e.props.bodyColumns))
 }
