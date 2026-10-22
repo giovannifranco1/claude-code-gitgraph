@@ -479,3 +479,20 @@ test('GG-17 refresh reloads the graph and the open commit, then flashes "updated
   expect((await ui.find({ type: 'Button', key: 'refresh' }))?.text).toContain('refresh')
   await ui.unmount()
 })
+
+test('GG-13 adding a remote with only a URL names it origin, and says why when it cannot', async ($, on) => {
+  const toasts: string[] = []
+  const url = 'git@github.com:giovannifranco1/claude-code-gitgraph.git'
+  const fake = newFake({ remotes: ['github'] })
+  await setup($, on, fake, [], toasts)
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: 'settings' })
+  await ui.press({ key: 'remote-add' })
+  await ui.input({ key: 'remote-new-url', text: url })
+  expect(callOf(fake, ['remote', 'add', 'origin', url])).toBeGreaterThan(-1)
+  await ui.press({ key: 'remote-add' })
+  await ui.input({ key: 'remote-new-name', text: 'github', kind: 'change' })
+  await ui.input({ key: 'remote-new-url', text: url })
+  expect(toasts.at(-1)).toBe('Remote "github" already exists')
+  await ui.unmount()
+})

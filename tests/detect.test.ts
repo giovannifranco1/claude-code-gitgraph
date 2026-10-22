@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import { isBranchNameCandidate } from '../hooks/detect'
-import { fitGraph, relTime, short, truncate } from '../hooks/format'
+import { fitGraph, relTime, short, truncate, truncateMiddle } from '../hooks/format'
 
 test('GG-10 a branch name is pre-checked before git validates it', async () => {
   expect(isBranchNameCandidate('feature/login')).toBe(true)
@@ -40,4 +40,13 @@ test('GG-04 text is truncated with an ellipsis', async () => {
 
 test('GG-04 hashes are shown short', async () => {
   expect(short('0123456789abcdef')).toBe('0123456')
+})
+
+test('GG-13 long URLs are cut in the middle so the repository name stays', async () => {
+  const url = 'git@github.com:giovannifranco1/claude-code-gitgraph.git'
+  expect(truncateMiddle(url, 100)).toBe(url)
+  expect(truncateMiddle(url, 30)).toBe('git@github.com…de-gitgraph.git')
+  expect(truncateMiddle(url, 30).length).toBe(30)
+  expect(truncateMiddle(url, 1)).toBe('…')
+  expect(truncateMiddle(url, 0)).toBe('')
 })

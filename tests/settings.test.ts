@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { addRemoteArgs, isRemoteName, isRemoteUrl, parseRemotes, userConfigArgs } from '../hooks/settings'
+import { addRemotePlan, isRemoteName, isRemoteUrl, parseRemotes, userConfigArgs } from '../hooks/settings'
 
 test('GG-13 remotes come from git remote -v, fetch and push URLs apart', async () => {
   const out = 'github\tgit@github.com:me/app.git (fetch)\ngithub\tgit@github.com:me/app.git (push)\norigin\thttps://x.io/a.git (fetch)\norigin\thttps://push.x.io/a.git (push)\n'
@@ -26,7 +26,16 @@ test('GG-13 remote names and URLs are validated before git sees them', async () 
 })
 
 test('GG-13 adding a remote passes name and URL as their own arguments', async () => {
-  expect(addRemoteArgs(' fork ', ' git@h:me/a.git ')).toEqual(['remote', 'add', 'fork', 'git@h:me/a.git'])
-  expect(addRemoteArgs('-x', 'git@h:a')).toBeNull()
-  expect(addRemoteArgs('fork', '-x')).toBeNull()
+  const url = 'git@github.com:giovannifranco1/claude-code-gitgraph.git'
+  expect(addRemotePlan(' fork ', ` ${url} `, ['origin'])).toEqual({ args: ['remote', 'add', 'fork', url] })
+  expect(addRemotePlan('-x', url, [])).toEqual({ error: 'Invalid remote name: "-x"' })
+  expect(addRemotePlan('fork', '-x', [])).toEqual({ error: 'Invalid URL: "-x"' })
+})
+
+test('GG-13 an empty name is origin, as the field suggests, unless origin exists', async () => {
+  const url = 'git@github.com:me/a.git'
+  expect(addRemotePlan('', url, [])).toEqual({ args: ['remote', 'add', 'origin', url] })
+  expect(addRemotePlan('  ', url, ['github'])).toEqual({ args: ['remote', 'add', 'origin', url] })
+  expect(addRemotePlan('', url, ['origin'])).toEqual({ error: 'Enter a name for the remote: origin already exists' })
+  expect(addRemotePlan('origin', url, ['origin'])).toEqual({ error: 'Remote "origin" already exists' })
 })

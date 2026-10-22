@@ -26,6 +26,14 @@ export function fitGraph(cells: Cell[], max: number): Cell[] {
 
 export const short = (hash: string) => hash.slice(0, 7)
 
+// Keeps both ends: a URL's host and its repository name.
+export function truncateMiddle(text: string, max: number): string {
+  if (text.length <= max) return text
+  if (max <= 0) return ''
+  const head = Math.floor((max - 1) / 2)
+  return `${text.slice(0, head)}…${text.slice(text.length - (max - 1 - head))}`
+}
+
 export function truncate(text: string, max: number): string {
   if (max <= 0) return ''
   return text.length <= max ? text : `${text.slice(0, max - 1)}…`

@@ -4,13 +4,13 @@ import type { ClientElements, Elements, EngineInterface, ProcessRunResult, Regis
 import type { Badge, BadgeKind, BadgeStyle, Cell, CommitDetail, ConfigScope, FileStat, Graph, GraphRow, Ref, RepoSettings, View } from '../types'
 import { badgeParts, badgesOf, diffBar, fitBadges } from './badges'
 import { isBranchNameCandidate } from './detect'
-import { absTime, fitGraph, relTime, short, truncate } from './format'
+import { absTime, fitGraph, relTime, short, truncate, truncateMiddle } from './format'
 import { layout } from './lanes'
 import { findByHash, isHashQuery, topOf, visibleRange } from './virtual'
 import { DETAIL_FORMAT, LOG_FORMAT, parseDetail, parseLog, parseStatus, remotesOf, UNCOMMITTED, withUncommitted } from './log'
 import { checkoutArgs, defaultPushRemotes, type MenuItem, menuFor, pushRuns, renameArgs } from './menu'
 import { drawPill, type PillProps } from './pilldraw'
-import { addRemoteArgs, isRemoteUrl, parseRemotes, userConfigArgs } from './settings'
+import { addRemotePlan, isRemoteUrl, parseRemotes, userConfigArgs } from './settings'
 import type { SpinnerProps } from './spinner'
 
 const PANE = 'gitgraph'
@@ -32,6 +32,8 @@ const BODY_LINES = 8
 const OVERSCAN = 15
 const BAR_W = 8
 const MIN_SUBJECT = 20
+// A pill's caps (or padding) and its gap, around its name.
+const PILL_PAD = 3
 const EDGE_SAFETY = 1
 const STATUS_ARGS = ['status', '--porcelain=v2', '--branch']
 const REFS_ARGS = ['for-each-ref', '--format=%(objectname) %(refname)']
@@ -297,12 +299,13 @@ async function setRemoteUrl($: EngineInterface, remote: string, value: string): 
 
 async function addRemote($: EngineInterface, url: string): Promise<void> {
   const name = (await read($, viewState)).remoteDraft
-  const args = addRemoteArgs(name, url)
-  if (!args) {
-    $.ui.toast('Invalid remote name or URL')
+  const existing = (await read($, settingsState))?.remotes.map(r => r.name) ?? []
+  const plan = addRemotePlan(name, url, existing)
+  if ('error' in plan) {
+    $.ui.toast(plan.error)
     return
   }
-  await runAction($, args, `Remote ${name.trim()} added`)
+  await runAction($, plan.args, `Remote ${plan.args[2]} added`)
 }
 
 // The trimmed name when it is a valid new branch name; a toast and null otherwise.
@@ -848,11 +851,13 @@ function renderSettings($: EngineInterface, ctx: Ctx, settings: RepoSettings | n
             {settings.remotes.length === 0 && <Text dimColor>No remotes.</Text>}
             {settings.remotes.map(r => (
               <Box flexDirection="column">
-                <Box flexDirection="row" gap={1} flexWrap="wrap">
-                  {renderPill(ctx, plainPill(ctx, r.name, REMOTE_BG, true))}
-                  <Text dimColor>{truncate(r.fetchUrl, Math.max(10, cols - r.name.length - 40))}</Text>
-                  {r.pushUrl && r.pushUrl !== r.fetchUrl && <Text dimColor>(push: {r.pushUrl})</Text>}
+                <Box height={1} overflow="hidden" flexDirection="row">
+                  <Box flexShrink={0}>{renderPill(ctx, plainPill(ctx, r.name, REMOTE_BG, true))}</Box>
+                  <Text dimColor>{truncateMiddle(r.fetchUrl, Math.max(10, cols - r.name.length - PILL_PAD))}</Text>
                 </Box>
+                {r.pushUrl && r.pushUrl !== r.fetchUrl && (
+                  <Text dimColor>{`  push: ${truncateMiddle(r.pushUrl, Math.max(10, cols - 8))}`}</Text>
+                )}
                 {!view.running && (
                   <Box flexDirection="row" gap={1} marginLeft={2}>
                     <Button key={`remote-fetch-${r.name}`} plain dimColor onPress={() => runAction($, ['fetch', r.name], `Fetched ${r.name} ✓`, true)}>
@@ -893,7 +898,7 @@ function renderSettings($: EngineInterface, ctx: Ctx, settings: RepoSettings | n
                       onInput={value => update($, viewState, v => ({ ...v, remoteDraft: value }))}
                       onSubmit={value => update($, viewState, v => ({ ...v, remoteDraft: value }))}
                     />
-                    <Input key="remote-new-url" label="URL:" placeholder="git@github.com:user/repo.git" submitLabel="add" onSubmit={value => addRemote($, value)} />
+                    <Input key="remote-new-url" label={`URL for ${view.remoteDraft.trim() || 'origin'}:`} placeholder="git@github.com:user/repo.git" submitLabel="add" onSubmit={value => addRemote($, value)} />
                   </Box>
                 )}
               </Box>

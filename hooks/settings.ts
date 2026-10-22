@@ -27,7 +27,14 @@ export const isRemoteName = (name: string) => /^[A-Za-z0-9._/][A-Za-z0-9._/-]*$/
 
 export const isRemoteUrl = (url: string) => url.length > 0 && !url.startsWith('-') && !/\s/.test(url)
 
-export function addRemoteArgs(name: string, url: string): string[] | null {
-  const [n, u] = [name.trim(), url.trim()]
-  return isRemoteName(n) && isRemoteUrl(u) ? ['remote', 'add', n, u] : null
+// What adding a remote runs, or why it cannot: an empty name is `origin`, as the
+// field's placeholder suggests, unless a remote already has that name.
+export function addRemotePlan(name: string, url: string, existing: string[]): { args: string[] } | { error: string } {
+  const [typed, u] = [name.trim(), url.trim()]
+  const n = typed || 'origin'
+  if (!typed && existing.includes(n)) return { error: 'Enter a name for the remote: origin already exists' }
+  if (!isRemoteName(n)) return { error: `Invalid remote name: "${n}"` }
+  if (existing.includes(n)) return { error: `Remote "${n}" already exists` }
+  if (!isRemoteUrl(u)) return { error: `Invalid URL: "${u}"` }
+  return { args: ['remote', 'add', n, u] }
 }
