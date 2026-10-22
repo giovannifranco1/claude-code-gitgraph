@@ -16,7 +16,7 @@
 </p>
 
 <p align="center">
-  <img src="media/gitgraph-graph.svg" alt="The Git Graph pane: colored lanes, merges, branch and tag pills, authors and short hashes" width="900">
+  <img src="media/demo.gif" alt="gitgraph in Claude Code: the commit graph beside the chat, a branch menu, starting a git flow feature and a commit's details" width="900">
 </p>
 
 > [!NOTE]
@@ -50,9 +50,12 @@ Then open the pane with:
 - **The commit graph** of the session's repository, one row per commit: a colored lane per line of history, merges (`─╮`), forks (`─╯`) and crossings drawn the way the VS Code extension does, and an `Uncommitted changes` row on top while the working tree is dirty
 - **Ref pills** in the color of their lane: the checked-out branch in bold with `●`, a local branch and its remotes in one pill (`develop ⇄ origin github`), remote-only branches in gray, tags in gold (`◆ v1.0.1`). Pills that don't fit are shortened, then counted as `+N`
 - **All branches or just HEAD** with the switch in the header, and **Load more** past 300 commits
+
+  <img src="media/graph.png" alt="The Git Graph pane docked beside the chat: colored lanes, branch and tag pills, authors, short hashes and the Git Flow bar at the bottom" width="800">
+
 - **Click a commit** to open its details: author, date, full message and every changed file with a diffstat bar. From there, copy its hash, check it out, cherry-pick it or create a branch on it
 
-  <img src="media/gitgraph-details.svg" alt="A commit opened in the pane: hash pill, author, date, changed files with +/- bars and the commit actions" width="800">
+  <img src="media/details.png" alt="A commit opened in the pane: hash pill, author, date, full message, changed files with +/- bars and the commit actions" width="800">
 
 - **Right-click a branch pill** for its menu, as in the VS Code extension:
   - **Local branch:** checkout, rename, push branch, merge into the current branch, rebase the current branch on it, delete branch (with an optional `force`, off by default), copy name
@@ -60,19 +63,17 @@ Then open the pane with:
   - **Tag:** push, delete, copy name
   - **Double-click** a pill to check it out
 
-  <img src="media/gitgraph-menu.svg" alt="The right-click menu of feature/search with Push branch open and origin ticked" width="800">
-
 - **Push to the remotes you pick:** Push branch opens a choice of remotes, starting with the ones the branch tracks, plus `all`. A push to several remotes runs one push each and reports every failure by its remote
 - **Safe actions:** destructive ones ask for a second press; a spinner shows what git is doing and further presses wait for it; push and fetch never hang on a password prompt
 - **Find a commit by hash**, 4 to 40 hex digits: the pane selects it and scrolls to it
 - **Git Flow actions** in a bar at the bottom of the pane (`⎇  feature  bugfix  release  hotfix │ finish  rebase  publish`), with [git-flow-next](https://github.com/gittower/git-flow-next):
   - **Start** a feature, bugfix, release or hotfix from the base your git flow config gives it; a release or hotfix name comes filled in with the next version after your highest tag
-  - On a work branch: **finish** (switches for `no-ff`, push afterwards and keep branch, all on by default; release and hotfix tags get an editable message), **rebase** (or merge, as your config says), and **publish**. Publish and finish ask for a second press
+  - On a work branch: **finish** (switches for `no-ff`, push afterwards and keep branch, all on by default; release and hotfix tags get an editable message), **rebase** (or merge, as your config says) and **publish**. Publish and finish ask for a second press
   - A finish or update that stops on a conflict offers **Continue** and **Abort**
   - Right-click any work branch's pill for the same actions; repositories without git flow get a **Start git flow** button that sets it up with the standard names (`main`, `develop`, `feature/`, `bugfix/`, `release/`, `hotfix/`)
 - **Repository settings:** user name and email for this repository or globally, and the remotes: add, edit the URL, fetch, delete
 
-  <img src="media/gitgraph-settings.svg" alt="The settings screen: user name and email per scope, the remotes with their URLs and the add remote form" width="800">
+  <img src="media/settings.png" alt="The settings screen: user name and email per scope, and the remotes with their URLs" width="800">
 
 - **Always current:** after every Bash call Claude makes and every 5 seconds while the pane is open, gitgraph compares the repository's refs and status and reloads only when something changed. **Refresh** reloads everything on screen and flashes `✓ updated`
 - **Light on big histories:** only the rows on screen are drawn, so scrolling stays smooth with hundreds of commits
