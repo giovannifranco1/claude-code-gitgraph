@@ -694,12 +694,12 @@ function renderSpinner({ els, Client }: Ctx, key = 'spinner') {
   return Client ? <Client key={key} module="./spinner.tsx" props={props} /> : <els.Text>⏳</els.Text>
 }
 
-function renderRunning(ctx: Ctx) {
+function renderRunning(ctx: Ctx, key = 'spinner') {
   const { els, view } = ctx
   return line(
     ctx,
     <els.Box flexDirection="row">
-      {renderSpinner(ctx)}
+      {renderSpinner(ctx, key)}
       <els.Text> {view.running}</els.Text>
     </els.Box>,
   )
@@ -1096,7 +1096,9 @@ function renderSettings($: EngineInterface, ctx: Ctx, settings: RepoSettings | n
 function flowFormRows($: EngineInterface, ctx: Ctx): RenderChildren[] {
   const { view, flow } = ctx
   const config = flow?.config
-  if (view.running) return [renderRunning(ctx)]
+  // An action started from a branch menu or a commit's details shows its spinner there; the
+  // footer shows only the others', under a key of its own (a key drawn twice voids the pane).
+  if (view.running) return view.menu || view.selected ? [] : [renderRunning(ctx, 'flow-spinner')]
   if (!config) return []
   if (view.flow.conflict) return conflictRows($, ctx, view.flow.conflict)
   return [...startRows($, ctx, config), ...finishRows($, ctx, config)]
