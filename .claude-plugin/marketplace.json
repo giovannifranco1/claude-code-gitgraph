@@ -1,0 +1,16 @@
+{
+  "name": "claude-code-gitgraph",
+  "owner": {
+    "name": "Giovanni Franco"
+  },
+  "metadata": {
+    "description": "Git Graph for Claude Code: a commit graph pane beside the chat"
+  },
+  "plugins": [
+    {
+      "name": "gitgraph",
+      "source": "./",
+      "description": "A Git Graph pane beside the chat: commit graph with lanes, ref pills, commit details, branch actions and repository settings"
+    }
+  ]
+}

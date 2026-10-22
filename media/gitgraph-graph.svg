@@ -1,0 +1,154 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="889" height="476" viewBox="0 0 889 476" font-family="SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="13.5" xml:space="preserve">
+<rect width="889" height="476" rx="10" fill="#1e1e1e" stroke="#3c3c3c"/>
+<circle cx="20" cy="17" r="5.5" fill="#ff5f57"/><circle cx="38" cy="17" r="5.5" fill="#febc2e"/><circle cx="56" cy="17" r="5.5" fill="#28c840"/>
+<text x="444.5" y="21" fill="#8b8b8b" text-anchor="middle" font-size="12.5">Git Graph</text>
+<rect x="18.0" y="42" width="90.2" height="15" rx="7.5" fill="#4fc1ff"/>
+<text x="26.2" y="54" fill="#1e1e1e" textLength="73.8" lengthAdjust="spacingAndGlyphs" font-weight="700">⎇ develop</text>
+<text x="116.4" y="54" fill="#8b8b8b" textLength="82.0" lengthAdjust="spacingAndGlyphs">17 commits</text>
+<text x="214.8" y="54" fill="#cca700" textLength="90.2" lengthAdjust="spacingAndGlyphs">● 2 changes</text>
+<text x="551.0" y="54" fill="#89d185" textLength="8.2" lengthAdjust="spacingAndGlyphs">◉</text>
+<text x="567.4" y="54" fill="#cccccc" textLength="98.4" lengthAdjust="spacingAndGlyphs">all branches</text>
+<text x="690.4" y="54" fill="#8b8b8b" textLength="73.8" lengthAdjust="spacingAndGlyphs">↻ refresh</text>
+<text x="788.8" y="54" fill="#8b8b8b" textLength="82.0" lengthAdjust="spacingAndGlyphs">⚙ settings</text>
+<text x="18.0" y="73" fill="#8b8b8b" textLength="8.2" lengthAdjust="spacingAndGlyphs">⌕</text>
+<text x="34.4" y="73" fill="#5a5a5a" textLength="155.8" lengthAdjust="spacingAndGlyphs">find commit by hash</text>
+<text x="18.0" y="92" fill="#8b8b8b" textLength="41.0" lengthAdjust="spacingAndGlyphs">Graph</text>
+<text x="83.6" y="92" fill="#8b8b8b" textLength="90.2" lengthAdjust="spacingAndGlyphs">Description</text>
+<text x="698.6" y="92" fill="#8b8b8b" textLength="49.2" lengthAdjust="spacingAndGlyphs">Author</text>
+<text x="813.4" y="92" fill="#8b8b8b" textLength="49.2" lengthAdjust="spacingAndGlyphs">Commit</text>
+<text x="18.0" y="111" fill="#3c3c3c" textLength="852.8" lengthAdjust="spacingAndGlyphs">────────────────────────────────────────────────────────────────────────────────────────────────────────</text>
+<text x="18.0" y="130" fill="#4fc1ff" textLength="8.2" lengthAdjust="spacingAndGlyphs">○</text>
+<text x="83.6" y="130" fill="#cca700" textLength="188.6" lengthAdjust="spacingAndGlyphs" font-style="italic">Uncommitted changes (2)</text>
+<rect x="83.6" y="137" width="131.2" height="15" rx="7.5" fill="#c586c0"/>
+<text x="18.0" y="149" fill="#4fc1ff" textLength="8.2" lengthAdjust="spacingAndGlyphs">│</text>
+<text x="34.4" y="149" fill="#c586c0" textLength="8.2" lengthAdjust="spacingAndGlyphs">●</text>
+<text x="91.8" y="149" fill="#1e1e1e" textLength="114.8" lengthAdjust="spacingAndGlyphs">feature/search</text>
+<text x="223.0" y="149" fill="#cccccc" textLength="344.4" lengthAdjust="spacingAndGlyphs">feat(search): highlight matches in results</text>
+<text x="690.4" y="149" fill="#8b8b8b" textLength="90.2" lengthAdjust="spacingAndGlyphs">Diego Alves</text>
+<text x="805.2" y="149" fill="#8b8b8b" textLength="57.4" lengthAdjust="spacingAndGlyphs">68e190e</text>
+<rect x="83.6" y="156" width="221.4" height="15" rx="7.5" fill="#4fc1ff"/>
+<text x="18.0" y="168" fill="#4fc1ff" textLength="8.2" lengthAdjust="spacingAndGlyphs">●</text>
+<text x="34.4" y="168" fill="#c586c0" textLength="8.2" lengthAdjust="spacingAndGlyphs">│</text>
+<text x="91.8" y="168" fill="#1e1e1e" textLength="73.8" lengthAdjust="spacingAndGlyphs" font-weight="700">● develop</text>
+<text x="173.8" y="168" fill="#1e1e1e" textLength="123.0" lengthAdjust="spacingAndGlyphs" font-style="italic">⇄ origin github</text>
+<text x="313.2" y="168" fill="#cccccc" textLength="278.8" lengthAdjust="spacingAndGlyphs">docs: document the deploy pipeline</text>
+<text x="690.4" y="168" fill="#8b8b8b" textLength="73.8" lengthAdjust="spacingAndGlyphs">Ana Souza</text>
+<text x="805.2" y="168" fill="#8b8b8b" textLength="57.4" lengthAdjust="spacingAndGlyphs">022bd97</text>
+<rect x="83.6" y="175" width="188.6" height="15" rx="7.5" fill="#9d9d9d"/>
+<text x="18.0" y="187" fill="#4fc1ff" textLength="8.2" lengthAdjust="spacingAndGlyphs">│</text>
+<text x="34.4" y="187" fill="#c586c0" textLength="8.2" lengthAdjust="spacingAndGlyphs">●</text>
+<text x="91.8" y="187" fill="#1e1e1e" textLength="172.2" lengthAdjust="spacingAndGlyphs">origin/feature/search</text>
+<text x="280.4" y="187" fill="#cccccc" textLength="319.8" lengthAdjust="spacingAndGlyphs">perf(search): cache hot queries for 60s</text>
+<text x="690.4" y="187" fill="#8b8b8b" textLength="90.2" lengthAdjust="spacingAndGlyphs">Diego Alves</text>
+<text x="805.2" y="187" fill="#8b8b8b" textLength="57.4" lengthAdjust="spacingAndGlyphs">a379260</text>
+<text x="18.0" y="206" fill="#4fc1ff" textLength="8.2" lengthAdjust="spacingAndGlyphs">│</text>
+<text x="34.4" y="206" fill="#c586c0" textLength="8.2" lengthAdjust="spacingAndGlyphs">●</text>
+<text x="83.6" y="206" fill="#cccccc" textLength="393.6" lengthAdjust="spacingAndGlyphs">feat(search): index products with trigram search</text>
+<text x="690.4" y="206" fill="#8b8b8b" textLength="90.2" lengthAdjust="spacingAndGlyphs">Diego Alves</text>
+<text x="805.2" y="206" fill="#8b8b8b" textLength="57.4" lengthAdjust="spacingAndGlyphs">be02222</text>
+<text x="18.0" y="225" fill="#4fc1ff" textLength="8.2" lengthAdjust="spacingAndGlyphs">●</text>
+<text x="26.2" y="225" fill="#ce9178" textLength="8.2" lengthAdjust="spacingAndGlyphs">─</text>
+<text x="34.4" y="225" fill="#ce9178" textLength="8.2" lengthAdjust="spacingAndGlyphs">┤</text>
+<text x="83.6" y="225" fill="#cccccc" textLength="155.8" lengthAdjust="spacingAndGlyphs">Merge branch 'main'</text>
+<text x="690.4" y="225" fill="#8b8b8b" textLength="73.8" lengthAdjust="spacingAndGlyphs">Ana Souza</text>
+<text x="805.2" y="225" fill="#8b8b8b" textLength="57.4" lengthAdjust="spacingAndGlyphs">5c311af</text>
+<rect x="83.6" y="232" width="180.4" height="15" rx="7.5" fill="#ce9178"/>
+<rect x="272.2" y="232" width="82.0" height="15" rx="7.5" fill="#e2c08d"/>
+<text x="18.0" y="244" fill="#4fc1ff" textLength="8.2" lengthAdjust="spacingAndGlyphs">│</text>
+<text x="34.4" y="244" fill="#ce9178" textLength="8.2" lengthAdjust="spacingAndGlyphs">●</text>
+<text x="42.6" y="244" fill="#4ec9b0" textLength="8.2" lengthAdjust="spacingAndGlyphs">─</text>
+<text x="50.8" y="244" fill="#4ec9b0" textLength="8.2" lengthAdjust="spacingAndGlyphs">╮</text>
+<text x="91.8" y="244" fill="#1e1e1e" textLength="32.8" lengthAdjust="spacingAndGlyphs">main</text>
+<text x="132.8" y="244" fill="#1e1e1e" textLength="123.0" lengthAdjust="spacingAndGlyphs" font-style="italic">⇄ origin github</text>
+<text x="280.4" y="244" fill="#1e1e1e" textLength="65.6" lengthAdjust="spacingAndGlyphs">◆ v1.0.1</text>
+<text x="362.4" y="244" fill="#cccccc" textLength="221.4" lengthAdjust="spacingAndGlyphs">Merge branch 'hotfix/1.0.1'</text>
+<text x="690.4" y="244" fill="#8b8b8b" textLength="73.8" lengthAdjust="spacingAndGlyphs">Ana Souza</text>
+<text x="805.2" y="244" fill="#8b8b8b" textLength="57.4" lengthAdjust="spacingAndGlyphs">6980b1d</text>
+<rect x="83.6" y="251" width="114.8" height="15" rx="7.5" fill="#4ec9b0"/>
+<text x="18.0" y="263" fill="#4fc1ff" textLength="8.2" lengthAdjust="spacingAndGlyphs">│</text>
+<text x="34.4" y="263" fill="#ce9178" textLength="8.2" lengthAdjust="spacingAndGlyphs">│</text>
+<text x="50.8" y="263" fill="#4ec9b0" textLength="8.2" lengthAdjust="spacingAndGlyphs">●</text>
+<text x="91.8" y="263" fill="#1e1e1e" textLength="98.4" lengthAdjust="spacingAndGlyphs">hotfix/1.0.1</text>
+<text x="206.6" y="263" fill="#cccccc" textLength="295.2" lengthAdjust="spacingAndGlyphs">fix(payments): round totals to cents</text>
+<text x="690.4" y="263" fill="#8b8b8b" textLength="82.0" lengthAdjust="spacingAndGlyphs">Carla Dias</text>
+<text x="805.2" y="263" fill="#8b8b8b" textLength="57.4" lengthAdjust="spacingAndGlyphs">685de0c</text>
+<rect x="83.6" y="270" width="82.0" height="15" rx="7.5" fill="#e2c08d"/>
+<text x="18.0" y="282" fill="#4fc1ff" textLength="8.2" lengthAdjust="spacingAndGlyphs">├</text>
+<text x="26.2" y="282" fill="#4fc1ff" textLength="8.2" lengthAdjust="spacingAndGlyphs">─</text>
+<text x="34.4" y="282" fill="#ce9178" textLength="8.2" lengthAdjust="spacingAndGlyphs">●</text>
+<text x="42.6" y="282" fill="#4ec9b0" textLength="8.2" lengthAdjust="spacingAndGlyphs">─</text>
+<text x="50.8" y="282" fill="#4ec9b0" textLength="8.2" lengthAdjust="spacingAndGlyphs">╯</text>
+<text x="91.8" y="282" fill="#1e1e1e" textLength="65.6" lengthAdjust="spacingAndGlyphs">◆ v1.0.0</text>
+<text x="173.8" y="282" fill="#cccccc" textLength="180.4" lengthAdjust="spacingAndGlyphs">Merge branch 'develop'</text>
+<text x="690.4" y="282" fill="#8b8b8b" textLength="73.8" lengthAdjust="spacingAndGlyphs">Ana Souza</text>
+<text x="805.2" y="282" fill="#8b8b8b" textLength="57.4" lengthAdjust="spacingAndGlyphs">23748be</text>
+<text x="18.0" y="301" fill="#4fc1ff" textLength="8.2" lengthAdjust="spacingAndGlyphs">●</text>
+<text x="26.2" y="301" fill="#dcdcaa" textLength="8.2" lengthAdjust="spacingAndGlyphs">─</text>
+<text x="34.4" y="301" fill="#ce9178" textLength="8.2" lengthAdjust="spacingAndGlyphs">┼</text>
+<text x="42.6" y="301" fill="#dcdcaa" textLength="8.2" lengthAdjust="spacingAndGlyphs">─</text>
+<text x="50.8" y="301" fill="#dcdcaa" textLength="8.2" lengthAdjust="spacingAndGlyphs">╮</text>
+<text x="83.6" y="301" fill="#cccccc" textLength="262.4" lengthAdjust="spacingAndGlyphs">Merge branch 'feature/dashboard'</text>
+<text x="690.4" y="301" fill="#8b8b8b" textLength="73.8" lengthAdjust="spacingAndGlyphs">Ana Souza</text>
+<text x="805.2" y="301" fill="#8b8b8b" textLength="57.4" lengthAdjust="spacingAndGlyphs">03ec8ab</text>
+<rect x="83.6" y="308" width="155.8" height="15" rx="7.5" fill="#dcdcaa"/>
+<text x="18.0" y="320" fill="#4fc1ff" textLength="8.2" lengthAdjust="spacingAndGlyphs">│</text>
+<text x="34.4" y="320" fill="#ce9178" textLength="8.2" lengthAdjust="spacingAndGlyphs">│</text>
+<text x="50.8" y="320" fill="#dcdcaa" textLength="8.2" lengthAdjust="spacingAndGlyphs">●</text>
+<text x="91.8" y="320" fill="#1e1e1e" textLength="139.4" lengthAdjust="spacingAndGlyphs">feature/dashboard</text>
+<text x="247.6" y="320" fill="#cccccc" textLength="262.4" lengthAdjust="spacingAndGlyphs">feat(ui): chart revenue by month</text>
+<text x="690.4" y="320" fill="#8b8b8b" textLength="82.0" lengthAdjust="spacingAndGlyphs">Bruno Lima</text>
+<text x="805.2" y="320" fill="#8b8b8b" textLength="57.4" lengthAdjust="spacingAndGlyphs">9b9c1e2</text>
+<text x="18.0" y="339" fill="#4fc1ff" textLength="8.2" lengthAdjust="spacingAndGlyphs">●</text>
+<text x="26.2" y="339" fill="#f48771" textLength="8.2" lengthAdjust="spacingAndGlyphs">─</text>
+<text x="34.4" y="339" fill="#ce9178" textLength="8.2" lengthAdjust="spacingAndGlyphs">┼</text>
+<text x="42.6" y="339" fill="#f48771" textLength="8.2" lengthAdjust="spacingAndGlyphs">─</text>
+<text x="50.8" y="339" fill="#dcdcaa" textLength="8.2" lengthAdjust="spacingAndGlyphs">┼</text>
+<text x="59.0" y="339" fill="#f48771" textLength="8.2" lengthAdjust="spacingAndGlyphs">─</text>
+<text x="67.2" y="339" fill="#f48771" textLength="8.2" lengthAdjust="spacingAndGlyphs">╮</text>
+<text x="83.6" y="339" fill="#cccccc" textLength="254.2" lengthAdjust="spacingAndGlyphs">Merge branch 'feature/payments'</text>
+<text x="690.4" y="339" fill="#8b8b8b" textLength="73.8" lengthAdjust="spacingAndGlyphs">Ana Souza</text>
+<text x="805.2" y="339" fill="#8b8b8b" textLength="57.4" lengthAdjust="spacingAndGlyphs">f89465d</text>
+<text x="18.0" y="358" fill="#4fc1ff" textLength="8.2" lengthAdjust="spacingAndGlyphs">│</text>
+<text x="34.4" y="358" fill="#ce9178" textLength="8.2" lengthAdjust="spacingAndGlyphs">│</text>
+<text x="50.8" y="358" fill="#dcdcaa" textLength="8.2" lengthAdjust="spacingAndGlyphs">●</text>
+<text x="67.2" y="358" fill="#f48771" textLength="8.2" lengthAdjust="spacingAndGlyphs">│</text>
+<text x="83.6" y="358" fill="#cccccc" textLength="328.0" lengthAdjust="spacingAndGlyphs">feat(ui): add dashboard layout and cards</text>
+<text x="690.4" y="358" fill="#8b8b8b" textLength="82.0" lengthAdjust="spacingAndGlyphs">Bruno Lima</text>
+<text x="805.2" y="358" fill="#8b8b8b" textLength="57.4" lengthAdjust="spacingAndGlyphs">761dd97</text>
+<rect x="83.6" y="365" width="147.6" height="15" rx="7.5" fill="#f48771"/>
+<text x="18.0" y="377" fill="#4fc1ff" textLength="8.2" lengthAdjust="spacingAndGlyphs">│</text>
+<text x="34.4" y="377" fill="#ce9178" textLength="8.2" lengthAdjust="spacingAndGlyphs">│</text>
+<text x="50.8" y="377" fill="#dcdcaa" textLength="8.2" lengthAdjust="spacingAndGlyphs">│</text>
+<text x="67.2" y="377" fill="#f48771" textLength="8.2" lengthAdjust="spacingAndGlyphs">●</text>
+<text x="91.8" y="377" fill="#1e1e1e" textLength="131.2" lengthAdjust="spacingAndGlyphs">feature/payments</text>
+<text x="239.4" y="377" fill="#cccccc" textLength="344.4" lengthAdjust="spacingAndGlyphs">test(payments): cover refunds and webhooks</text>
+<text x="690.4" y="377" fill="#8b8b8b" textLength="82.0" lengthAdjust="spacingAndGlyphs">Carla Dias</text>
+<text x="805.2" y="377" fill="#8b8b8b" textLength="57.4" lengthAdjust="spacingAndGlyphs">00fd0a2</text>
+<text x="18.0" y="396" fill="#4fc1ff" textLength="8.2" lengthAdjust="spacingAndGlyphs">│</text>
+<text x="34.4" y="396" fill="#ce9178" textLength="8.2" lengthAdjust="spacingAndGlyphs">│</text>
+<text x="50.8" y="396" fill="#dcdcaa" textLength="8.2" lengthAdjust="spacingAndGlyphs">│</text>
+<text x="67.2" y="396" fill="#f48771" textLength="8.2" lengthAdjust="spacingAndGlyphs">●</text>
+<text x="83.6" y="396" fill="#cccccc" textLength="352.6" lengthAdjust="spacingAndGlyphs">feat(payments): add Stripe checkout session</text>
+<text x="690.4" y="396" fill="#8b8b8b" textLength="82.0" lengthAdjust="spacingAndGlyphs">Carla Dias</text>
+<text x="805.2" y="396" fill="#8b8b8b" textLength="57.4" lengthAdjust="spacingAndGlyphs">059e117</text>
+<text x="18.0" y="415" fill="#4fc1ff" textLength="8.2" lengthAdjust="spacingAndGlyphs">●</text>
+<text x="26.2" y="415" fill="#f48771" textLength="8.2" lengthAdjust="spacingAndGlyphs">─</text>
+<text x="34.4" y="415" fill="#ce9178" textLength="8.2" lengthAdjust="spacingAndGlyphs">┼</text>
+<text x="42.6" y="415" fill="#f48771" textLength="8.2" lengthAdjust="spacingAndGlyphs">─</text>
+<text x="50.8" y="415" fill="#dcdcaa" textLength="8.2" lengthAdjust="spacingAndGlyphs">┴</text>
+<text x="59.0" y="415" fill="#f48771" textLength="8.2" lengthAdjust="spacingAndGlyphs">─</text>
+<text x="67.2" y="415" fill="#f48771" textLength="8.2" lengthAdjust="spacingAndGlyphs">╯</text>
+<text x="83.6" y="415" fill="#cccccc" textLength="278.8" lengthAdjust="spacingAndGlyphs">feat(auth): add session middleware</text>
+<text x="690.4" y="415" fill="#8b8b8b" textLength="82.0" lengthAdjust="spacingAndGlyphs">Bruno Lima</text>
+<text x="805.2" y="415" fill="#8b8b8b" textLength="57.4" lengthAdjust="spacingAndGlyphs">6b9eb4f</text>
+<text x="18.0" y="434" fill="#4fc1ff" textLength="8.2" lengthAdjust="spacingAndGlyphs">●</text>
+<text x="26.2" y="434" fill="#ce9178" textLength="8.2" lengthAdjust="spacingAndGlyphs">─</text>
+<text x="34.4" y="434" fill="#ce9178" textLength="8.2" lengthAdjust="spacingAndGlyphs">╯</text>
+<text x="83.6" y="434" fill="#cccccc" textLength="295.2" lengthAdjust="spacingAndGlyphs">feat(api): add health check endpoint</text>
+<text x="690.4" y="434" fill="#8b8b8b" textLength="73.8" lengthAdjust="spacingAndGlyphs">Ana Souza</text>
+<text x="805.2" y="434" fill="#8b8b8b" textLength="57.4" lengthAdjust="spacingAndGlyphs">d9e8df9</text>
+<text x="18.0" y="453" fill="#4fc1ff" textLength="8.2" lengthAdjust="spacingAndGlyphs">●</text>
+<text x="83.6" y="453" fill="#cccccc" textLength="172.2" lengthAdjust="spacingAndGlyphs">chore: initial commit</text>
+<text x="690.4" y="453" fill="#8b8b8b" textLength="73.8" lengthAdjust="spacingAndGlyphs">Ana Souza</text>
+<text x="805.2" y="453" fill="#8b8b8b" textLength="57.4" lengthAdjust="spacingAndGlyphs">3f995a7</text>
+</svg>

@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#262a33"/>
+      <stop offset="1" stop-color="#16181d"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" rx="224" fill="url(#bg)"/>
+  <g fill="none" stroke-linecap="round" stroke-width="64">
+    <!-- the main lane -->
+    <path d="M372 170 V854" stroke="#4fc1ff"/>
+    <!-- a branch that leaves and merges back -->
+    <path d="M372 740 C372 630 652 650 652 540 V470 C652 360 372 380 372 284" stroke="#c586c0"/>
+  </g>
+  <g stroke="#1c1f25" stroke-width="28">
+    <circle cx="372" cy="740" r="78" fill="#4fc1ff"/>
+    <circle cx="652" cy="505" r="78" fill="#c586c0"/>
+    <circle cx="372" cy="505" r="66" fill="#4fc1ff"/>
+    <circle cx="372" cy="284" r="92" fill="#d97757"/>
+  </g>
+</svg>
