@@ -1,6 +1,7 @@
 # STATE — gitgraph
 
 ## Decisões
+- 2026-10-22: release 1.0.1: README com imagens, ícone, licença MIT, marketplace.json (pronto para submeter ao diretório: `claude plugin validate --strict` passa).
 - 2026-10-22: release 1.0.0 (tag `1.0.0`), repositório `giovannifranco1/claude-code-gitgraph`.
 - 2026-10-22: painel abre só via `/gitgraph` (não disputa espaço com /filetree e /flow).
 - 2026-10-22: grafo mostra todas as branches (`--all`) por padrão, com toggle para só a atual.
