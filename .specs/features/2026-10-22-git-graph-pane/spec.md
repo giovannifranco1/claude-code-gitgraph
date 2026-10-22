@@ -38,7 +38,7 @@ Como dev usando o Claude Code, quero um painel lateral com o grafo de commits do
 - QUANDO pressiona o mesmo commit de novo ENTÃO recolhe.
 
 ### GG-09 — Auto-refresh
-- QUANDO o Claude roda um Bash com comando git que altera o repo (commit, merge, checkout, rebase, reset, pull, fetch, branch, tag, cherry-pick, stash, revert, `gh pr merge/checkout`…) ENTÃO o painel recarrega após o comando.
+- QUANDO o Claude roda um Bash que altera o repo (refs, HEAD ou working tree — detectado por assinatura `status`+`for-each-ref`, não por heurística do texto do comando), por exemplo um comando git (commit, merge, checkout, rebase, reset, pull, fetch, branch, tag, cherry-pick, stash, revert, `gh pr merge/checkout`…) ENTÃO o painel recarrega após o comando.
 - QUANDO o comando git é só leitura (`status`, `log`, `diff`, `show`…) ENTÃO não recarrega.
 - QUANDO o repo muda por fora (outro terminal) ENTÃO o painel percebe em até ~5s (comparação de assinatura de refs/HEAD/status) enquanto aberto.
 - Há um botão de refresh manual no header.

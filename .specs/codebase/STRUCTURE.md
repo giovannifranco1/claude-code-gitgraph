@@ -7,8 +7,10 @@ gitgraph/
 │   ├── register.tsx             # wiring + render
 │   ├── log.ts                   # parse do git log
 │   ├── lanes.ts                 # layout do grafo
-│   └── detect.ts                # comandos git que mudam o repo
+│   ├── format.ts                # datas, truncamento, hash curto
+│   └── detect.ts                # pré-validação de nome de branch
 ├── types/index.d.ts             # contrato de $.state
 ├── tests/*.test.ts(x)           # testes (claude plugin test .)
+├── README.md
 └── .specs/                      # spec-driven
 ```
