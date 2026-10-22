@@ -1,0 +1,25 @@
+{
+  "name": "gitgraph",
+  "version": "0.1.0",
+  "description": "A Git Graph pane beside the chat: commit graph with lanes, refs, commit details, auto-refresh and quick actions",
+  "types": "./types/index.d.ts",
+  "keywords": [
+    "git",
+    "graph",
+    "mod",
+    "pane"
+  ],
+  "userConfig": {
+    "badges": {
+      "type": "string",
+      "title": "Badges",
+      "description": "auto: rounded pills when a Nerd Font is installed; round: always rounded (needs a Nerd Font in the terminal); square: plain square pills",
+      "default": "auto",
+      "options": [
+        "auto",
+        "round",
+        "square"
+      ]
+    }
+  }
+}
