@@ -97,7 +97,3 @@ The graph layout, git output parsing, pills, menus and settings logic are plain 
 ## License
 
 [MIT](LICENSE)
-
----
-
-*Inspired by [Git Graph](https://github.com/mhutchie/vscode-git-graph) for VS Code. README layout after [claude-code-filetree](https://github.com/data-goblin/claude-code-filetree). The images are drawn from the pane's own layout code on a demo repository.*
