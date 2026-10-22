@@ -1,15 +1,15 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register, RenderChildren } from 'claude-code'
+import type { ClientElements, Elements, EngineInterface, ProcessRunResult, Register, RenderChildren } from 'claude-code'
 
 import type { Badge, BadgeKind, BadgeStyle, Cell, CommitDetail, ConfigScope, FileStat, Graph, GraphRow, Ref, RepoSettings, View } from '../types'
-import { badgeParts, badgesOf, badgeWidth, diffBar, fitBadges } from './badges'
+import { badgeParts, badgesOf, diffBar, fitBadges } from './badges'
 import { isBranchNameCandidate } from './detect'
 import { absTime, fitGraph, relTime, short, truncate } from './format'
 import { layout } from './lanes'
 import { findByHash, isHashQuery, topOf, visibleRange } from './virtual'
 import { DETAIL_FORMAT, LOG_FORMAT, parseDetail, parseLog, parseStatus, remotesOf, UNCOMMITTED, withUncommitted } from './log'
 import { checkoutArgs, defaultPushRemotes, type MenuItem, menuFor, pushRuns, renameArgs } from './menu'
-import type { PillProps } from './pill'
+import { drawPill, type PillProps } from './pilldraw'
 import { addRemoteArgs, isRemoteUrl, parseRemotes, userConfigArgs } from './settings'
 import type { SpinnerProps } from './spinner'
 
@@ -23,9 +23,8 @@ const MAX_FILES = 20
 const PALETTE = ['#4fc1ff', '#c586c0', '#ce9178', '#4ec9b0', '#dcdcaa', '#f48771', '#b5cea8', '#d7ba7d']
 const BADGE_FG = '#1e1e1e'
 const BADGE_BG: Partial<Record<BadgeKind, string>> = { remote: '#9d9d9d', tag: '#e2c08d', detached: '#f48771' }
-const CAP_LEFT = ''
-const CAP_RIGHT = ''
 const SELECTED_BG = '#264f78'
+const REMOTE_BG = BADGE_BG.remote ?? '#9d9d9d'
 const ADD_COLOR = '#89d185'
 const DEL_COLOR = '#f48771'
 const AUTHOR_W = 12
@@ -58,8 +57,20 @@ const roundState = atom({ plugin: 'gitgraph', key: 'isRound' } as const, false)
 const nerdState = atom({ plugin: 'gitgraph', key: 'hasNerdFont' } as const, false)
 const settingsState = atom({ plugin: 'gitgraph', key: 'settings' } as const, null as RepoSettings | null)
 
+// Everything transient a git action, a selection or a new menu closes.
+const CLOSED = {
+  confirm: null,
+  menu: null,
+  isRenaming: false,
+  push: null,
+  editingRemote: null,
+  isAddingRemote: false,
+} satisfies Partial<View>
+
 let generation = 0
-let graphCache: { version: number; graph: Graph } | null = null
+// What a render derives from the graph, worked out once per graph version.
+type GraphCache = { version: number; graph: Graph; maxCells: number; indexOf: Map<string, number> }
+let graphCache: GraphCache | null = null
 let signature = ''
 let busy = false
 // Set synchronously when an action starts, so a second press before the redraw is ignored.
@@ -80,19 +91,32 @@ function git($: EngineInterface, args: string[], isNetwork = false) {
 // What changes when commits, refs, HEAD or the working tree change.
 const signatureOf = (status: string, refs: string) => `${status}\0${refs}`
 
+function cacheOf(version: number, graph: Graph): GraphCache {
+  return {
+    version,
+    graph,
+    maxCells: graph.rows.reduce((n, r) => Math.max(n, r.cells.length), 1),
+    indexOf: new Map(graph.rows.map((r, i) => [r.commit.hash, i])),
+  }
+}
+
 async function setGraph($: EngineInterface, change: (g: Graph) => Graph): Promise<void> {
   const graph = await update($, graphState, change)
-  const version = await update($, versionState, n => n + 1)
-  graphCache = { version, graph }
+  graphCache = cacheOf(await update($, versionState, n => n + 1), graph)
 }
 
-async function readGraph($: EngineInterface): Promise<Graph> {
+async function readCache($: EngineInterface): Promise<GraphCache> {
   const version = await read($, versionState)
-  if (graphCache?.version !== version) graphCache = { version, graph: await read($, graphState) }
-  return graphCache.graph
+  if (graphCache?.version !== version) graphCache = cacheOf(version, await read($, graphState))
+  return graphCache
 }
 
-async function load($: EngineInterface): Promise<void> {
+const readGraph = async ($: EngineInterface) => (await readCache($)).graph
+
+type RepoState = { status: ProcessRunResult; refs: ProcessRunResult }
+
+// `known` is a status and refs a caller has just read (the poll), so they are not run twice.
+async function load($: EngineInterface, known?: RepoState): Promise<void> {
   const gen = ++generation
   const isCurrent = () => gen === generation
   const view = await read($, viewState)
@@ -100,8 +124,8 @@ async function load($: EngineInterface): Promise<void> {
   try {
     const [log, status, refs] = await Promise.all([
       git($, ['log', view.scope === 'all' ? '--all' : 'HEAD', '--date-order', `-n${view.limit + 1}`, LOG_FORMAT]),
-      git($, STATUS_ARGS),
-      git($, REFS_ARGS),
+      known?.status ?? git($, STATUS_ARGS),
+      known?.refs ?? git($, REFS_ARGS),
     ])
     if (!isCurrent()) return
     if (status.exitCode !== 0) {
@@ -134,18 +158,20 @@ async function load($: EngineInterface): Promise<void> {
 async function poll($: EngineInterface): Promise<void> {
   if (busy || !(await read($, viewState)).isOpen) return
   busy = true
+  let known: RepoState
   try {
     const [status, refs] = await Promise.all([git($, STATUS_ARGS), git($, REFS_ARGS)])
     if (signatureOf(status.stdout, refs.stdout) === signature) return
+    known = { status, refs }
   } finally {
     busy = false
   }
-  await load($)
+  await load($, known)
 }
 
 async function select($: EngineInterface, hash: string): Promise<void> {
   const selected = (await read($, viewState)).selected === hash ? null : hash
-  await update($, viewState, v => ({ ...v, selected, confirm: null, menu: null }))
+  await update($, viewState, v => ({ ...v, ...CLOSED, selected }))
   await update($, detailState, () => null)
   if (selected) await loadDetail($, selected)
 }
@@ -161,9 +187,8 @@ async function refreshAll($: EngineInterface): Promise<void> {
   if ((await read($, viewState)).refresh === 'running') return
   await update($, viewState, (v): View => ({ ...v, refresh: 'running' }))
   try {
-    await load($)
     const view = await read($, viewState)
-    await Promise.all([view.selected ? loadDetail($, view.selected) : undefined, view.isSettings ? loadSettings($) : undefined])
+    await Promise.all([load($), view.selected ? loadDetail($, view.selected) : undefined, view.isSettings ? loadSettings($) : undefined])
   } finally {
     await update($, viewState, (v): View => ({ ...v, refresh: 'done' }))
     $.clock.after(REFRESHED_MS, () => void update($, viewState, (v): View => (v.refresh === 'done' ? { ...v, refresh: 'idle' } : v)))
@@ -205,7 +230,7 @@ async function searchCommit($: EngineInterface, value: string): Promise<void> {
 async function openMenu($: EngineInterface, hash: string, badge: Badge): Promise<void> {
   await update($, viewState, (v): View => {
     const isSame = v.menu?.hash === hash && v.menu.badge.label === badge.label && v.menu.badge.kind === badge.kind
-    return { ...v, menu: isSame ? null : { hash, badge }, confirm: null, isRenaming: false, push: null }
+    return { ...v, ...CLOSED, menu: isSame ? null : { hash, badge } }
   })
 }
 
@@ -229,20 +254,10 @@ async function runActions($: EngineInterface, runs: string[][], done: string, la
     }
   } finally {
     isRunning = false
-    await update($, viewState, v => ({
-      ...v,
-      running: null,
-      confirm: null,
-      menu: null,
-      isRenaming: false,
-      push: null,
-      editingRemote: null,
-      isAddingRemote: false,
-    }))
+    await update($, viewState, v => ({ ...v, ...CLOSED, running: null }))
   }
   $.ui.toast(failures.length === 0 ? done : failures.join(' · '))
-  await load($)
-  if ((await read($, viewState)).isSettings) await loadSettings($)
+  await Promise.all([load($), (await read($, viewState)).isSettings ? loadSettings($) : undefined])
 }
 
 async function loadSettings($: EngineInterface): Promise<void> {
@@ -333,8 +348,10 @@ type Ctx = {
   now: number
   isRound: boolean
   icons: (typeof ICONS)['plain']
-  // Only the terminal and the desktop draw a `Client`; elsewhere pills are plain Text.
-  hasClient: boolean
+  // Fields where the surface has them (not mobile).
+  Input: Elements['terminal']['Input'] | undefined
+  // Only the terminal and the desktop draw a `Client` (vscode's table holds a stub); elsewhere pills are Text.
+  Client: Elements['terminal']['Client'] | undefined
 }
 
 function pillProps({ isRound }: Ctx, badge: Badge, lane: string): PillProps {
@@ -349,26 +366,28 @@ function pillProps({ isRound }: Ctx, badge: Badge, lane: string): PillProps {
   }
 }
 
-// The same pill as ./pill.tsx draws, for surfaces without `Client` (and inside a Button).
-function renderPill({ els: { Text } }: Ctx, p: PillProps) {
-  const body = (
-    <Text backgroundColor={p.bg} color={p.fg} weight={p.isBold ? 'bold' : undefined}>
-      {p.isRound ? '' : ' '}
-      {p.name}
-      <Text italic>{p.remotes}</Text>
-      {p.isRound ? '' : ' '}
-    </Text>
-  )
-  return p.isRound ? (
-    <Text>
-      <Text color={p.bg}>{CAP_LEFT}</Text>
-      {body}
-      <Text color={p.bg}>{CAP_RIGHT}</Text>{' '}
-    </Text>
-  ) : (
-    <Text>
-      {body}{' '}
-    </Text>
+// The pill ./pill.tsx draws, for surfaces without `Client`.
+const renderPill = ({ els: { Text } }: Ctx, p: PillProps) => drawPill(Text as ClientElements['Text'], p)
+
+// A pill that names something other than a ref: a hash, the current branch, a remote, `+N`.
+const plainPill = ({ isRound }: Ctx, name: string, bg: string, isBold = false): PillProps => ({
+  name,
+  remotes: '',
+  bg,
+  fg: BADGE_FG,
+  isBold,
+  isRound,
+})
+
+function copyButton($: EngineInterface, { els: { Button } }: Ctx, key: string, label: string, text: string, copied: string, close = false) {
+  return (
+    <Button key={key} onPress={async pe => {
+      const res = await $.ui.copy({ text, surface: pe.surface })
+      $.ui.toast(res.isCopied ? copied : 'Could not copy')
+      if (close) await update($, viewState, v => ({ ...v, menu: null }))
+    }}>
+      {label}
+    </Button>
   )
 }
 
@@ -392,7 +411,7 @@ const blank = (ctx: Ctx) => line(ctx, <ctx.els.Text> </ctx.els.Text>)
 function renderHeader($: EngineInterface, ctx: Ctx) {
   const { els, graph, view, cols, graphWidth, icons } = ctx
   const { Box, Text, Button } = els
-  const Input = 'Input' in els ? els.Input : undefined
+  const { Input } = ctx
   const isAll = view.scope === 'all'
   const headRow = graph.rows.find(r => r.commit.hash === graph.head)
   const count = graph.rows.length - (graph.dirty ? 1 : 0)
@@ -401,14 +420,7 @@ function renderHeader($: EngineInterface, ctx: Ctx) {
     <Box height={1} overflow="hidden" flexDirection="row" justifyContent="space-between" columnGap={2}>
       <Box flexShrink={1} overflow="hidden">
         <Text wrap="truncate-end">
-          {renderPill(ctx, {
-            name: `⎇ ${head}`,
-            remotes: '',
-            bg: headRow ? laneColor(headRow.cells) : '#4fc1ff',
-            fg: BADGE_FG,
-            isBold: true,
-            isRound: ctx.isRound,
-          })}
+          {renderPill(ctx, plainPill(ctx, `⎇ ${head}`, headRow ? laneColor(headRow.cells) : PALETTE[0] ?? '#4fc1ff', true))}
           <Text dimColor>
             {' '}
             {count}
@@ -419,7 +431,7 @@ function renderHeader($: EngineInterface, ctx: Ctx) {
       </Box>
       <Box flexDirection="row" gap={2} flexShrink={0}>
         <Button key="scope" plain onPress={async () => {
-          await update($, viewState, (v): View => ({ ...v, scope: v.scope === 'all' ? 'head' : 'all', limit: PAGE, selected: null, menu: null }))
+          await update($, viewState, (v): View => ({ ...v, ...CLOSED, scope: v.scope === 'all' ? 'head' : 'all', limit: PAGE, selected: null }))
           await load($)
         }}>
           <Text color={isAll ? 'success' : undefined} dimColor={!isAll}>
@@ -436,7 +448,7 @@ function renderHeader($: EngineInterface, ctx: Ctx) {
           )}
         </Button>
         <Button key="settings" plain dimColor onPress={async () => {
-          await update($, viewState, v => ({ ...v, isSettings: true, menu: null, selected: null }))
+          await update($, viewState, v => ({ ...v, ...CLOSED, isSettings: true, selected: null }))
           await loadSettings($)
         }}>
           {`${icons.settings} settings`}
@@ -469,7 +481,7 @@ function renderHeader($: EngineInterface, ctx: Ctx) {
 function renderRow($: EngineInterface, ctx: Ctx, { commit, cells }: GraphRow) {
   const { els, view, cols, graphMax, graphWidth } = ctx
   const { Box, Text, Button } = els
-  const Client = ctx.hasClient && 'Client' in els ? els.Client : undefined
+  const { Client } = ctx
   const fitted = fitGraph(cells, graphMax)
   const graphText = groupCells(fitted).map(g => <Text color={PALETTE[g.color % PALETTE.length]}>{g.text}</Text>)
   const pad = ' '.repeat(graphWidth - fitted.length + 1)
@@ -488,10 +500,9 @@ function renderRow($: EngineInterface, ctx: Ctx, { commit, cells }: GraphRow) {
   const meta = metaOf(ctx, commit.author, commit.hash)
   // Pills get what is left once the subject keeps its minimum; the rest become `+N`.
   const fixed = graphWidth + 1 + meta.length + EDGE_SAFETY
-  const { shown, hidden } = fitBadges(badgesOf(commit.refs), Math.max(0, cols - fixed - MIN_SUBJECT))
+  const { shown, hidden, width } = fitBadges(badgesOf(commit.refs), Math.max(0, cols - fixed - MIN_SUBJECT))
   const more = hidden > 0 ? `+${hidden}` : ''
-  const pillsWidth = shown.reduce((n, b) => n + badgeWidth(b) + 1, 0) + (more ? more.length + 3 : 0)
-  const room = Math.max(0, cols - fixed - pillsWidth)
+  const room = Math.max(0, cols - fixed - width)
   const isSelected = view.selected === commit.hash
   // With `Client`, each pill is its own instance so a right click opens its menu.
   return (
@@ -513,7 +524,7 @@ function renderRow($: EngineInterface, ctx: Ctx, { commit, cells }: GraphRow) {
       ))}
       {more && (
         <Box flexShrink={0}>
-          {renderPill(ctx, { name: more, remotes: '', bg: BADGE_BG.remote ?? '#9d9d9d', fg: BADGE_FG, isBold: false, isRound: ctx.isRound })}
+          {renderPill(ctx, plainPill(ctx, more, REMOTE_BG))}
         </Box>
       )}
       <Button key={commit.hash} plain onPress={() => select($, commit.hash)}>
@@ -540,8 +551,7 @@ function confirmButton($: EngineInterface, { els: { Button }, view }: Ctx, key: 
 }
 
 // The spinner where the surface draws a `Client`, an hourglass elsewhere.
-function renderSpinner({ els, hasClient }: Ctx, key = 'spinner') {
-  const Client = hasClient && 'Client' in els ? els.Client : undefined
+function renderSpinner({ els, Client }: Ctx, key = 'spinner') {
   const props: SpinnerProps = { color: '#4fc1ff' }
   return Client ? <Client key={key} module="./spinner.tsx" props={props} /> : <els.Text>⏳</els.Text>
 }
@@ -610,18 +620,7 @@ function renderPushChooser($: EngineInterface, ctx: Ctx, badge: Badge, item: Men
 function renderMenuItem($: EngineInterface, ctx: Ctx, badge: Badge, item: MenuItem) {
   const { Button } = ctx.els
   const key = `menu-${item.id}`
-  if (item.copy !== undefined) {
-    const text = item.copy
-    return (
-      <Button key={key} onPress={async pe => {
-        const res = await $.ui.copy({ text, surface: pe.surface })
-        $.ui.toast(res.isCopied ? `Copied "${text}"` : 'Could not copy')
-        await update($, viewState, v => ({ ...v, menu: null }))
-      }}>
-        {item.label}
-      </Button>
-    )
-  }
+  if (item.copy !== undefined) return copyButton($, ctx, key, item.label, item.copy, `Copied "${item.copy}"`, true)
   if (item.pushArgs)
     return (
       <Button key={key} variant={ctx.view.push ? 'primary' : undefined} onPress={() =>
@@ -660,7 +659,7 @@ const MENU_ITEM_ROWS = 2
 function renderMenu($: EngineInterface, ctx: Ctx, { cells }: GraphRow, badge: Badge) {
   const { els, graph, view } = ctx
   const { Box, Text, Button } = els
-  const Input = 'Input' in els ? els.Input : undefined
+  const { Input } = ctx
   const lane = laneColor(cells)
   const items = menuFor(badge, graph.remotes)
   const push = items.find(i => i.pushArgs)
@@ -731,7 +730,7 @@ function renderFiles(ctx: Ctx, files: FileStat[]) {
 function renderDetail($: EngineInterface, ctx: Ctx, { commit, cells }: GraphRow) {
   const { els, detail, graph, view } = ctx
   const { Text, Button } = els
-  const Input = 'Input' in els ? els.Input : undefined
+  const { Input } = ctx
   const branch = localBranch(commit.refs)
   const lane = laneColor(cells)
   const badges = badgesOf(commit.refs).filter(b => b.kind !== 'detached')
@@ -741,7 +740,7 @@ function renderDetail($: EngineInterface, ctx: Ctx, { commit, cells }: GraphRow)
     line(
       ctx,
       <Text wrap="truncate-end">
-        {renderPill(ctx, { name: short(commit.hash), remotes: '', bg: lane, fg: BADGE_FG, isBold: true, isRound: ctx.isRound })}
+        {renderPill(ctx, plainPill(ctx, short(commit.hash), lane, true))}
         <Text weight="bold">{subject}</Text>
       </Text>,
     ),
@@ -785,15 +784,10 @@ function renderDetail($: EngineInterface, ctx: Ctx, { commit, cells }: GraphRow)
       line(
         ctx,
         [
-          <Button key="copy" onPress={async pe => {
-            const res = await $.ui.copy({ text: commit.hash, surface: pe.surface })
-            $.ui.toast(res.isCopied ? `Copied hash ${short(commit.hash)}` : 'Could not copy')
-          }}>
-            Copy hash
-          </Button>,
+          copyButton($, ctx, 'copy', 'Copy hash', commit.hash, `Copied hash ${short(commit.hash)}`),
           !isCheckedOut(commit.refs) &&
             confirmButton($, ctx, 'checkout', `checkout:${commit.hash}`, `Checkout ${branch ?? '(detached)'}`, () =>
-              runAction($, branch ? ['checkout', branch] : ['checkout', '--detach', commit.hash], `Checked out ${branch ?? short(commit.hash)}`),
+              runAction($, (branch && checkoutArgs({ kind: 'branch', label: branch, remotes: [] })) || ['checkout', '--detach', commit.hash], `Checked out ${branch ?? short(commit.hash)}`),
             ),
           commit.hash !== graph.head &&
             confirmButton($, ctx, 'pick', `pick:${commit.hash}`, 'Cherry-pick', () =>
@@ -812,7 +806,7 @@ function renderDetail($: EngineInterface, ctx: Ctx, { commit, cells }: GraphRow)
 function renderSettings($: EngineInterface, ctx: Ctx, settings: RepoSettings | null) {
   const { els, view, cols } = ctx
   const { Box, Text, Button } = els
-  const Input = 'Input' in els ? els.Input : undefined
+  const { Input } = ctx
   const scopeButton = (scope: ConfigScope, label: string) => (
     <Button key={`scope-${scope}`} plain onPress={() => update($, viewState, v => ({ ...v, configScope: scope }))}>
       {view.configScope === scope ? '◉' : '○'} {label}
@@ -855,7 +849,7 @@ function renderSettings($: EngineInterface, ctx: Ctx, settings: RepoSettings | n
             {settings.remotes.map(r => (
               <Box flexDirection="column">
                 <Box flexDirection="row" gap={1} flexWrap="wrap">
-                  {renderPill(ctx, { name: r.name, remotes: '', bg: BADGE_BG.remote ?? '#9d9d9d', fg: BADGE_FG, isBold: true, isRound: ctx.isRound })}
+                  {renderPill(ctx, plainPill(ctx, r.name, REMOTE_BG, true))}
                   <Text dimColor>{truncate(r.fetchUrl, Math.max(10, cols - r.name.length - 40))}</Text>
                   {r.pushUrl && r.pushUrl !== r.fetchUrl && <Text dimColor>(push: {r.pushUrl})</Text>}
                 </Box>
@@ -913,7 +907,14 @@ function renderSettings($: EngineInterface, ctx: Ctx, settings: RepoSettings | n
 
 async function renderPane($: EngineInterface, els: Ctx['els'], surface: string, cols: number, scroll: { offset: number; bodyRows: number }) {
   const { Box, Text, Button } = els
-  const graph = await readGraph($)
+  const [cache, view, detail, isRound, hasNerd] = await Promise.all([
+    readCache($),
+    read($, viewState),
+    read($, detailState),
+    read($, roundState),
+    read($, nerdState),
+  ])
+  const { graph, indexOf } = cache
   if (graph.status === 'no-repo') return <Text dimColor>Not a git repository.</Text>
   if (graph.status === 'error') return <Text color="error">Could not read git: {graph.error ?? ''}</Text>
 
@@ -921,28 +922,29 @@ async function renderPane($: EngineInterface, els: Ctx['els'], surface: string, 
   const ctx: Ctx = {
     els,
     graph,
-    view: await read($, viewState),
-    detail: await read($, detailState),
+    view,
+    detail,
     cols,
     graphMax,
-    graphWidth: Math.min(graphMax, Math.max(1, ...graph.rows.map(r => r.cells.length))),
+    graphWidth: Math.min(graphMax, cache.maxCells),
     now: Math.floor(Date.now() / 1000),
-    isRound: await read($, roundState),
-    icons: (await read($, nerdState)) ? ICONS.nerd : ICONS.plain,
-    hasClient: surface === 'terminal' || surface === 'desktop',
+    isRound,
+    icons: hasNerd ? ICONS.nerd : ICONS.plain,
+    Input: 'Input' in els ? (els.Input as Elements['terminal']['Input']) : undefined,
+    Client: (surface === 'terminal' || surface === 'desktop') && 'Client' in els ? (els.Client as Elements['terminal']['Client']) : undefined,
   }
-  if (ctx.view.isSettings) return renderSettings($, ctx, await read($, settingsState))
-  const { view } = ctx
+  if (view.isSettings) return renderSettings($, ctx, await read($, settingsState))
   const header = renderHeader($, ctx)
 
   // Only the rows in the window are drawn; spacers of the same height stand for the rest,
   // so a scroll step costs a window of rows, not the whole graph.
-  const menuRow = view.menu ? graph.rows.find(r => r.commit.hash === view.menu?.hash) : undefined
+  const rowOf = (hash: string | null | undefined) => (hash ? graph.rows[indexOf.get(hash) ?? -1] : undefined)
+  const menuRow = rowOf(view.menu?.hash)
   const menuBox = menuRow && view.menu ? renderMenu($, ctx, menuRow, view.menu.badge) : undefined
-  const selectedRow = view.selected ? graph.rows.find(r => r.commit.hash === view.selected) : undefined
+  const selectedRow = rowOf(view.selected)
   const detailBox = selectedRow ? renderDetail($, ctx, selectedRow) : undefined
   const heights = graph.rows.map(r => 1 + (r === menuRow ? (menuBox?.height ?? 0) : 0) + (r === selectedRow ? (detailBox?.height ?? 0) : 0))
-  const pinned = view.scrollTo ? graph.rows.findIndex(r => r.commit.hash === view.scrollTo) : -1
+  const pinned = view.scrollTo ? (indexOf.get(view.scrollTo) ?? -1) : -1
   const offset = pinned >= 0 ? header.height + topOf(heights, pinned) - Math.floor(scroll.bodyRows / 2) : scroll.offset
   const { from, to, before, after } = visibleRange(heights, header.height, offset, scroll.bodyRows, OVERSCAN)
 

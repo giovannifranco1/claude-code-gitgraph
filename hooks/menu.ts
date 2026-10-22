@@ -5,7 +5,6 @@ export type MenuItem = {
   label: string
   // The git commands the item runs, in order (several for a push to every remote).
   runs?: string[][]
-  isConfirmed?: boolean
   isNetwork?: boolean
   copy?: string
   isRename?: boolean
@@ -27,7 +26,6 @@ const act = (id: string, label: string, args: string[], isNetwork = false): Menu
   id,
   label,
   runs: [args],
-  isConfirmed: true,
   isNetwork,
 })
 

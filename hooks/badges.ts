@@ -51,7 +51,8 @@ function shrink(badge: Badge, room: number): Badge | null {
 }
 
 // The pills that fit `max` columns, shortened where needed; the rest counted for a `+N` pill.
-export function fitBadges(badges: Badge[], max: number): { shown: Badge[]; hidden: number } {
+// `width` is what they take, the `+N` pill and every gap included.
+export function fitBadges(badges: Badge[], max: number): { shown: Badge[]; hidden: number; width: number } {
   const plus = (n: number) => (n > 0 ? `+${n}`.length + 3 : 0)
   const shown: Badge[] = []
   let used = 0
@@ -61,7 +62,8 @@ export function fitBadges(badges: Badge[], max: number): { shown: Badge[]; hidde
     shown.push(fitted)
     used += badgeWidth(fitted) + 1
   }
-  return { shown, hidden: badges.length - shown.length }
+  const hidden = badges.length - shown.length
+  return { shown, hidden, width: used + plus(hidden) }
 }
 
 // A diffstat bar of at most `width` cells, each non-zero side keeping one.

@@ -15,7 +15,6 @@ test('GG-12 a local branch gets the full branch menu', async () => {
   expect(by.rebase?.runs?.[0]).toEqual(['rebase', 'feat'])
   expect(by.delete?.runs?.[0]).toEqual(['branch', '-d', 'feat'])
   expect(by.copy?.copy).toBe('feat')
-  expect(items.filter(i => i.runs).every(i => i.isConfirmed)).toBe(true)
 })
 
 test('GG-12 the checked-out branch cannot be checked out, merged, rebased or deleted', async () => {

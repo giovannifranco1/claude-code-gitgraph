@@ -26,7 +26,7 @@ export type CommitDetail = {
   files: FileStat[]
 }
 
-export type GraphStatus = 'idle' | 'loading' | 'ready' | 'no-repo' | 'error'
+export type GraphStatus = 'idle' | 'ready' | 'no-repo' | 'error'
 export type Graph = {
   status: GraphStatus
   rows: GraphRow[]

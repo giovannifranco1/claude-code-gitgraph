@@ -38,22 +38,23 @@ test('GG-08 a diffstat bar splits its width between additions and deletions', as
 test('GG-11 pills past their width budget collapse into a +N count', async () => {
   const b = (label: string) => ({ kind: 'branch' as const, label, remotes: [] })
   const all = [b('main'), b('feature/long-name'), b('x')]
-  expect(fitBadges(all, 100)).toEqual({ shown: all, hidden: 0 })
+  expect(fitBadges(all, 100)).toEqual({ shown: all, hidden: 0, width: 7 + 20 + 4 })
   // ' main ' + gap = 7, ' feature/long-name ' + gap = 20; '+2' pill is 5 wide
-  expect(fitBadges(all, 14)).toEqual({ shown: [b('main')], hidden: 2 })
-  expect(fitBadges(all, 3)).toEqual({ shown: [], hidden: 3 })
-  expect(fitBadges([], 3)).toEqual({ shown: [], hidden: 0 })
+  expect(fitBadges(all, 14)).toEqual({ shown: [b('main')], hidden: 2, width: 7 + 5 })
+  expect(fitBadges(all, 3)).toEqual({ shown: [], hidden: 3, width: 5 })
+  expect(fitBadges([], 3)).toEqual({ shown: [], hidden: 0, width: 0 })
 })
 
 test('GG-11 a pill that does not fit is shortened before it is counted away', async () => {
   const long = { kind: 'branch' as const, label: 'feature/long-name', remotes: [] }
   // ' feature/lon… ' + gap = 15
-  expect(fitBadges([long], 15)).toEqual({ shown: [{ ...long, label: 'feature/lon…' }], hidden: 0 })
+  expect(fitBadges([long], 15)).toEqual({ shown: [{ ...long, label: 'feature/lon…' }], hidden: 0, width: 15 })
   // remotes go first: ' main ' + gap = 7 fits where ' main ⇄ origin ' + gap = 16 does not
   expect(fitBadges([{ kind: 'head', label: 'main', remotes: ['origin'] }], 12)).toEqual({
     shown: [{ kind: 'head', label: 'main', remotes: [] }],
     hidden: 0,
+    width: 9,
   })
   // under six letters of name it is not worth a pill
-  expect(fitBadges([long], 9)).toEqual({ shown: [], hidden: 1 })
+  expect(fitBadges([long], 9)).toEqual({ shown: [], hidden: 1, width: 5 })
 })
