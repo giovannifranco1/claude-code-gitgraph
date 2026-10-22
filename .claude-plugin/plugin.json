@@ -21,5 +21,11 @@
         "square"
       ]
     }
-  }
+  },
+  "license": "MIT",
+  "author": {
+    "name": "Giovanni Franco"
+  },
+  "repository": "https://github.com/giovannifranco1/claude-code-gitgraph",
+  "homepage": "https://github.com/giovannifranco1/claude-code-gitgraph"
 }
