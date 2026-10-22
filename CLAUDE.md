@@ -15,7 +15,9 @@ Painel lateral (estilo extensão Git Graph do VS Code) que mostra o grafo de com
 
 ## Convenções
 
-- Idioma das specs/docs: PT-BR. Código e identificadores em inglês.
+- Idioma das specs/docs: PT-BR. Código, identificadores e **todo texto da interface (labels, toasts, placeholders) em inglês** (pedido do dev, 2026-10-22).
+- Sem atalhos de teclado (`hotkey`) nos botões por enquanto (pedido do dev).
+- Linhas do painel têm altura explícita (`height` + `overflow: hidden`): a virtualização do scroll depende disso.
 - Lógica pura (parse, lanes, detecção) em módulos sem `$`, cobertos por `*.test.ts`.
 - `register.tsx` só faz wiring: estado, eventos, render.
 - Estado que o render lê vive em `$.state` (declarado em `types/index.d.ts`), nunca em variável de módulo.

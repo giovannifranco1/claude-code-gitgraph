@@ -85,3 +85,11 @@ test('GG-04 remote names come from the remote-tracking refs', async () => {
   expect(remotesOf(refs)).toEqual(['origin', 'up-stream'])
   expect(remotesOf('')).toEqual([])
 })
+
+test('GG-04 symbolic remote HEADs are not refs of their own', async () => {
+  expect(parseRefs('HEAD -> main, origin/main, github/main, origin/HEAD, github/HEAD', ['origin', 'github'])).toEqual([
+    { kind: 'head', name: 'main' },
+    { kind: 'remote', name: 'origin/main' },
+    { kind: 'remote', name: 'github/main' },
+  ])
+})

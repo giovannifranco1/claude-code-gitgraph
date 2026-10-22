@@ -16,6 +16,7 @@ export function parseRefs(decorations: string, remotes: string[] = ['origin']): 
     else if (part === 'HEAD') refs.push({ kind: 'head', name: 'HEAD' })
     else if (part.startsWith('HEAD -> ')) refs.push({ kind: 'head', name: part.slice(8) })
     else if (part.includes(' -> ')) refs.push({ kind: 'remote', name: part.split(' -> ')[1] ?? part })
+    else if (remotes.some(r => part === `${r}/HEAD`)) continue // a remote's default-branch pointer, not a branch
     else if (remotes.some(r => part.startsWith(`${r}/`))) refs.push({ kind: 'remote', name: part })
     else refs.push({ kind: 'branch', name: part })
   }
