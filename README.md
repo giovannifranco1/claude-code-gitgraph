@@ -10,7 +10,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Claude_Code-%E2%89%A5_2.1.308-D97757?logo=claude&logoColor=fff" alt="Claude Code 2.1.308 or newer">
-  <img src="https://img.shields.io/badge/version-1.3.0-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.3.1-blue" alt="Version">
   <img src="https://img.shields.io/badge/type-mod-6f42c1" alt="Claude Code mod">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License: MIT">
 </p>
@@ -62,12 +62,12 @@ Then open the pane with:
   - **Local branch:** checkout, rename, push branch, merge into the current branch, rebase the current branch on it, delete branch (with an optional `force`, off by default), copy name
   - **Remote branch:** checkout as a new tracking branch, fetch, merge, delete on the remote, copy name
   - **Tag:** push, delete, copy name
-  - **Double-click** a pill to check it out
+  - **Double-click** a pill to check it out, without opening the commit's details (a single click on a pill opens them a moment later)
 
 - **Push to the remotes you pick:** Push branch opens a choice of remotes, starting with the ones the branch tracks, plus `all`. A push to several remotes runs one push each and reports every failure by its remote
 - **Safe actions:** destructive ones ask for a second press; a spinner shows what git is doing and further presses wait for it; push and fetch never hang on a password prompt
 - **Find a commit by hash** from the search icon, 4 to 40 hex digits: the pane selects it and scrolls to it
-- **Git Flow actions** in a bar at the bottom of the pane (`⎇  feature  bugfix  release  hotfix │ finish  rebase  publish`), with [git-flow-next](https://github.com/gittower/git-flow-next):
+- **Git Flow actions** in a bar at the bottom of the pane (`feature bugfix release hotfix │ [ finish ] [ rebase ] [ publish ]`, wrapping onto a second row on a narrow pane), with [git-flow-next](https://github.com/gittower/git-flow-next):
   - **Start** a feature, bugfix, release or hotfix from the base your git flow config gives it; a release or hotfix name comes filled in with the next version after your highest tag
   - On a work branch: **finish** (switches for `no-ff`, push afterwards and keep branch, all on by default; release and hotfix tags get an editable message), **rebase** (or merge, as your config says) and **publish**. Publish and finish ask for a second press
   - A finish or update that stops on a conflict offers **Continue** and **Abort**
