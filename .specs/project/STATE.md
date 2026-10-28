@@ -12,6 +12,7 @@
 - 2026-10-27: release 1.3.1: barra do Git Flow cabe na largura do painel (sem ícone ⎇, larguras em células desenhadas); duplo clique numa pílula faz checkout sem abrir os detalhes.
 - 2026-10-27: reset soft (GG-19) nos detalhes do commit, só `--soft` (pedido do dev); voltar ao commit anterior funciona quando ele ainda tem ref (branch pushado): commits sem ref somem do grafo, como no Git Graph do VS Code. Ações dos detalhes e do menu quebram em linhas via `buttonRows`.
 - 2026-10-28: clique simples na pílula volta a abrir os detalhes na hora (a espera de 450 ms para descartar duplo clique ficou lenta para o dev); o duplo clique faz checkout e devolve a seleção de antes do primeiro clique.
+- 2026-10-28: release 1.4.0: reset soft do branch atual para um commit (GG-19) nos detalhes, ações dos detalhes quebrando em linhas; clique simples na pílula abre os detalhes na hora.
 - 2026-10-22: release 1.0.0 (tag `1.0.0`), repositório `giovannifranco1/claude-code-gitgraph`.
 - 2026-10-22: painel abre só via `/gitgraph` (não disputa espaço com /filetree e /flow).
 - 2026-10-22: grafo mostra todas as branches (`--all`) por padrão, com toggle para só a atual.
