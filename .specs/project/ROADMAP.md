@@ -9,7 +9,7 @@
 - [x] F2 `2026-10-22-gitflow-actions` — rodapé `⎇ Git Flow` com start/finish/update/publish de feature, bugfix, release e hotfix (git-flow-next), conflito com continue/abort, itens no menu de branch
 
 ## M3 — Vários repositórios (2026-10-27)
-- [x] F3 `2026-10-27-multi-repo` — descoberta de repos até 3 níveis, `Select` `repo:` no header, todo git no repo ativo (MR-01..MR-03)
+- [x] F3 `2026-10-27-multi-repo` — descoberta de repos até 3 níveis, dropdown `repo:` no começo do header, busca por hash atrás do ícone ⌕, todo git no repo ativo (MR-01..MR-03)
 
 ## M4 — Ideias futuras
 - Diff de arquivo no painel (preview)
