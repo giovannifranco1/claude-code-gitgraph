@@ -110,8 +110,8 @@ let signature = ''
 let busy = false
 // Set synchronously when an action starts, so a second press before the redraw is ignored.
 let isRunning = false
-// The last left click on a pill, to tell a double click.
-let lastPillClick = { key: '', at: 0 }
+// The last left click on a pill, to tell a double click, and the commit selected before it.
+let lastPillClick: { key: string; at: number; selected: string | null } = { key: '', at: 0, selected: null }
 
 const firstLine = (text: string) => text.split('\n').find(l => l.trim() !== '') ?? 'unknown error'
 
@@ -1442,9 +1442,9 @@ export const register: Register = (on, options) => {
     return next(e)
   }).catch(($, e, next) => next(e))
 
-  // A pill posts `{ button }`: right opens its ref's menu, and a second left click on the
-  // same pill within DOUBLE_CLICK_MS checks the ref out. A left click selects the commit
-  // only once that wait passes with no second click, so a double click opens no details.
+  // A pill posts `{ button }`: right opens its ref's menu, left selects the commit at once,
+  // and a second left click on the same pill within DOUBLE_CLICK_MS checks the ref out,
+  // putting back the selection the first click changed: a double click leaves no details.
   on('ui.message', { requestId: PANE }, async ($, e, next) => {
     const [kind, hash = '', index = ''] = e.element.split(':')
     const button = (e.data as { button?: string } | null)?.button
@@ -1453,14 +1453,15 @@ export const register: Register = (on, options) => {
     const badge = row && badgesOf(row.commit.refs)[Number(index)]
     const now = Date.now()
     const isDouble = button === 'left' && lastPillClick.key === e.element && now - lastPillClick.at <= DOUBLE_CLICK_MS
-    lastPillClick = button === 'left' && !isDouble ? { key: e.element, at: now } : { key: '', at: 0 }
+    const before = lastPillClick.selected
+    const { selected } = await read($, viewState)
+    lastPillClick = button === 'left' && !isDouble ? { key: e.element, at: now, selected } : { key: '', at: 0, selected: null }
     if (badge && button === 'right') await openMenu($, hash, badge)
-    else if (badge && isDouble) await checkoutRef($, badge)
-    else if (button === 'left') {
-      const click = lastPillClick
-      if (badge) $.clock.after(DOUBLE_CLICK_MS, () => void (lastPillClick === click && select($, hash)))
-      else await select($, hash)
-    }
+    else if (badge && isDouble) {
+      // `select` toggles: selecting the clicked commit again closes what the first click opened.
+      if (selected !== before) await select($, before ?? hash)
+      await checkoutRef($, badge)
+    } else if (button === 'left') await select($, hash)
     return next(e)
   }).catch(($, e, next) => next(e))
 

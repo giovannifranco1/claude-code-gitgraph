@@ -62,7 +62,7 @@ Then open the pane with:
   - **Local branch:** checkout, rename, push branch, merge into the current branch, rebase the current branch on it, delete branch (with an optional `force`, off by default), copy name
   - **Remote branch:** checkout as a new tracking branch, fetch, merge, delete on the remote, copy name
   - **Tag:** push, delete, copy name
-  - **Double-click** a pill to check it out, without opening the commit's details (a single click on a pill opens them a moment later)
+  - **Double-click** a pill to check it out, leaving the details as they were (a single click on a pill opens them right away)
 
 - **Push to the remotes you pick:** Push branch opens a choice of remotes, starting with the ones the branch tracks, plus `all`. A push to several remotes runs one push each and reports every failure by its remote
 - **Safe actions:** destructive ones ask for a second press; a spinner shows what git is doing and further presses wait for it; push and fetch never hang on a password prompt
