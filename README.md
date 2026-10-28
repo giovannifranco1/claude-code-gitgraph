@@ -10,7 +10,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Claude_Code-%E2%89%A5_2.1.308-D97757?logo=claude&logoColor=fff" alt="Claude Code 2.1.308 or newer">
-  <img src="https://img.shields.io/badge/version-1.1.2-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.2.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/type-mod-6f42c1" alt="Claude Code mod">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License: MIT">
 </p>
@@ -75,7 +75,7 @@ Then open the pane with:
 
   <img src="media/settings.png" alt="The settings screen: user name and email per scope, and the remotes with their URLs" width="800">
 
-- **Always current:** after every Bash call Claude makes and every 5 seconds while the pane is open, gitgraph compares the repository's refs and status and reloads only when something changed. **Refresh** reloads everything on screen and flashes `✓ updated`
+- **Always current:** after every Bash call Claude makes and every 5 seconds while the pane is open, gitgraph compares the repository's refs and status and reloads only when something changed. The header's icon buttons: **settings** (gear) opens the repository settings; **fetch** (cloud) runs `git fetch --all` and redraws the graph with what the remotes brought; **refresh** reloads everything on screen and flashes `✓`
 - **Light on big histories:** only the rows on screen are drawn, so scrolling stays smooth with hundreds of commits
 
 ## Settings
