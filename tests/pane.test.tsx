@@ -17,6 +17,8 @@ type Fake = {
   calls: string[][]
   envs: Record<string, string>[]
   headRefs?: string
+  // The commit HEAD is on (M by default), as after a reset.
+  head?: string
   remotes?: string[]
   failPush?: string
   clock?: ReturnType<typeof mock.clock>
@@ -91,7 +93,7 @@ function answer(fake: Fake, raw: readonly string[], cwd = '.') {
     case 'log':
       return ok(logOf(fake))
     case 'status':
-      return ok(`# branch.oid ${M}\n# branch.head ${fake.branch ?? 'main'}\n1 .M N... 100644 100644 100644 x y src/a.ts\n${fake.isConflicted ? 'u UU N... 100644 100644 100644 100644 a b c src/b.ts\n' : ''}`)
+      return ok(`# branch.oid ${fake.head ?? M}\n# branch.head ${fake.branch ?? 'main'}\n1 .M N... 100644 100644 100644 x y src/a.ts\n${fake.isConflicted ? 'u UU N... 100644 100644 100644 100644 a b c src/b.ts\n' : ''}`)
     case 'flow': {
       const cli = fake.flow ?? 'next'
       if (cli === 'none') return { ...fail("git: 'flow' is not a git command."), exitCode: 1 }
@@ -261,6 +263,47 @@ test('GG-10 checkout and cherry-pick run only on the second press', async ($, on
   await ui.press({ key: 'pick' })
   await ui.press({ key: 'pick' })
   expect(fake.calls).toContainEqual(['git', 'cherry-pick', B])
+  await ui.unmount()
+})
+
+test('GG-19 a soft reset of the current branch to a commit runs on the second press', async ($, on) => {
+  const fake = newFake()
+  await setup($, on, fake)
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: B })
+  await ui.press({ key: 'reset' })
+  expect(fake.calls.some(c => c[1] === 'reset')).toBe(false)
+  await ui.press({ key: 'reset' })
+  expect(fake.calls).toContainEqual(['git', 'reset', '--soft', B])
+  await ui.unmount()
+})
+
+test('GG-19 on a narrow pane the commit actions go on in more rows, none cut off', async ($, on) => {
+  await setup($, on, newFake())
+  const ui = await $.ui.mount(pane('terminal', 50))
+  await ui.press({ key: B })
+  expect(await ui.find({ type: 'Box', key: 'detail-actions-1' })).toBeDefined()
+  for (const key of ['copy', 'checkout', 'pick', 'reset']) expect(await ui.find({ type: 'Button', key })).toBeDefined()
+  await ui.unmount()
+})
+
+test('GG-19 the commit HEAD is on offers no reset', async ($, on) => {
+  await setup($, on, newFake())
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: M })
+  expect(await ui.find({ key: 'reset' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('GG-19 after a reset, the commit left behind (kept by its pushed ref) resets the branch back', async ($, on) => {
+  // HEAD moved back to A; M is still drawn through origin/main.
+  const fake = newFake({ head: A, headRefs: 'origin/main' })
+  await setup($, on, fake)
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: M })
+  await ui.press({ key: 'reset' })
+  await ui.press({ key: 'reset' })
+  expect(fake.calls).toContainEqual(['git', 'reset', '--soft', M])
   await ui.unmount()
 })
 

@@ -54,7 +54,7 @@ Then open the pane with:
 
   <img src="media/graph.png" alt="The Git Graph pane docked beside the chat: colored lanes, branch and tag pills, authors, short hashes and the Git Flow bar at the bottom" width="800">
 
-- **Click a commit** to open its details: author, date, full message and every changed file with a diffstat bar. From there, copy its hash, check it out, cherry-pick it or create a branch on it
+- **Click a commit** to open its details: author, date, full message and every changed file with a diffstat bar. From there, copy its hash, check it out, cherry-pick it, create a branch on it or **reset the current branch to it (soft)**: the branch moves there and its changes stay staged. As in the VS Code extension, a commit left behind stays in the graph while a ref keeps it (the branch you pushed, `origin/…`), so you can reset back to it
 
   <img src="media/details.png" alt="A commit opened in the pane: hash pill, author, date, full message, changed files with +/- bars and the commit actions" width="800">
 

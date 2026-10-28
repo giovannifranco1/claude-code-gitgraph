@@ -889,9 +889,18 @@ const BUTTON_CHROME = 4
 // The cells a framed Button takes; armed, it reads `Confirm: …?`.
 const buttonWidth = (label: string, isArmed: boolean) => (isArmed ? `Confirm: ${label}?` : label).length + BUTTON_CHROME
 
+// Framed Buttons inside a framed box, on as many rows as its width needs, none cut off.
+function buttonRows({ els: { Box }, cols, graphWidth }: Ctx, key: string, items: BarItem[]) {
+  return wrapRows(items.map(i => i.width), cols - graphWidth - 1 - 4, 1).map((row, n) => (
+    <Box key={`${key}-${n}`} height={1} overflow="hidden" flexDirection="row" columnGap={1}>
+      {row.map(i => items[i]?.node)}
+    </Box>
+  ))
+}
+
 function renderMenu($: EngineInterface, ctx: Ctx, { cells }: GraphRow, badge: Badge) {
   const { els, graph, view } = ctx
-  const { Box, Text, Button } = els
+  const { Text, Button } = els
   const { Input } = ctx
   const lane = laneColor(cells)
   const items = menuFor(badge, graph.remotes, ctx.flow?.config ?? null)
@@ -911,17 +920,9 @@ function renderMenu($: EngineInterface, ctx: Ctx, { cells }: GraphRow, badge: Ba
   ]
   if (view.running) rows.push(renderRunning(ctx))
   else {
-    // The items take as many rows as the menu's width needs, none hidden; an armed item
-    // is measured with its longer `Confirm: …?`.
-    const room = ctx.cols - ctx.graphWidth - 1 - 4
+    // An armed item is measured with its longer `Confirm: …?`.
     const isArmed = (item: MenuItem) => (item.flow ? view.confirm === flowArmKey(item.flow) : view.confirm?.startsWith(`menu:${item.id}:`) === true)
-    const widths = items.map(item => buttonWidth(item.label, isArmed(item)))
-    for (const [n, row] of wrapRows(widths, room, 1).entries())
-      rows.push(
-        <Box key={`menu-items-${n}`} height={1} overflow="hidden" flexDirection="row" columnGap={1}>
-          {row.map(i => items[i] && renderMenuItem($, ctx, badge, items[i]))}
-        </Box>,
-      )
+    rows.push(...buttonRows(ctx, 'menu-items', items.map(item => ({ node: renderMenuItem($, ctx, badge, item), width: buttonWidth(item.label, isArmed(item)) }))))
     if (view.push && push) rows.push(...renderPushChooser($, ctx, badge, push))
     const branch = items.find(i => i.deleteBranch !== undefined)?.deleteBranch
     if (view.isDeleting && branch !== undefined)
@@ -1035,23 +1036,27 @@ function renderDetail($: EngineInterface, ctx: Ctx, { commit, cells }: GraphRow)
   rows.push(blank(ctx))
   if (view.running) rows.push(view.menu ? blank(ctx) : renderRunning(ctx))
   else {
-    rows.push(
-      line(
-        ctx,
-        [
-          copyButton($, ctx, 'copy', 'Copy hash', commit.hash, `Copied hash ${short(commit.hash)}`),
-          !isCheckedOut(commit.refs) &&
-            confirmButton($, ctx, 'checkout', `checkout:${commit.hash}`, `Checkout ${branch ?? '(detached)'}`, () =>
-              runAction($, (branch && checkoutArgs({ kind: 'branch', label: branch, remotes: [] })) || ['checkout', '--detach', commit.hash], `Checked out ${branch ?? short(commit.hash)}`),
-            ),
-          commit.hash !== graph.head &&
-            confirmButton($, ctx, 'pick', `pick:${commit.hash}`, 'Cherry-pick', () =>
-              runAction($, ['cherry-pick', commit.hash], `Cherry-picked ${short(commit.hash)}`),
-            ),
-        ],
-        1,
-      ),
-    )
+    const confirmItem = (key: string, armKey: string, label: string, run: () => Promise<void>): BarItem => ({
+      node: confirmButton($, ctx, key, armKey, label, run),
+      width: buttonWidth(label, view.confirm === armKey),
+    })
+    const head = headName(graph)
+    const actions = [
+      { node: copyButton($, ctx, 'copy', 'Copy hash', commit.hash, `Copied hash ${short(commit.hash)}`), width: buttonWidth('Copy hash', false) },
+      !isCheckedOut(commit.refs) &&
+        confirmItem('checkout', `checkout:${commit.hash}`, `Checkout ${branch ?? '(detached)'}`, () =>
+          runAction($, (branch && checkoutArgs({ kind: 'branch', label: branch, remotes: [] })) || ['checkout', '--detach', commit.hash], `Checked out ${branch ?? short(commit.hash)}`),
+        ),
+      commit.hash !== graph.head &&
+        confirmItem('pick', `pick:${commit.hash}`, 'Cherry-pick', () => runAction($, ['cherry-pick', commit.hash], `Cherry-picked ${short(commit.hash)}`)),
+      // Moves the current branch here and keeps the changes staged; a commit left
+      // behind stays in the graph while a ref (a pushed branch) keeps it, to reset back to.
+      commit.hash !== graph.head &&
+        confirmItem('reset', `reset:${commit.hash}`, `Reset ${head} here (soft)`, () =>
+          runAction($, ['reset', '--soft', commit.hash], `Reset ${head} to ${short(commit.hash)}: changes kept staged`),
+        ),
+    ].filter(a => a !== false)
+    rows.push(...buttonRows(ctx, 'detail-actions', actions))
     if (Input)
       rows.push(line(ctx, <Input key="new-branch" label="New branch here:" placeholder="branch-name" submitLabel="create" onSubmit={value => createBranch($, commit.hash, value)} />))
   }

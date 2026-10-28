@@ -10,6 +10,7 @@
 - 2026-10-27: barra do Git Flow sem o ícone ⎇ (pedido do dev) e com 1 coluna entre itens, para caber numa linha a partir de ~77 colunas; larguras medidas em células desenhadas (`buttonWidth`: `[ label ]` dos Buttons com moldura; `iconCells`: ícone Nerd Font = 2).
 - 2026-10-27: badges de commits vizinhos continuam colados (decisão do dev): uma linha de grafo entre dois commits com badge foi testada e recusada (ritmo irregular nos merges).
 - 2026-10-27: release 1.3.1: barra do Git Flow cabe na largura do painel (sem ícone ⎇, larguras em células desenhadas); duplo clique numa pílula faz checkout sem abrir os detalhes.
+- 2026-10-27: reset soft (GG-19) nos detalhes do commit, só `--soft` (pedido do dev); voltar ao commit anterior funciona quando ele ainda tem ref (branch pushado): commits sem ref somem do grafo, como no Git Graph do VS Code. Ações dos detalhes e do menu quebram em linhas via `buttonRows`.
 - 2026-10-22: release 1.0.0 (tag `1.0.0`), repositório `giovannifranco1/claude-code-gitgraph`.
 - 2026-10-22: painel abre só via `/gitgraph` (não disputa espaço com /filetree e /flow).
 - 2026-10-22: grafo mostra todas as branches (`--all`) por padrão, com toggle para só a atual.

@@ -4,6 +4,7 @@
 - [x] F1 `2026-10-22-git-graph-pane` — painel com grafo, labels, detalhes do commit, auto-refresh e ações (checkout, criar branch, cherry-pick, copiar hash)
 - [x] F1 extensão (GG-11..GG-17) — pílulas arredondadas, menu de ref (botão direito/duplo clique), push por remote, loading, configurações (usuário/remotes), busca por hash, scroll virtualizado, refresh com feedback, UI em inglês
 - [x] GG-18 `fetch --all` no toolbar do header (botão ☁ fetch)
+- [x] GG-19 reset soft do branch atual para um commit (detalhes do commit, confirmado); commit deixado para trás continua no grafo enquanto um ref (o push) o mantém, para voltar
 
 ## M2 — Git Flow (2026-10-22)
 - [x] F2 `2026-10-22-gitflow-actions` — rodapé `⎇ Git Flow` com start/finish/update/publish de feature, bugfix, release e hotfix (git-flow-next), conflito com continue/abort, itens no menu de branch
