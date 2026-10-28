@@ -50,13 +50,12 @@ const ICONS = {
     refresh: '\u{f0450}',
     settings: '\uf013',
     search: '\uf002',
-    flow: '\ue725',
     feature: '\uf0eb',
     bugfix: '\uf188',
     release: '\uf02b',
     hotfix: '\uf06d',
   },
-  plain: { on: '◉', off: '○', fetch: '☁', refresh: '↻', settings: '⚙', search: '⌕', flow: '⎇', feature: '✦', bugfix: '✱', release: '◆', hotfix: '▲' },
+  plain: { on: '◉', off: '○', fetch: '☁', refresh: '↻', settings: '⚙', search: '⌕', feature: '✦', bugfix: '✱', release: '◆', hotfix: '▲' },
 }
 // No git the pane runs opens an editor (merge, rebase or tag messages) or asks for a password.
 const GIT_ENV = { GIT_TERMINAL_PROMPT: '0', GIT_EDITOR: 'true', GIT_MERGE_AUTOEDIT: 'no' }
@@ -592,6 +591,8 @@ const blank = (ctx: Ctx) => line(ctx, <ctx.els.Text> </ctx.els.Text>)
 // Ghostty and non-Mono Nerd Fonts draw a Nerd Font icon two cells wide over a space after
 // it: a second space keeps it centered in the hover.
 const iconLabel = (ctx: Ctx, glyph: string) => (ctx.icons === ICONS.nerd ? ` ${glyph}  ` : ` ${glyph} `)
+// The cells an icon takes: a Nerd Font icon two, as above.
+const iconCells = (ctx: Ctx) => (ctx.icons === ICONS.nerd ? 2 : 1)
 
 // Header rows, each one row tall: toolbar, search (where fields exist), column titles, rule.
 function renderHeader($: EngineInterface, ctx: Ctx) {
@@ -885,6 +886,8 @@ function framed({ els: { Box } }: Ctx, color: string, indent: number, rows: Rend
 
 // A framed Button's chrome around its label, in cells.
 const BUTTON_CHROME = 4
+// The cells a framed Button takes; armed, it reads `Confirm: …?`.
+const buttonWidth = (label: string, isArmed: boolean) => (isArmed ? `Confirm: ${label}?` : label).length + BUTTON_CHROME
 
 function renderMenu($: EngineInterface, ctx: Ctx, { cells }: GraphRow, badge: Badge) {
   const { els, graph, view } = ctx
@@ -911,8 +914,8 @@ function renderMenu($: EngineInterface, ctx: Ctx, { cells }: GraphRow, badge: Ba
     // The items take as many rows as the menu's width needs, none hidden; an armed item
     // is measured with its longer `Confirm: …?`.
     const room = ctx.cols - ctx.graphWidth - 1 - 4
-    const isArmed = (item: MenuItem) => (item.flow ? view.confirm === flowArmKey(item.flow) : view.confirm?.startsWith(`menu:${item.id}:`))
-    const widths = items.map(item => (isArmed(item) ? `Confirm: ${item.label}?` : item.label).length + BUTTON_CHROME)
+    const isArmed = (item: MenuItem) => (item.flow ? view.confirm === flowArmKey(item.flow) : view.confirm?.startsWith(`menu:${item.id}:`) === true)
+    const widths = items.map(item => buttonWidth(item.label, isArmed(item)))
     for (const [n, row] of wrapRows(widths, room, 1).entries())
       rows.push(
         <Box key={`menu-items-${n}`} height={1} overflow="hidden" flexDirection="row" columnGap={1}>
@@ -1258,22 +1261,21 @@ const barText = (ctx: Ctx, text: string, color?: 'warning'): BarItem => ({
 })
 
 // The footer bar's items: start a work branch of each type and, on one, finish, update
-// and publish it; or why git flow cannot be used here.
+// and publish it; or why git flow cannot be used here. Widths are drawn cells: a framed
+// Button's `[ label ]` and a Nerd Font icon's second cell included.
 function flowBar($: EngineInterface, ctx: Ctx): BarItem[] {
   const { els: { Text, Button }, view, graph, flow, icons } = ctx
-  const mark: BarItem = { node: <Text weight="bold">{icons.flow}</Text>, width: 1 }
-  if (flow === null) return [mark, barText(ctx, 'git flow…')]
-  if (flow.cli === 'none') return [mark, barText(ctx, 'git flow is not installed:', 'warning'), barText(ctx, FLOW_INSTALL)]
-  if (flow.cli === 'other') return [mark, barText(ctx, 'Git Flow actions need git-flow-next:', 'warning'), barText(ctx, FLOW_INSTALL)]
+  if (flow === null) return [barText(ctx, 'git flow…')]
+  if (flow.cli === 'none') return [barText(ctx, 'git flow is not installed:', 'warning'), barText(ctx, FLOW_INSTALL)]
+  if (flow.cli === 'other') return [barText(ctx, 'Git Flow actions need git-flow-next:', 'warning'), barText(ctx, FLOW_INSTALL)]
   const config = flow.config
   // Not set up: one button sets it up with the standard names (`git flow init -d`).
   if (!config) {
     const init = 'Start git flow'
     return [
-      mark,
       {
         node: confirmButton($, ctx, 'flow-init', 'flow-init', init, () => runFlow($, [{ args: ['flow', 'init', '-d'] }], 'Git flow started: main, develop ✓', 'Starting git flow…')),
-        width: view.confirm === 'flow-init' ? `Confirm: ${init}?`.length : init.length,
+        width: buttonWidth(init, view.confirm === 'flow-init'),
       },
       barText(ctx, FLOW_DEFAULTS),
     ]
@@ -1286,21 +1288,20 @@ function flowBar($: EngineInterface, ctx: Ctx): BarItem[] {
           <Text color={view.flow.starting === t.kind ? 'success' : undefined}>{label}</Text>
         </Button>
       ),
-      width: label.length,
+      width: iconCells(ctx) + 1 + t.kind.length,
     }
   })
   const actions = flowMenuFor(graph.branch, config).flatMap((i): BarItem[] => {
     if (!i.flow) return []
     const update = typeOf(config, i.flow.topic.kind)?.strategy === 'rebase' ? 'rebase' : 'merge'
     const label = { 'flow-finish': 'finish', 'flow-update': update, 'flow-publish': 'publish' }[i.id] ?? i.label
-    const isArmed = view.confirm === flowArmKey(i.flow)
-    return [{ node: renderFlowItem($, ctx, i.id, label, i.flow), width: isArmed ? `Confirm: ${label}?`.length : label.length }]
+    return [{ node: renderFlowItem($, ctx, i.id, label, i.flow), width: buttonWidth(label, view.confirm === flowArmKey(i.flow)) }]
   })
   const separator: BarItem = { node: <Text dimColor>│</Text>, width: 1, isSeparator: true }
-  return [mark, ...starts, ...(actions.length ? [separator, ...actions] : [])]
+  return [...starts, ...(actions.length ? [separator, ...actions] : [])]
 }
 
-const BAR_GAP = 2
+const BAR_GAP = 1
 
 // The git flow footer: a rule, the bar (on as many rows as the width needs; a separator
 // that would open or close a row is left out), then the forms of an action in progress.
@@ -1436,8 +1437,9 @@ export const register: Register = (on, options) => {
     return next(e)
   }).catch(($, e, next) => next(e))
 
-  // A pill posts `{ button }`: right opens its ref's menu, left selects the commit,
-  // and a second left click on the same pill within DOUBLE_CLICK_MS checks the ref out.
+  // A pill posts `{ button }`: right opens its ref's menu, and a second left click on the
+  // same pill within DOUBLE_CLICK_MS checks the ref out. A left click selects the commit
+  // only once that wait passes with no second click, so a double click opens no details.
   on('ui.message', { requestId: PANE }, async ($, e, next) => {
     const [kind, hash = '', index = ''] = e.element.split(':')
     const button = (e.data as { button?: string } | null)?.button
@@ -1449,7 +1451,11 @@ export const register: Register = (on, options) => {
     lastPillClick = button === 'left' && !isDouble ? { key: e.element, at: now } : { key: '', at: 0 }
     if (badge && button === 'right') await openMenu($, hash, badge)
     else if (badge && isDouble) await checkoutRef($, badge)
-    else if (button === 'left') await select($, hash)
+    else if (button === 'left') {
+      const click = lastPillClick
+      if (badge) $.clock.after(DOUBLE_CLICK_MS, () => void (lastPillClick === click && select($, hash)))
+      else await select($, hash)
+    }
     return next(e)
   }).catch(($, e, next) => next(e))
 

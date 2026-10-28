@@ -321,10 +321,13 @@ test('GG-12 a right click on a pill opens its branch menu; push asks for the rem
   await ui.unmount()
 })
 
-test('GG-12 a left click on a pill selects its commit', async ($, on) => {
-  await setup($, on, newFake())
+test('GG-12 a left click on a pill selects its commit once no second click follows', async ($, on) => {
+  const fake = newFake()
+  await setup($, on, fake)
   const ui = await $.ui.mount(pane('terminal'))
   await ui.pointer({ type: 'down', x: 1, y: 0, button: 'left', in: `pill:${B}:0` })
+  expect(await ui.find({ type: 'Text', text: /bia@x\.io/ })).toBeUndefined()
+  await fake.clock?.advance(1_000)
   expect(await ui.find({ type: 'Text', text: /bia@x\.io/ })).toBeDefined()
   await ui.unmount()
 })
@@ -465,6 +468,9 @@ test('GG-14 a double click on a branch pill checks it out; a single click does n
   expect(callOf(fake, ['checkout', 'feat'])).toBe(-1)
   await ui.pointer({ type: 'down', x: 1, y: 0, button: 'left', in: `pill:${B}:0` })
   expect(callOf(fake, ['checkout', 'feat'])).toBeGreaterThan(-1)
+  await fake.clock?.advance(1_000)
+  expect(gitCalls(fake).some(c => c[1] === 'show')).toBe(false)
+  expect(await ui.find({ type: 'Text', text: /bia@x\.io/ })).toBeUndefined()
   await ui.unmount()
 })
 
@@ -617,6 +623,17 @@ test('GF-01 a form grows the pinned footer by its rows, keeping it on the bottom
   await ui.press({ key: 'flow-start-feature' })
   expect((await ui.find({ type: 'Box', key: 'flow-footer' }))?.props).toMatchObject({ top: 40 - 3, height: 3 })
   await ui.unmount()
+})
+
+test('GF-01 the bar counts the frame of its buttons and wide icons, wrapping before the right edge', async ($, on) => {
+  await setup($, on, newFake({ branch: 'feature/login' }))
+  // 54 columns held the bar on one row when only the labels were counted; it takes 67.
+  const narrow = await $.ui.mount(pane('terminal', 54))
+  expect((await narrow.find({ type: 'Box', key: 'flow-footer' }))?.props).toMatchObject({ height: 3 })
+  await narrow.unmount()
+  const wide = await $.ui.mount(pane('terminal', 68))
+  expect((await wide.find({ type: 'Box', key: 'flow-footer' }))?.props).toMatchObject({ height: 2 })
+  await wide.unmount()
 })
 
 test('GF-01 elsewhere (other surfaces, an inline pane) the footer closes the list, after the last commit', async ($, on) => {
