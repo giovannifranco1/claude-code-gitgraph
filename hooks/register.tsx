@@ -45,7 +45,8 @@ const ICONS = {
   nerd: {
     on: '\uf205',
     off: '\uf204',
-    refresh: '\uf021',
+    fetch: '\uf0ed',
+    refresh: '\u{f0450}',
     settings: '\uf013',
     search: '\uf002',
     flow: '\ue725',
@@ -54,7 +55,7 @@ const ICONS = {
     release: '\uf02b',
     hotfix: '\uf06d',
   },
-  plain: { on: '◉', off: '○', refresh: '↻', settings: '⚙', search: '⌕', flow: '⎇', feature: '✦', bugfix: '✱', release: '◆', hotfix: '▲' },
+  plain: { on: '◉', off: '○', fetch: '☁', refresh: '↻', settings: '⚙', search: '⌕', flow: '⎇', feature: '✦', bugfix: '✱', release: '◆', hotfix: '▲' },
 }
 // No git the pane runs opens an editor (merge, rebase or tag messages) or asks for a password.
 const GIT_ENV = { GIT_TERMINAL_PROMPT: '0', GIT_EDITOR: 'true', GIT_MERGE_AUTOEDIT: 'no' }
@@ -550,6 +551,11 @@ function switchButton({ els: { Button, Text }, icons }: Ctx, key: string, label:
 
 const blank = (ctx: Ctx) => line(ctx, <ctx.els.Text> </ctx.els.Text>)
 
+// An icon Button's label, a space each side so the click target is wider than the glyph.
+// Ghostty and non-Mono Nerd Fonts draw a Nerd Font icon two cells wide over a space after
+// it: a second space keeps it centered in the hover.
+const iconLabel = (ctx: Ctx, glyph: string) => (ctx.icons === ICONS.nerd ? ` ${glyph}  ` : ` ${glyph} `)
+
 // Header rows, each one row tall: toolbar, search (where fields exist), column titles, rule.
 function renderHeader($: EngineInterface, ctx: Ctx) {
   const { els, graph, view, cols, graphWidth, icons } = ctx
@@ -577,20 +583,21 @@ function renderHeader($: EngineInterface, ctx: Ctx) {
           await update($, viewState, (v): View => ({ ...v, ...CLOSED, scope: v.scope === 'all' ? 'head' : 'all', limit: PAGE, selected: null }))
           await load($)
         })}
-        {view.refresh === 'running' && renderSpinner(ctx, 'refresh-spinner')}
-        <Button key="refresh" plain dimColor={view.refresh === 'idle'} onPress={() => refreshAll($)}>
-          {view.refresh === 'done' ? (
-            <Text color="success">✓ updated</Text>
-          ) : (
-            <Text>{view.refresh === 'running' ? 'refreshing…' : `${icons.refresh} refresh`}</Text>
-          )}
-        </Button>
-        <Button key="settings" plain dimColor onPress={async () => {
-          await update($, viewState, v => ({ ...v, ...CLOSED, isSettings: true, selected: null }))
-          await loadSettings($)
-        }}>
-          {`${icons.settings} settings`}
-        </Button>
+        <Box flexDirection="row">
+          <Button key="settings" plain dimColor onPress={async () => {
+            await update($, viewState, v => ({ ...v, ...CLOSED, isSettings: true, selected: null }))
+            await loadSettings($)
+          }}>
+            {iconLabel(ctx, icons.settings)}
+          </Button>
+          <Button key="fetch" plain dimColor onPress={() => runActions($, [['fetch', '--all']], 'Fetched all remotes ✓', 'Fetching all remotes…', true)}>
+            {iconLabel(ctx, icons.fetch)}
+          </Button>
+          {view.refresh === 'running' && renderSpinner(ctx, 'refresh-spinner')}
+          <Button key="refresh" plain dimColor={view.refresh === 'idle'} onPress={() => refreshAll($)}>
+            {view.refresh === 'done' ? <Text color="success"> ✓ </Text> : <Text>{iconLabel(ctx, icons.refresh)}</Text>}
+          </Button>
+        </Box>
       </Box>
     </Box>,
   ]

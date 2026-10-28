@@ -480,7 +480,7 @@ test('GG-05 the all-branches option is a switch with no keyboard shortcut', asyn
   expect(before?.props.hotkey).toBeUndefined()
   await ui.press({ key: 'scope' })
   expect((await ui.find({ type: 'Button', key: 'scope' }))?.text).toContain('')
-  for (const key of ['refresh', 'settings']) expect((await ui.find({ type: 'Button', key }))?.props.hotkey).toBeUndefined()
+  for (const key of ['fetch', 'refresh', 'settings']) expect((await ui.find({ type: 'Button', key }))?.props.hotkey).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: /commits/ })).toBeDefined()
   await ui.unmount()
 })
@@ -528,7 +528,7 @@ test('GG-16 a hash search selects the commit and scrolls to it', async ($, on) =
   await there.unmount()
 })
 
-test('GG-17 refresh reloads the graph and the open commit, then flashes "updated"', async ($, on) => {
+test('GG-17 refresh reloads the graph and the open commit, then flashes a check', async ($, on) => {
   const fake = newFake()
   await setup($, on, fake)
   const ui = await $.ui.mount(pane('terminal'))
@@ -538,9 +538,22 @@ test('GG-17 refresh reloads the graph and the open commit, then flashes "updated
   await ui.press({ key: 'refresh' })
   expect(logCalls(fake).length).toBe(logs + 1)
   expect(gitCalls(fake).filter(c => c[1] === 'show').length).toBe(shows + 1)
-  expect((await ui.find({ type: 'Button', key: 'refresh' }))?.text).toContain('updated')
+  expect((await ui.find({ type: 'Button', key: 'refresh' }))?.text).toContain('✓')
   await fake.clock?.advance(2_000)
-  expect((await ui.find({ type: 'Button', key: 'refresh' }))?.text).toContain('refresh')
+  expect((await ui.find({ type: 'Button', key: 'refresh' }))?.text).not.toContain('✓')
+  await ui.unmount()
+})
+
+test('GG-18 the fetch button fetches every remote and reloads the graph', async ($, on) => {
+  const toasts: string[] = []
+  const fake = newFake()
+  await setup($, on, fake, [], toasts)
+  const ui = await $.ui.mount(pane('terminal'))
+  const logs = logCalls(fake).length
+  await ui.press({ key: 'fetch' })
+  expect(callOf(fake, ['fetch', '--all'])).toBeGreaterThan(-1)
+  expect(toasts.at(-1)).toBe('Fetched all remotes ✓')
+  expect(logCalls(fake).length).toBe(logs + 1)
   await ui.unmount()
 })
 

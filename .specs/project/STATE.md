@@ -30,6 +30,7 @@
 - 2026-10-22: o kit de testes não deixa registrar hooks (`setup`) duas vezes no mesmo teste: um teste por caso.
 - 2026-10-22: o engine roda o git dos mods com os hooks do repo desligados (`core.hooksPath=/dev/null`); o git-flow-next falha com isso (`stat /dev/null/pre-flow-feature-start: not a directory`). Decisão do dev: comandos `git flow` recebem `-c core.hooksPath=<mod>/nohooks`, pasta vazia do mod — nenhum hook roda e o git-flow-next não quebra. Testado com git-flow-next real sob o ambiente do engine. O fake de git dos testes não pega isso.
 - 2026-10-22: `$.state` sobrevive a reload/atualização do mod: ao adicionar campo a um valor guardado (View ganhou `flow`), dar `{ shape }` novo ao atom (e `Shaped<T>` no contrato), senão o render quebra com o valor antigo (painel preto). O kit de testes não simula valor antigo no estado.
+- 2026-10-27: o Ghostty (e fontes Nerd não-Mono) desenha um ícone Nerd Font com 2 células quando a célula seguinte é espaço: num Button só de ícone com padding, o glifo fica deslocado para a direita no hover. Label com Nerd Font é ` ícone  ` (dois espaços depois), via `iconLabel`; o fallback plain fica ` ícone `. O `Button` não tem padding: a área de clique é a largura do label.
 
 ## Deferred ideas
 - /simplify 2026-10-22 (pulado, registrado): trocar os booleanos de formulário da View por uma união discriminada; detectar duplo clique dentro do pill.tsx; `loadSettings` com `--show-scope --get-regexp`; `framed` somando alturas de `{node, height}`; dividir `renderSettings`.
