@@ -17,6 +17,8 @@ type Fake = {
   calls: string[][]
   envs: Record<string, string>[]
   headRefs?: string
+  // The commit HEAD is on (M by default), as after a reset.
+  head?: string
   remotes?: string[]
   failPush?: string
   clock?: ReturnType<typeof mock.clock>
@@ -91,7 +93,7 @@ function answer(fake: Fake, raw: readonly string[], cwd = '.') {
     case 'log':
       return ok(logOf(fake))
     case 'status':
-      return ok(`# branch.oid ${M}\n# branch.head ${fake.branch ?? 'main'}\n1 .M N... 100644 100644 100644 x y src/a.ts\n${fake.isConflicted ? 'u UU N... 100644 100644 100644 100644 a b c src/b.ts\n' : ''}`)
+      return ok(`# branch.oid ${fake.head ?? M}\n# branch.head ${fake.branch ?? 'main'}\n1 .M N... 100644 100644 100644 x y src/a.ts\n${fake.isConflicted ? 'u UU N... 100644 100644 100644 100644 a b c src/b.ts\n' : ''}`)
     case 'flow': {
       const cli = fake.flow ?? 'next'
       if (cli === 'none') return { ...fail("git: 'flow' is not a git command."), exitCode: 1 }
@@ -264,6 +266,47 @@ test('GG-10 checkout and cherry-pick run only on the second press', async ($, on
   await ui.unmount()
 })
 
+test('GG-19 a soft reset of the current branch to a commit runs on the second press', async ($, on) => {
+  const fake = newFake()
+  await setup($, on, fake)
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: B })
+  await ui.press({ key: 'reset' })
+  expect(fake.calls.some(c => c[1] === 'reset')).toBe(false)
+  await ui.press({ key: 'reset' })
+  expect(fake.calls).toContainEqual(['git', 'reset', '--soft', B])
+  await ui.unmount()
+})
+
+test('GG-19 on a narrow pane the commit actions go on in more rows, none cut off', async ($, on) => {
+  await setup($, on, newFake())
+  const ui = await $.ui.mount(pane('terminal', 50))
+  await ui.press({ key: B })
+  expect(await ui.find({ type: 'Box', key: 'detail-actions-1' })).toBeDefined()
+  for (const key of ['copy', 'checkout', 'pick', 'reset']) expect(await ui.find({ type: 'Button', key })).toBeDefined()
+  await ui.unmount()
+})
+
+test('GG-19 the commit HEAD is on offers no reset', async ($, on) => {
+  await setup($, on, newFake())
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: M })
+  expect(await ui.find({ key: 'reset' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('GG-19 after a reset, the commit left behind (kept by its pushed ref) resets the branch back', async ($, on) => {
+  // HEAD moved back to A; M is still drawn through origin/main.
+  const fake = newFake({ head: A, headRefs: 'origin/main' })
+  await setup($, on, fake)
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: M })
+  await ui.press({ key: 'reset' })
+  await ui.press({ key: 'reset' })
+  expect(fake.calls).toContainEqual(['git', 'reset', '--soft', M])
+  await ui.unmount()
+})
+
 test('GG-10 a new branch name is validated and passed as its own argument', async ($, on) => {
   const fake = newFake()
   await setup($, on, fake)
@@ -321,13 +364,10 @@ test('GG-12 a right click on a pill opens its branch menu; push asks for the rem
   await ui.unmount()
 })
 
-test('GG-12 a left click on a pill selects its commit once no second click follows', async ($, on) => {
-  const fake = newFake()
-  await setup($, on, fake)
+test('GG-12 a left click on a pill selects its commit at once', async ($, on) => {
+  await setup($, on, newFake())
   const ui = await $.ui.mount(pane('terminal'))
   await ui.pointer({ type: 'down', x: 1, y: 0, button: 'left', in: `pill:${B}:0` })
-  expect(await ui.find({ type: 'Text', text: /bia@x\.io/ })).toBeUndefined()
-  await fake.clock?.advance(1_000)
   expect(await ui.find({ type: 'Text', text: /bia@x\.io/ })).toBeDefined()
   await ui.unmount()
 })
@@ -468,9 +508,21 @@ test('GG-14 a double click on a branch pill checks it out; a single click does n
   expect(callOf(fake, ['checkout', 'feat'])).toBe(-1)
   await ui.pointer({ type: 'down', x: 1, y: 0, button: 'left', in: `pill:${B}:0` })
   expect(callOf(fake, ['checkout', 'feat'])).toBeGreaterThan(-1)
-  await fake.clock?.advance(1_000)
-  expect(gitCalls(fake).some(c => c[1] === 'show')).toBe(false)
   expect(await ui.find({ type: 'Text', text: /bia@x\.io/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('GG-14 a double click puts back the commit that was open before it', async ($, on) => {
+  const fake = newFake()
+  await setup($, on, fake)
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: M })
+  await ui.pointer({ type: 'down', x: 1, y: 0, button: 'left', in: `pill:${B}:0` })
+  await ui.pointer({ type: 'down', x: 1, y: 0, button: 'left', in: `pill:${B}:0` })
+  expect(callOf(fake, ['checkout', 'feat'])).toBeGreaterThan(-1)
+  // M's details again (M is HEAD: no Cherry-pick), not feat's.
+  expect(await ui.find({ type: 'Button', key: 'copy' })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'pick' })).toBeUndefined()
   await ui.unmount()
 })
 

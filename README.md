@@ -54,7 +54,7 @@ Then open the pane with:
 
   <img src="media/graph.png" alt="The Git Graph pane docked beside the chat: colored lanes, branch and tag pills, authors, short hashes and the Git Flow bar at the bottom" width="800">
 
-- **Click a commit** to open its details: author, date, full message and every changed file with a diffstat bar. From there, copy its hash, check it out, cherry-pick it or create a branch on it
+- **Click a commit** to open its details: author, date, full message and every changed file with a diffstat bar. From there, copy its hash, check it out, cherry-pick it, create a branch on it or **reset the current branch to it (soft)**: the branch moves there and its changes stay staged. As in the VS Code extension, a commit left behind stays in the graph while a ref keeps it (the branch you pushed, `origin/…`), so you can reset back to it
 
   <img src="media/details.png" alt="A commit opened in the pane: hash pill, author, date, full message, changed files with +/- bars and the commit actions" width="800">
 
@@ -62,7 +62,7 @@ Then open the pane with:
   - **Local branch:** checkout, rename, push branch, merge into the current branch, rebase the current branch on it, delete branch (with an optional `force`, off by default), copy name
   - **Remote branch:** checkout as a new tracking branch, fetch, merge, delete on the remote, copy name
   - **Tag:** push, delete, copy name
-  - **Double-click** a pill to check it out, without opening the commit's details (a single click on a pill opens them a moment later)
+  - **Double-click** a pill to check it out, leaving the details as they were (a single click on a pill opens them right away)
 
 - **Push to the remotes you pick:** Push branch opens a choice of remotes, starting with the ones the branch tracks, plus `all`. A push to several remotes runs one push each and reports every failure by its remote
 - **Safe actions:** destructive ones ask for a second press; a spinner shows what git is doing and further presses wait for it; push and fetch never hang on a password prompt
