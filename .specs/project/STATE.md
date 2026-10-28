@@ -6,6 +6,7 @@
 - 2026-10-22: release 1.1.1: README com prints reais e GIF de demonstração (no lugar das imagens SVG geradas).
 - 2026-10-22: hotfix 1.1.2: painel preto durante push — spinner do rodapé com a mesma key do menu (o Pane recusa key de Client repetida). Lição: duas áreas que mostram `running` precisam de keys distintas; achado só com `claude --debug` (sessão sem hot-reload não mostra o erro).
 - 2026-10-27: release 1.2.0: botão `fetch --all` (nuvem) no header; settings, fetch e refresh só com ícone, nessa ordem (refresh por último), com área de clique maior. Teste local de mudanças não publicadas: `claude --plugin-dir .` com a instalação do marketplace desativada.
+- 2026-10-27: release 1.3.0: vários repositórios (MR-01..03): busca de repos até 3 níveis, dropdown `repo:` no começo do header, todo git com `cwd` do repo ativo; busca por hash atrás do ícone ⌕. Lição: o `Select` nativo no terminal saiu cortado, destoando e sem disparar a troca; dropdown próprio de Buttons (linhas de altura 1 no header) funciona e combina.
 - 2026-10-22: release 1.0.0 (tag `1.0.0`), repositório `giovannifranco1/claude-code-gitgraph`.
 - 2026-10-22: painel abre só via `/gitgraph` (não disputa espaço com /filetree e /flow).
 - 2026-10-22: grafo mostra todas as branches (`--all`) por padrão, com toggle para só a atual.
