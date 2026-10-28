@@ -10,6 +10,9 @@
 - 2026-10-27: barra do Git Flow sem o ícone ⎇ (pedido do dev) e com 1 coluna entre itens, para caber numa linha a partir de ~77 colunas; larguras medidas em células desenhadas (`buttonWidth`: `[ label ]` dos Buttons com moldura; `iconCells`: ícone Nerd Font = 2).
 - 2026-10-27: badges de commits vizinhos continuam colados (decisão do dev): uma linha de grafo entre dois commits com badge foi testada e recusada (ritmo irregular nos merges).
 - 2026-10-27: release 1.3.1: barra do Git Flow cabe na largura do painel (sem ícone ⎇, larguras em células desenhadas); duplo clique numa pílula faz checkout sem abrir os detalhes.
+- 2026-10-27: reset soft (GG-19) nos detalhes do commit, só `--soft` (pedido do dev); voltar ao commit anterior funciona quando ele ainda tem ref (branch pushado): commits sem ref somem do grafo, como no Git Graph do VS Code. Ações dos detalhes e do menu quebram em linhas via `buttonRows`.
+- 2026-10-28: clique simples na pílula volta a abrir os detalhes na hora (a espera de 450 ms para descartar duplo clique ficou lenta para o dev); o duplo clique faz checkout e devolve a seleção de antes do primeiro clique.
+- 2026-10-28: release 1.4.0: reset soft do branch atual para um commit (GG-19) nos detalhes, ações dos detalhes quebrando em linhas; clique simples na pílula abre os detalhes na hora.
 - 2026-10-22: release 1.0.0 (tag `1.0.0`), repositório `giovannifranco1/claude-code-gitgraph`.
 - 2026-10-22: painel abre só via `/gitgraph` (não disputa espaço com /filetree e /flow).
 - 2026-10-22: grafo mostra todas as branches (`--all`) por padrão, com toggle para só a atual.
@@ -40,7 +43,7 @@
 - 2026-10-27: o Ghostty (e fontes Nerd não-Mono) desenha um ícone Nerd Font com 2 células quando a célula seguinte é espaço: num Button só de ícone com padding, o glifo fica deslocado para a direita no hover. Label com Nerd Font é ` ícone  ` (dois espaços depois), via `iconLabel`; o fallback plain fica ` ícone `. O `Button` não tem padding: a área de clique é a largura do label.
 
 ## Deferred ideas
-- /simplify 2026-10-27 (pulado): `cellWidth` genérico por code point no lugar de `.length` nos itens da barra; cancelar o timer do clique simples no duplo clique (hoje ele roda e não faz nada).
+- /simplify 2026-10-27 (pulado): `cellWidth` genérico por code point no lugar de `.length` nos itens da barra.
 - /simplify 2026-10-22 (pulado, registrado): trocar os booleanos de formulário da View por uma união discriminada; detectar duplo clique dentro do pill.tsx; `loadSettings` com `--show-scope --get-regexp`; `framed` somando alturas de `{node, height}`; dividir `renderSettings`.
 - /simplify 2026-10-22 (git flow, pulado): Continue/Abort também para merge/rebase do menu (detectar pelo status); memoizar o rodapé entre passos de scroll; `run` genérico no `MenuItem`.
 - Ver ROADMAP M2.

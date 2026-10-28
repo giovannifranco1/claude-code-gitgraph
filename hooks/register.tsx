@@ -110,8 +110,8 @@ let signature = ''
 let busy = false
 // Set synchronously when an action starts, so a second press before the redraw is ignored.
 let isRunning = false
-// The last left click on a pill, to tell a double click.
-let lastPillClick = { key: '', at: 0 }
+// The last left click on a pill, to tell a double click, and the commit selected before it.
+let lastPillClick: { key: string; at: number; selected: string | null } = { key: '', at: 0, selected: null }
 
 const firstLine = (text: string) => text.split('\n').find(l => l.trim() !== '') ?? 'unknown error'
 
@@ -889,9 +889,18 @@ const BUTTON_CHROME = 4
 // The cells a framed Button takes; armed, it reads `Confirm: …?`.
 const buttonWidth = (label: string, isArmed: boolean) => (isArmed ? `Confirm: ${label}?` : label).length + BUTTON_CHROME
 
+// Framed Buttons inside a framed box, on as many rows as its width needs, none cut off.
+function buttonRows({ els: { Box }, cols, graphWidth }: Ctx, key: string, items: BarItem[]) {
+  return wrapRows(items.map(i => i.width), cols - graphWidth - 1 - 4, 1).map((row, n) => (
+    <Box key={`${key}-${n}`} height={1} overflow="hidden" flexDirection="row" columnGap={1}>
+      {row.map(i => items[i]?.node)}
+    </Box>
+  ))
+}
+
 function renderMenu($: EngineInterface, ctx: Ctx, { cells }: GraphRow, badge: Badge) {
   const { els, graph, view } = ctx
-  const { Box, Text, Button } = els
+  const { Text, Button } = els
   const { Input } = ctx
   const lane = laneColor(cells)
   const items = menuFor(badge, graph.remotes, ctx.flow?.config ?? null)
@@ -911,17 +920,9 @@ function renderMenu($: EngineInterface, ctx: Ctx, { cells }: GraphRow, badge: Ba
   ]
   if (view.running) rows.push(renderRunning(ctx))
   else {
-    // The items take as many rows as the menu's width needs, none hidden; an armed item
-    // is measured with its longer `Confirm: …?`.
-    const room = ctx.cols - ctx.graphWidth - 1 - 4
+    // An armed item is measured with its longer `Confirm: …?`.
     const isArmed = (item: MenuItem) => (item.flow ? view.confirm === flowArmKey(item.flow) : view.confirm?.startsWith(`menu:${item.id}:`) === true)
-    const widths = items.map(item => buttonWidth(item.label, isArmed(item)))
-    for (const [n, row] of wrapRows(widths, room, 1).entries())
-      rows.push(
-        <Box key={`menu-items-${n}`} height={1} overflow="hidden" flexDirection="row" columnGap={1}>
-          {row.map(i => items[i] && renderMenuItem($, ctx, badge, items[i]))}
-        </Box>,
-      )
+    rows.push(...buttonRows(ctx, 'menu-items', items.map(item => ({ node: renderMenuItem($, ctx, badge, item), width: buttonWidth(item.label, isArmed(item)) }))))
     if (view.push && push) rows.push(...renderPushChooser($, ctx, badge, push))
     const branch = items.find(i => i.deleteBranch !== undefined)?.deleteBranch
     if (view.isDeleting && branch !== undefined)
@@ -1035,23 +1036,27 @@ function renderDetail($: EngineInterface, ctx: Ctx, { commit, cells }: GraphRow)
   rows.push(blank(ctx))
   if (view.running) rows.push(view.menu ? blank(ctx) : renderRunning(ctx))
   else {
-    rows.push(
-      line(
-        ctx,
-        [
-          copyButton($, ctx, 'copy', 'Copy hash', commit.hash, `Copied hash ${short(commit.hash)}`),
-          !isCheckedOut(commit.refs) &&
-            confirmButton($, ctx, 'checkout', `checkout:${commit.hash}`, `Checkout ${branch ?? '(detached)'}`, () =>
-              runAction($, (branch && checkoutArgs({ kind: 'branch', label: branch, remotes: [] })) || ['checkout', '--detach', commit.hash], `Checked out ${branch ?? short(commit.hash)}`),
-            ),
-          commit.hash !== graph.head &&
-            confirmButton($, ctx, 'pick', `pick:${commit.hash}`, 'Cherry-pick', () =>
-              runAction($, ['cherry-pick', commit.hash], `Cherry-picked ${short(commit.hash)}`),
-            ),
-        ],
-        1,
-      ),
-    )
+    const confirmItem = (key: string, armKey: string, label: string, run: () => Promise<void>): BarItem => ({
+      node: confirmButton($, ctx, key, armKey, label, run),
+      width: buttonWidth(label, view.confirm === armKey),
+    })
+    const head = headName(graph)
+    const actions = [
+      { node: copyButton($, ctx, 'copy', 'Copy hash', commit.hash, `Copied hash ${short(commit.hash)}`), width: buttonWidth('Copy hash', false) },
+      !isCheckedOut(commit.refs) &&
+        confirmItem('checkout', `checkout:${commit.hash}`, `Checkout ${branch ?? '(detached)'}`, () =>
+          runAction($, (branch && checkoutArgs({ kind: 'branch', label: branch, remotes: [] })) || ['checkout', '--detach', commit.hash], `Checked out ${branch ?? short(commit.hash)}`),
+        ),
+      commit.hash !== graph.head &&
+        confirmItem('pick', `pick:${commit.hash}`, 'Cherry-pick', () => runAction($, ['cherry-pick', commit.hash], `Cherry-picked ${short(commit.hash)}`)),
+      // Moves the current branch here and keeps the changes staged; a commit left
+      // behind stays in the graph while a ref (a pushed branch) keeps it, to reset back to.
+      commit.hash !== graph.head &&
+        confirmItem('reset', `reset:${commit.hash}`, `Reset ${head} here (soft)`, () =>
+          runAction($, ['reset', '--soft', commit.hash], `Reset ${head} to ${short(commit.hash)}: changes kept staged`),
+        ),
+    ].filter(a => a !== false)
+    rows.push(...buttonRows(ctx, 'detail-actions', actions))
     if (Input)
       rows.push(line(ctx, <Input key="new-branch" label="New branch here:" placeholder="branch-name" submitLabel="create" onSubmit={value => createBranch($, commit.hash, value)} />))
   }
@@ -1437,9 +1442,9 @@ export const register: Register = (on, options) => {
     return next(e)
   }).catch(($, e, next) => next(e))
 
-  // A pill posts `{ button }`: right opens its ref's menu, and a second left click on the
-  // same pill within DOUBLE_CLICK_MS checks the ref out. A left click selects the commit
-  // only once that wait passes with no second click, so a double click opens no details.
+  // A pill posts `{ button }`: right opens its ref's menu, left selects the commit at once,
+  // and a second left click on the same pill within DOUBLE_CLICK_MS checks the ref out,
+  // putting back the selection the first click changed: a double click leaves no details.
   on('ui.message', { requestId: PANE }, async ($, e, next) => {
     const [kind, hash = '', index = ''] = e.element.split(':')
     const button = (e.data as { button?: string } | null)?.button
@@ -1448,14 +1453,15 @@ export const register: Register = (on, options) => {
     const badge = row && badgesOf(row.commit.refs)[Number(index)]
     const now = Date.now()
     const isDouble = button === 'left' && lastPillClick.key === e.element && now - lastPillClick.at <= DOUBLE_CLICK_MS
-    lastPillClick = button === 'left' && !isDouble ? { key: e.element, at: now } : { key: '', at: 0 }
+    const before = lastPillClick.selected
+    const { selected } = await read($, viewState)
+    lastPillClick = button === 'left' && !isDouble ? { key: e.element, at: now, selected } : { key: '', at: 0, selected: null }
     if (badge && button === 'right') await openMenu($, hash, badge)
-    else if (badge && isDouble) await checkoutRef($, badge)
-    else if (button === 'left') {
-      const click = lastPillClick
-      if (badge) $.clock.after(DOUBLE_CLICK_MS, () => void (lastPillClick === click && select($, hash)))
-      else await select($, hash)
-    }
+    else if (badge && isDouble) {
+      // `select` toggles: selecting the clicked commit again closes what the first click opened.
+      if (selected !== before) await select($, before ?? hash)
+      await checkoutRef($, badge)
+    } else if (button === 'left') await select($, hash)
     return next(e)
   }).catch(($, e, next) => next(e))
 
