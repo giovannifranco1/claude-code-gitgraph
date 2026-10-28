@@ -75,7 +75,7 @@ Then open the pane with:
 
   <img src="media/settings.png" alt="The settings screen: user name and email per scope, and the remotes with their URLs" width="800">
 
-- **Always current:** after every Bash call Claude makes and every 5 seconds while the pane is open, gitgraph compares the repository's refs and status and reloads only when something changed. **Refresh** reloads everything on screen and flashes `✓ updated`
+- **Always current:** after every Bash call Claude makes and every 5 seconds while the pane is open, gitgraph compares the repository's refs and status and reloads only when something changed. The header's icon buttons: **settings** (gear) opens the repository settings; **fetch** (cloud) runs `git fetch --all` and redraws the graph with what the remotes brought; **refresh** reloads everything on screen and flashes `✓`
 - **Light on big histories:** only the rows on screen are drawn, so scrolling stays smooth with hundreds of commits
 
 ## Settings
