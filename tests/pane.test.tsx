@@ -31,6 +31,9 @@ type Fake = {
   hold?: Promise<void>
   // `-c` settings a call carried, as `<verb>: <key=value>`.
   configs: string[]
+  // Each call's working directory, in the order of `calls`; what the repo search prints.
+  cwds: string[]
+  repos?: string
 }
 
 const FLOW_CONFIG = [
@@ -71,16 +74,19 @@ function logOf(fake: Fake): string {
   return out + row(parent, '', '', 'Ana', '1600000000', 'Initial')
 }
 
-function answer(fake: Fake, raw: readonly string[]) {
+function answer(fake: Fake, raw: readonly string[], cwd = '.') {
   // `git -c key=value …`: the config is kept apart, the call recorded without it.
   const hasConfig = raw[0] === 'git' && raw[1] === '-c'
   const argv = hasConfig ? ['git', ...raw.slice(3)] : raw
   if (hasConfig) fake.configs.push(`${argv[1]}: ${raw[2]}`)
   fake.calls.push([...argv])
+  fake.cwds.push(cwd)
   const ok = (stdout = '') => ({ exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false })
   const fail = (stderr: string) => ({ ...ok(), exitCode: 128, stderr })
   const [, verb, ...rest] = argv
-  if (!fake.isRepo) return fail('fatal: not a git repository')
+  if (argv[0] === 'find') return ok(fake.repos ?? '')
+  // `isRepo: false` is the session folder only: the repos found below it are repos.
+  if (!fake.isRepo && cwd === '.') return fail('fatal: not a git repository')
   switch (verb) {
     case 'log':
       return ok(logOf(fake))
@@ -136,7 +142,7 @@ async function setup($: Engine, on: On, fake: Fake, copied: string[] = [], toast
   on('process.run', async (_, e) => {
     fake.envs.push({ ...(e.init?.env ?? {}) })
     if (fake.hold && e.argv.includes('push')) await fake.hold
-    return { value: answer(fake, e.argv) }
+    return { value: answer(fake, e.argv, e.init?.cwd) }
   })
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('tool.call', () => ({ result: {} }))
@@ -161,7 +167,7 @@ const pane = <S extends 'terminal' | 'desktop' | 'vscode'>(surface: S, bodyColum
     },
   }) as const
 
-const newFake = (over: Partial<Fake> = {}): Fake => ({ isRepo: true, extra: 0, rev: 0, calls: [], envs: [], configs: [], ...over })
+const newFake = (over: Partial<Fake> = {}): Fake => ({ isRepo: true, extra: 0, rev: 0, calls: [], envs: [], configs: [], cwds: [], ...over })
 const gitCalls = (fake: Fake) => fake.calls.filter(c => c[0] === 'git')
 const logCalls = (fake: Fake) => gitCalls(fake).filter(c => c[1] === 'log')
 
@@ -480,7 +486,7 @@ test('GG-05 the all-branches option is a switch with no keyboard shortcut', asyn
   expect(before?.props.hotkey).toBeUndefined()
   await ui.press({ key: 'scope' })
   expect((await ui.find({ type: 'Button', key: 'scope' }))?.text).toContain('')
-  for (const key of ['fetch', 'refresh', 'settings']) expect((await ui.find({ type: 'Button', key }))?.props.hotkey).toBeUndefined()
+  for (const key of ['search-toggle', 'fetch', 'refresh', 'settings']) expect((await ui.find({ type: 'Button', key }))?.props.hotkey).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: /commits/ })).toBeDefined()
   await ui.unmount()
 })
@@ -509,16 +515,21 @@ test('GG-15 the table shows no date column; the date is in the details', async (
   await ui.unmount()
 })
 
-test('GG-16 a hash search selects the commit and scrolls to it', async ($, on) => {
+test('GG-16 the search icon opens a hash search that selects the commit and scrolls to it', async ($, on) => {
   const toasts: string[] = []
   const fk = newFake({ extra: 300 })
   await setup($, on, fk, [], toasts)
   const ui = await $.ui.mount(pane('terminal'))
+  expect(await ui.find({ type: 'Input', key: 'search' })).toBeUndefined()
+  await ui.press({ key: 'search-toggle' })
   await ui.input({ key: 'search', text: 'E000020' })
   expect(fk.calls.at(-1)?.slice(-2)).toEqual(['--format=%H%x1f%an%x1f%ae%x1f%at%x1f%B%x1e', 'e0000200'])
+  // A commit found closes the search.
+  expect(await ui.find({ type: 'Input', key: 'search' })).toBeUndefined()
   await ui.unmount()
   const there = await $.ui.mount(pane('terminal', 100, 200))
   expect(await there.find({ type: 'Text', text: /bia@x\.io/ })).toBeDefined()
+  await there.press({ key: 'search-toggle' })
   await there.input({ key: 'search', text: 'xyz' })
   expect(toasts.at(-1)).toMatch(/Invalid hash/)
   await there.input({ key: 'search', text: 'dead' })
@@ -882,5 +893,52 @@ test('GG-12 while a push runs from the branch menu the pane draws, each spinner 
   expect(new Set(keys).size).toBe(keys.length)
   release()
   await pushing
+  await ui.unmount()
+})
+
+const lastCwd = (fake: Fake, verb: string) => fake.cwds[fake.calls.findLastIndex(c => c[0] === 'git' && c[1] === verb)]
+
+test('MR-02 with several repos a dropdown beside the hash search picks the one the graph shows', async ($, on) => {
+  const fake = newFake({ repos: './.git\n./api/.git\n' })
+  await setup($, on, fake)
+  const ui = await $.ui.mount(pane('terminal'))
+  expect((await ui.find({ type: 'Button', key: 'repo' }))?.text).toContain('(this folder)')
+  expect(await ui.find({ type: 'Button', key: 'repo-option:api' })).toBeUndefined()
+  expect(lastCwd(fake, 'log')).toBe('.')
+  await ui.press({ key: B })
+  await ui.press({ key: 'repo' })
+  expect(await ui.find({ type: 'Button', key: 'repo-option:.' })).toBeDefined()
+  await ui.press({ key: 'repo-option:api' })
+  expect(lastCwd(fake, 'log')).toBe('api')
+  expect(lastCwd(fake, 'status')).toBe('api')
+  expect(await ui.find({ type: 'Text', text: /bia@x\.io/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Button', key: 'repo-option:api' })).toBeUndefined()
+  expect((await ui.find({ type: 'Button', key: 'repo' }))?.text).toContain('api')
+  await ui.unmount()
+})
+
+test('MR-02 with one repo the header has no repo dropdown', async ($, on) => {
+  await setup($, on, newFake({ repos: './.git\n' }))
+  const ui = await $.ui.mount(pane('terminal'))
+  expect(await ui.find({ type: 'Button', key: 'repo' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('MR-02 a session folder that is no repo shows the first repo found', async ($, on) => {
+  const fake = newFake({ isRepo: false, repos: './web/.git\n./api/.git\n' })
+  const opened = await setup($, on, fake)
+  expect((opened as { text?: string }).text).toBe('Git Graph opened.')
+  expect(lastCwd(fake, 'log')).toBe('api')
+})
+
+test('MR-03 a repo gone from the search falls back to the session folder', async ($, on) => {
+  const fake = newFake({ repos: './.git\n./api/.git\n' })
+  await setup($, on, fake)
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: 'repo' })
+  await ui.press({ key: 'repo-option:api' })
+  fake.repos = './.git\n'
+  await ui.press({ key: 'refresh' })
+  expect(lastCwd(fake, 'log')).toBe('.')
   await ui.unmount()
 })
