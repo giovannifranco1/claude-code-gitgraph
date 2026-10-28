@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { ClientElements, Elements, EngineInterface, ProcessRunResult, Register, RenderChildren } from 'claude-code'
 
-import type { Badge, BadgeKind, BadgeStyle, Cell, CommitDetail, ConfigScope, FileStat, FlowConfig, FlowConflict, FlowInfo, FlowKind, FlowOptions, FlowTopic, FlowView, Graph, GraphRow, Ref, RepoSettings, View } from '../types'
+import type { Badge, BadgeKind, BadgeStyle, Cell, CommitDetail, ConfigScope, FileStat, FlowConfig, FlowConflict, FlowInfo, FlowKind, FlowOptions, FlowTopic, FlowView, Graph, GraphRow, Ref, RepoSettings, Repos, View } from '../types'
 import { badgeParts, badgesOf, diffBar, fitBadges } from './badges'
 import { isBranchNameCandidate } from './detect'
 import { absTime, fitGraph, relTime, short, truncate, truncateMiddle } from './format'
@@ -11,6 +11,7 @@ import { DETAIL_FORMAT, LOG_FORMAT, parseDetail, parseLog, parseStatus, remotesO
 import { defaultTagMessage, finishArgs, finishPushArgs, flowArgs, flowCliOf, flowMenuFor, nextVersion, parseFlowConfig, resumeArgs, topicFor, typeOf } from './flow'
 import { checkoutArgs, defaultPushRemotes, deleteBranchArgs, type MenuItem, menuFor, pushRuns, renameArgs } from './menu'
 import { drawPill, type PillProps } from './pilldraw'
+import { FIND_ARGS, parseRepos, pickActive } from './repos'
 import { addRemotePlan, isRemoteUrl, parseRemotes, userConfigArgs } from './settings'
 import type { SpinnerProps } from './spinner'
 
@@ -69,7 +70,7 @@ const NERD_FONT_CHECK = 'ls ~/Library/Fonts /Library/Fonts ~/.local/share/fonts 
 
 const DEFAULT_FLOW: FlowView = { starting: null, finishing: null, opts: { isNoFf: true, isPush: true, isKeep: true }, tagMessage: null, conflict: null }
 const EMPTY_GRAPH: Graph = { status: 'idle', rows: [], head: '', branch: '', dirty: 0, conflicts: 0, remotes: [], hasMore: false }
-const DEFAULT_VIEW: View = { scope: 'all', limit: PAGE, selected: null, confirm: null, menu: null, isRenaming: false, isDeleting: false, isForce: false, push: null, running: null, isSettings: false, configScope: 'local', editingRemote: null, isAddingRemote: false, remoteDraft: '', scrollTo: null, refresh: 'idle', isOpen: false, flow: DEFAULT_FLOW }
+const DEFAULT_VIEW: View = { scope: 'all', limit: PAGE, selected: null, confirm: null, menu: null, isRenaming: false, isDeleting: false, isForce: false, push: null, running: null, isSettings: false, configScope: 'local', editingRemote: null, isAddingRemote: false, remoteDraft: '', scrollTo: null, isSearching: false, refresh: 'idle', isOpen: false, flow: DEFAULT_FLOW }
 
 const graphState = atom({ plugin: 'gitgraph', key: 'graph' } as const, EMPTY_GRAPH)
 // Bumped with every graph write: renders read this small number and keep the graph
@@ -77,13 +78,15 @@ const graphState = atom({ plugin: 'gitgraph', key: 'graph' } as const, EMPTY_GRA
 const versionState = atom({ plugin: 'gitgraph', key: 'graphVersion' } as const, 0)
 // Tagged with the shape of View: a view an older version kept (without fields added
 // since) reads as absent after an update, instead of breaking the render.
-const viewState = atom({ plugin: 'gitgraph', key: 'view' } as const, DEFAULT_VIEW, { shape: 'view-6' })
+const viewState = atom({ plugin: 'gitgraph', key: 'view' } as const, DEFAULT_VIEW, { shape: 'view-7' })
 const detailState = atom({ plugin: 'gitgraph', key: 'detail' } as const, null as CommitDetail | null)
 const roundState = atom({ plugin: 'gitgraph', key: 'isRound' } as const, false)
 const nerdState = atom({ plugin: 'gitgraph', key: 'hasNerdFont' } as const, false)
 const settingsState = atom({ plugin: 'gitgraph', key: 'settings' } as const, null as RepoSettings | null)
 // Loaded when the pane opens and after git flow actions, not with every graph load.
 const flowState = atom({ plugin: 'gitgraph', key: 'flow' } as const, null as FlowInfo | null)
+// Searched when the pane opens and on refresh; every git the pane runs runs in `active`.
+const reposState = atom({ plugin: 'gitgraph', key: 'repos' } as const, { list: [], active: '.', isPicking: false } as Repos)
 
 // Everything transient a git action, a selection or a new menu closes.
 const CLOSED = {
@@ -113,10 +116,42 @@ let lastPillClick = { key: '', at: 0 }
 
 const firstLine = (text: string) => text.split('\n').find(l => l.trim() !== '') ?? 'unknown error'
 
-// Network commands may wait on a remote: a longer timeout.
-function git($: EngineInterface, args: string[], isNetwork = false) {
-  return $.process.run(['git', ...args], { timeoutMs: isNetwork ? NETWORK_TIMEOUT_MS : GIT_TIMEOUT_MS, env: GIT_ENV })
+// Runs in the repo the pane shows. Network commands may wait on a remote: a longer timeout.
+async function git($: EngineInterface, args: string[], isNetwork = false) {
+  const { active } = await read($, reposState)
+  return $.process.run(['git', ...args], { cwd: active, timeoutMs: isNetwork ? NETWORK_TIMEOUT_MS : GIT_TIMEOUT_MS, env: GIT_ENV })
 }
+
+// Lists the repos in the session folder and keeps the active one while it is still there;
+// a failed search leaves the session folder alone. True when the active repo changed.
+async function findRepos($: EngineInterface): Promise<boolean> {
+  const list = await $.process.run(FIND_ARGS, { timeoutMs: GIT_TIMEOUT_MS }).then(out => parseRepos(out.stdout), (): string[] => [])
+  const before = (await read($, reposState)).active
+  const { active } = await update($, reposState, r => ({ ...r, list, active: pickActive(list, before) }))
+  return active !== before
+}
+
+// Shows another repo: what was open belonged to the last one.
+async function showRepo($: EngineInterface): Promise<void> {
+  const [view] = await Promise.all([
+    update($, viewState, (v): View => ({ ...v, ...CLOSED, flow: { ...v.flow, ...FLOW_CLOSED, conflict: null }, selected: null, limit: PAGE, scrollTo: null })),
+    update($, detailState, () => null),
+  ])
+  await Promise.all([load($), loadFlow($), view.isSettings ? loadSettings($) : undefined])
+  try {
+    await $.ui.scroll({ to: 'start', in: PANE })
+  } catch {
+    // no surface to scroll
+  }
+}
+
+async function selectRepo($: EngineInterface, path: string): Promise<void> {
+  const before = (await read($, reposState)).active
+  await update($, reposState, r => ({ ...r, active: path, isPicking: false }))
+  if (path !== before) await showRepo($)
+}
+
+const repoLabel = (path: string) => (path === '.' ? '(this folder)' : path)
 
 // What changes when commits, refs, HEAD or the working tree change.
 const signatureOf = (status: string, refs: string) => `${status}\0${refs}`
@@ -218,6 +253,7 @@ async function refreshAll($: EngineInterface): Promise<void> {
   if ((await read($, viewState)).refresh === 'running') return
   await update($, viewState, (v): View => ({ ...v, refresh: 'running' }))
   try {
+    if (await findRepos($)) return await showRepo($)
     const view = await read($, viewState)
     await Promise.all([load($), view.selected ? loadDetail($, view.selected) : undefined, view.isSettings ? loadSettings($) : undefined, (await read($, flowState)) ? loadFlow($) : undefined])
   } finally {
@@ -247,7 +283,7 @@ async function searchCommit($: EngineInterface, value: string): Promise<void> {
     $.ui.toast(exists ? `Commit ${query} is not among the ${graph.rows.length} loaded: use "Load more"` : `No commit with hash ${query}`)
     return
   }
-  await update($, viewState, v => ({ ...v, scrollTo: hash, menu: null }))
+  await update($, viewState, v => ({ ...v, scrollTo: hash, menu: null, isSearching: false }))
   if ((await read($, viewState)).selected !== hash) await select($, hash)
   // Scrolling is a convenience: where a surface cannot, the commit is still selected.
   try {
@@ -476,6 +512,7 @@ type Ctx = {
   now: number
   isRound: boolean
   icons: (typeof ICONS)['plain']
+  repos: Repos
   // Fields where the surface has them (not mobile).
   Input: Elements['terminal']['Input'] | undefined
   // Only the terminal and the desktop draw a `Client` (vscode's table holds a stub); elsewhere pills are Text.
@@ -560,14 +597,22 @@ const iconLabel = (ctx: Ctx, glyph: string) => (ctx.icons === ICONS.nerd ? ` ${g
 function renderHeader($: EngineInterface, ctx: Ctx) {
   const { els, graph, view, cols, graphWidth, icons } = ctx
   const { Box, Text, Button } = els
-  const { Input } = ctx
+  const { Input, repos } = ctx
   const isAll = view.scope === 'all'
   const headRow = graph.rows.find(r => r.commit.hash === graph.head)
   const count = graph.rows.length - (graph.dirty ? 1 : 0)
   const head = headName(graph)
   const lines = [
     <Box height={1} overflow="hidden" flexDirection="row" justifyContent="space-between" columnGap={2}>
-      <Box flexShrink={1} overflow="hidden">
+      {/* With several repos, the repo comes first: its options open as rows below the header's first row. */}
+      {repos.list.length > 1 && (
+        <Box flexShrink={0}>
+          <Button key="repo" plain dimColor={!repos.isPicking} onPress={() => update($, reposState, r => ({ ...r, isPicking: !r.isPicking }))}>
+            {`repo: ${repoLabel(repos.active)} ${repos.isPicking ? '▴' : '▾'}`}
+          </Button>
+        </Box>
+      )}
+      <Box flexShrink={1} flexGrow={1} overflow="hidden">
         <Text wrap="truncate-end">
           {renderPill(ctx, plainPill(ctx, `⎇ ${head}`, headRow ? laneColor(headRow.cells) : PALETTE[0] ?? '#4fc1ff', true))}
           <Text dimColor>
@@ -584,6 +629,11 @@ function renderHeader($: EngineInterface, ctx: Ctx) {
           await load($)
         })}
         <Box flexDirection="row">
+          {Input && (
+            <Button key="search-toggle" plain dimColor={!view.isSearching} onPress={() => update($, viewState, v => ({ ...v, isSearching: !v.isSearching }))}>
+              {iconLabel(ctx, icons.search)}
+            </Button>
+          )}
           <Button key="settings" plain dimColor onPress={async () => {
             await update($, viewState, v => ({ ...v, ...CLOSED, isSettings: true, selected: null }))
             await loadSettings($)
@@ -601,11 +651,21 @@ function renderHeader($: EngineInterface, ctx: Ctx) {
       </Box>
     </Box>,
   ]
-  if (Input)
+  if (repos.isPicking)
+    for (const path of repos.list)
+      lines.push(
+        line(
+          ctx,
+          <Button key={`repo-option:${path}`} plain dimColor={path !== repos.active} onPress={() => selectRepo($, path)}>
+            {`  ${path === repos.active ? '●' : '○'} ${repoLabel(path)}`}
+          </Button>,
+        ),
+      )
+  if (Input && view.isSearching)
     lines.push(
       line(
         ctx,
-        <Input key="search" label={`${icons.search} `} placeholder="find commit by hash" submitLabel="find" onSubmit={value => searchCommit($, value)} />,
+        <Input key="search" label={`${icons.search} `} placeholder="find commit by hash" submitLabel="find" autoFocus onSubmit={value => searchCommit($, value)} />,
       ),
     )
   if (cols >= 70)
@@ -1256,13 +1316,14 @@ function renderFlow($: EngineInterface, ctx: Ctx) {
 
 async function renderPane($: EngineInterface, els: Ctx['els'], surface: string, isDocked: boolean, cols: number, scroll: { offset: number; bodyRows: number }) {
   const { Box, Text, Button } = els
-  const [cache, view, detail, isRound, hasNerd, flow] = await Promise.all([
+  const [cache, view, detail, isRound, hasNerd, flow, repos] = await Promise.all([
     readCache($),
     read($, viewState),
     read($, detailState),
     read($, roundState),
     read($, nerdState),
     read($, flowState),
+    read($, reposState),
   ])
   const { graph, indexOf } = cache
   if (graph.status === 'no-repo') return <Text dimColor>Not a git repository.</Text>
@@ -1281,6 +1342,7 @@ async function renderPane($: EngineInterface, els: Ctx['els'], surface: string, 
     now: Math.floor(Date.now() / 1000),
     isRound,
     icons: hasNerd ? ICONS.nerd : ICONS.plain,
+    repos,
     Input: 'Input' in els ? (els.Input as Elements['terminal']['Input']) : undefined,
     Client: (surface === 'terminal' || surface === 'desktop') && 'Client' in els ? (els.Client as Elements['terminal']['Client']) : undefined,
   }
@@ -1363,6 +1425,7 @@ export const register: Register = (on, options) => {
   on('command.run', { command: 'gitgraph' }, async $ => {
     await update($, viewState, v => ({ ...v, isOpen: true }))
     await $.ui.open({ id: PANE, title: TITLE })
+    await findRepos($)
     await Promise.all([load($), loadFlow($)])
     const graph = await readGraph($)
     return { text: graph.status === 'no-repo' ? 'Git Graph: not a git repository.' : 'Git Graph opened.' }

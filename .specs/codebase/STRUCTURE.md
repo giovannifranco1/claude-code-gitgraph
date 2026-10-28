@@ -12,6 +12,7 @@ gitgraph/
 │   ├── badges.ts                # pílulas de ref, orçamento de largura, diffstat
 │   ├── menu.ts                  # menu de ref (itens + argv), checkout, push por remote
 │   ├── flow.ts                  # git flow: config gitflow.*, tópicos, próxima versão, argv de start/finish/update/publish
+│   ├── repos.ts                 # argv do find de repos, parse da lista, repo ativo
 │   ├── settings.ts              # git remote -v, git config user.*, validação de remote
 │   ├── virtual.ts               # janela visível do scroll, busca por hash
 │   ├── pilldraw.tsx             # desenho da pílula (compartilhado)
