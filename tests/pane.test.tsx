@@ -619,6 +619,17 @@ test('GF-01 a form grows the pinned footer by its rows, keeping it on the bottom
   await ui.unmount()
 })
 
+test('GF-01 the bar counts the frame of its buttons and wide icons, wrapping before the right edge', async ($, on) => {
+  await setup($, on, newFake({ branch: 'feature/login' }))
+  // 54 columns held the bar on one row when only the labels were counted; it takes 67.
+  const narrow = await $.ui.mount(pane('terminal', 54))
+  expect((await narrow.find({ type: 'Box', key: 'flow-footer' }))?.props).toMatchObject({ height: 3 })
+  await narrow.unmount()
+  const wide = await $.ui.mount(pane('terminal', 68))
+  expect((await wide.find({ type: 'Box', key: 'flow-footer' }))?.props).toMatchObject({ height: 2 })
+  await wide.unmount()
+})
+
 test('GF-01 elsewhere (other surfaces, an inline pane) the footer closes the list, after the last commit', async ($, on) => {
   await setup($, on, newFake())
   const ui = await $.ui.mount(pane('desktop'))

@@ -7,6 +7,8 @@
 - 2026-10-22: hotfix 1.1.2: painel preto durante push — spinner do rodapé com a mesma key do menu (o Pane recusa key de Client repetida). Lição: duas áreas que mostram `running` precisam de keys distintas; achado só com `claude --debug` (sessão sem hot-reload não mostra o erro).
 - 2026-10-27: release 1.2.0: botão `fetch --all` (nuvem) no header; settings, fetch e refresh só com ícone, nessa ordem (refresh por último), com área de clique maior. Teste local de mudanças não publicadas: `claude --plugin-dir .` com a instalação do marketplace desativada.
 - 2026-10-27: release 1.3.0: vários repositórios (MR-01..03): busca de repos até 3 níveis, dropdown `repo:` no começo do header, todo git com `cwd` do repo ativo; busca por hash atrás do ícone ⌕. Lição: o `Select` nativo no terminal saiu cortado, destoando e sem disparar a troca; dropdown próprio de Buttons (linhas de altura 1 no header) funciona e combina.
+- 2026-10-27: barra do Git Flow sem o ícone ⎇ (pedido do dev) e com 1 coluna entre itens, para caber numa linha a partir de ~77 colunas; larguras medidas em células desenhadas (`buttonWidth`: `[ label ]` dos Buttons com moldura; `iconCells`: ícone Nerd Font = 2).
+- 2026-10-27: badges de commits vizinhos continuam colados (decisão do dev): uma linha de grafo entre dois commits com badge foi testada e recusada (ritmo irregular nos merges).
 - 2026-10-22: release 1.0.0 (tag `1.0.0`), repositório `giovannifranco1/claude-code-gitgraph`.
 - 2026-10-22: painel abre só via `/gitgraph` (não disputa espaço com /filetree e /flow).
 - 2026-10-22: grafo mostra todas as branches (`--all`) por padrão, com toggle para só a atual.
@@ -18,6 +20,8 @@
 - (resolvido) Hot-reload de mods foi ativado depois na sessão de criação.
 
 ## Lições
+- 2026-10-27: a barra do rodapé estourava a borda direita porque media os Buttons com moldura só pelo label: no terminal eles são `[ label ]` (+4 células). Toda largura de item deve contar o que é desenhado.
+- 2026-10-27: no terminal o fundo de um badge ocupa a célula inteira: badges em linhas vizinhas sempre se tocam; não existe meia linha de espaço.
 - 2026-10-22: a engine recusa carregar o módulo se `$` for colocado num objeto (bound/spread/destructuring de um ctx): passe `$` como parâmetro e chame `$.noun.event(...)` direto.
 - 2026-10-22: em `git -C ... commit` encadeado com `;` após `tsc`, o commit sai mesmo com erro de tipo — encadear gates com `&&`.
 - 2026-10-22: o kit de testes não exporta `On`; usar `Parameters<TestBody>[1]`.
@@ -35,6 +39,7 @@
 - 2026-10-27: o Ghostty (e fontes Nerd não-Mono) desenha um ícone Nerd Font com 2 células quando a célula seguinte é espaço: num Button só de ícone com padding, o glifo fica deslocado para a direita no hover. Label com Nerd Font é ` ícone  ` (dois espaços depois), via `iconLabel`; o fallback plain fica ` ícone `. O `Button` não tem padding: a área de clique é a largura do label.
 
 ## Deferred ideas
+- /simplify 2026-10-27 (pulado): `cellWidth` genérico por code point no lugar de `.length` nos itens da barra; cancelar o timer do clique simples no duplo clique (hoje ele roda e não faz nada).
 - /simplify 2026-10-22 (pulado, registrado): trocar os booleanos de formulário da View por uma união discriminada; detectar duplo clique dentro do pill.tsx; `loadSettings` com `--show-scope --get-regexp`; `framed` somando alturas de `{node, height}`; dividir `renderSettings`.
 - /simplify 2026-10-22 (git flow, pulado): Continue/Abort também para merge/rebase do menu (detectar pelo status); memoizar o rodapé entre passos de scroll; `run` genérico no `MenuItem`.
 - Ver ROADMAP M2.

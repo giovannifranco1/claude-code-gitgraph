@@ -67,7 +67,7 @@ Then open the pane with:
 - **Push to the remotes you pick:** Push branch opens a choice of remotes, starting with the ones the branch tracks, plus `all`. A push to several remotes runs one push each and reports every failure by its remote
 - **Safe actions:** destructive ones ask for a second press; a spinner shows what git is doing and further presses wait for it; push and fetch never hang on a password prompt
 - **Find a commit by hash** from the search icon, 4 to 40 hex digits: the pane selects it and scrolls to it
-- **Git Flow actions** in a bar at the bottom of the pane (`⎇  feature  bugfix  release  hotfix │ finish  rebase  publish`), with [git-flow-next](https://github.com/gittower/git-flow-next):
+- **Git Flow actions** in a bar at the bottom of the pane (`feature bugfix release hotfix │ [ finish ] [ rebase ] [ publish ]`, wrapping onto a second row on a narrow pane), with [git-flow-next](https://github.com/gittower/git-flow-next):
   - **Start** a feature, bugfix, release or hotfix from the base your git flow config gives it; a release or hotfix name comes filled in with the next version after your highest tag
   - On a work branch: **finish** (switches for `no-ff`, push afterwards and keep branch, all on by default; release and hotfix tags get an editable message), **rebase** (or merge, as your config says) and **publish**. Publish and finish ask for a second press
   - A finish or update that stops on a conflict offers **Continue** and **Abort**
