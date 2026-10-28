@@ -63,6 +63,8 @@ export type View = {
   remoteDraft: string
   // A commit the pane is scrolling to: the render draws the window around it.
   scrollTo: string | null
+  // The hash search field, opened from its toolbar icon.
+  isSearching: boolean
   // The refresh button's feedback: running, then `done` for a moment.
   refresh: 'idle' | 'running' | 'done'
   isOpen: boolean
@@ -98,9 +100,12 @@ export type ConfigScope = 'local' | 'global'
 export type RemoteInfo = { name: string; fetchUrl: string; pushUrl: string }
 export type UserConfig = { name: string; email: string }
 export type RepoSettings = { local: UserConfig; global: UserConfig; remotes: RemoteInfo[] }
+// The repos found in the session folder, by path relative to it (`.` is the folder), the one
+// shown, and whether the repo dropdown is open.
+export type Repos = { list: string[]; active: string; isPicking: boolean }
 
 declare module 'claude-code' {
   interface PluginState {
-    gitgraph: { graph: Graph; view: Shaped<View>; detail: CommitDetail | null; isRound: boolean; settings: RepoSettings | null; hasNerdFont: boolean; graphVersion: number; flow: FlowInfo | null }
+    gitgraph: { graph: Graph; view: Shaped<View>; detail: CommitDetail | null; isRound: boolean; settings: RepoSettings | null; hasNerdFont: boolean; graphVersion: number; flow: FlowInfo | null; repos: Repos }
   }
 }
