@@ -1437,8 +1437,9 @@ export const register: Register = (on, options) => {
     return next(e)
   }).catch(($, e, next) => next(e))
 
-  // A pill posts `{ button }`: right opens its ref's menu, left selects the commit,
-  // and a second left click on the same pill within DOUBLE_CLICK_MS checks the ref out.
+  // A pill posts `{ button }`: right opens its ref's menu, and a second left click on the
+  // same pill within DOUBLE_CLICK_MS checks the ref out. A left click selects the commit
+  // only once that wait passes with no second click, so a double click opens no details.
   on('ui.message', { requestId: PANE }, async ($, e, next) => {
     const [kind, hash = '', index = ''] = e.element.split(':')
     const button = (e.data as { button?: string } | null)?.button
@@ -1450,7 +1451,11 @@ export const register: Register = (on, options) => {
     lastPillClick = button === 'left' && !isDouble ? { key: e.element, at: now } : { key: '', at: 0 }
     if (badge && button === 'right') await openMenu($, hash, badge)
     else if (badge && isDouble) await checkoutRef($, badge)
-    else if (button === 'left') await select($, hash)
+    else if (button === 'left') {
+      const click = lastPillClick
+      if (badge) $.clock.after(DOUBLE_CLICK_MS, () => void (lastPillClick === click && select($, hash)))
+      else await select($, hash)
+    }
     return next(e)
   }).catch(($, e, next) => next(e))
 

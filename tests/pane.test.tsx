@@ -321,10 +321,13 @@ test('GG-12 a right click on a pill opens its branch menu; push asks for the rem
   await ui.unmount()
 })
 
-test('GG-12 a left click on a pill selects its commit', async ($, on) => {
-  await setup($, on, newFake())
+test('GG-12 a left click on a pill selects its commit once no second click follows', async ($, on) => {
+  const fake = newFake()
+  await setup($, on, fake)
   const ui = await $.ui.mount(pane('terminal'))
   await ui.pointer({ type: 'down', x: 1, y: 0, button: 'left', in: `pill:${B}:0` })
+  expect(await ui.find({ type: 'Text', text: /bia@x\.io/ })).toBeUndefined()
+  await fake.clock?.advance(1_000)
   expect(await ui.find({ type: 'Text', text: /bia@x\.io/ })).toBeDefined()
   await ui.unmount()
 })
@@ -465,6 +468,9 @@ test('GG-14 a double click on a branch pill checks it out; a single click does n
   expect(callOf(fake, ['checkout', 'feat'])).toBe(-1)
   await ui.pointer({ type: 'down', x: 1, y: 0, button: 'left', in: `pill:${B}:0` })
   expect(callOf(fake, ['checkout', 'feat'])).toBeGreaterThan(-1)
+  await fake.clock?.advance(1_000)
+  expect(gitCalls(fake).some(c => c[1] === 'show')).toBe(false)
+  expect(await ui.find({ type: 'Text', text: /bia@x\.io/ })).toBeUndefined()
   await ui.unmount()
 })
 
