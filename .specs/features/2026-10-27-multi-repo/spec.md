@@ -27,9 +27,14 @@ Como dev que abre o Claude Code numa pasta com mais de um repositório git (um w
 - QUANDO há um repo ativo ENTÃO todo git do mod (grafo, detalhes, ações, Git Flow, settings, fetch, poll de 5 s e o reload após cada Bash) roda com `cwd` = repo ativo.
 - QUANDO o repo ativo some da lista numa nova descoberta ENTÃO o painel volta ao repo padrão.
 
+### MR-04 — Branch de cada repo no seletor (pedido do dev, 2026-11-10)
+- QUANDO o seletor abre ENTÃO cada linha mostra `<repo> - <branch>`, com a branch em que aquele repo está agora (ex.: `○ api - develop`).
+- QUANDO o HEAD do repo está destacado ENTÃO a linha mostra `<repo> - detached`; QUANDO a branch não pôde ser lida ENTÃO a linha mostra só `<repo>`.
+- As branches são lidas (em paralelo, uma por repo) a cada vez que o seletor abre e, com ele aberto, no refresh — fora do caminho do primeiro render e nunca no poll. O botão `repo: <ativo> ▾` não muda: a branch do ativo já está no pill `⎇`.
+
 ## Fora do escopo
 - Submódulos (decisão do dev).
-- Status/indicador dos repos não ativos (decisão do dev: só o select).
+- Status/indicador de mudanças pendentes dos repos não ativos (decisão do dev: só o select; a branch entrou no MR-04).
 - Repos fora da pasta da sessão.
 
 ## Design (inline — escopo Medium)

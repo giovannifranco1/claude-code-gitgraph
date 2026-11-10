@@ -26,3 +26,17 @@ export function parseRepos(stdout: string): string[] {
 export function pickActive(list: readonly string[], current: string): string {
   return list.includes(current) ? current : (list[0] ?? '.')
 }
+
+// The branch a repo's HEAD points at. `-q` makes a detached HEAD exit 1 without a message.
+export const BRANCH_ARGS = ['symbolic-ref', '--short', '-q', 'HEAD']
+
+// The branch from BRANCH_ARGS' output: `detached` off a branch, null when it could not be read.
+export function parseBranch(out: { exitCode: number; stdout: string }): string | null {
+  if (out.exitCode === 1) return 'detached'
+  return out.exitCode === 0 ? out.stdout.trim() || null : null
+}
+
+export const repoLabel = (path: string) => (path === '.' ? '(this folder)' : path)
+
+// A picker option: the repo and the branch it is on, when known.
+export const repoOption = (path: string, branch?: string) => (branch ? `${repoLabel(path)} - ${branch}` : repoLabel(path))
