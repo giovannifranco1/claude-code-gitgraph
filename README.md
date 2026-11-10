@@ -10,7 +10,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Claude_Code-%E2%89%A5_2.1.308-D97757?logo=claude&logoColor=fff" alt="Claude Code 2.1.308 or newer">
-  <img src="https://img.shields.io/badge/version-1.5.0-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.5.1-blue" alt="Version">
   <img src="https://img.shields.io/badge/type-mod-6f42c1" alt="Claude Code mod">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License: MIT">
 </p>
@@ -50,7 +50,7 @@ Then open the pane with:
 - **The commit graph** of the session's repository, one row per commit: a colored lane per line of history, merges (`─╮`), forks (`─╯`) and crossings drawn the way the VS Code extension does, and an `Uncommitted changes` row on top while the working tree is dirty
 - **Ref pills** in the color of their lane: the checked-out branch in bold with `●`, a local branch and its remotes in one pill (`develop ⇄ origin github`), remote-only branches in gray, tags in gold (`◆ v1.0.1`). Pills that don't fit are shortened, then counted as `+N`
 - **All branches or just HEAD** with the switch in the header, and **Load more** past 300 commits
-- **Several repositories:** when the session folder holds more than one repo (or is no repo but has repos inside, up to three levels down), a `repo:` dropdown at the start of the header picks the one the graph and every action use; each option shows the branch that repo is on (`api - develop`)
+- **Several repositories:** when the session folder holds more than one repo (or is no repo but has repos inside, up to three levels down), a `repo:` dropdown at the start of the header picks the one the graph and every action use; each option shows, in a right column, the branch that repo is on (`[develop]`)
 
   <img src="media/graph.png" alt="The Git Graph pane docked beside the chat: colored lanes, branch and tag pills, authors, short hashes and the Git Flow bar at the bottom" width="800">
 

@@ -28,9 +28,11 @@ Como dev que abre o Claude Code numa pasta com mais de um repositório git (um w
 - QUANDO o repo ativo some da lista numa nova descoberta ENTÃO o painel volta ao repo padrão.
 
 ### MR-04 — Branch de cada repo no seletor (pedido do dev, 2026-11-10)
-- QUANDO o seletor abre ENTÃO cada linha mostra `<repo> - <branch>`, com a branch em que aquele repo está agora (ex.: `○ api - develop`).
-- QUANDO o HEAD do repo está destacado ENTÃO a linha mostra `<repo> - detached`; QUANDO a branch não pôde ser lida ENTÃO a linha mostra só `<repo>`.
-- As branches são lidas (em paralelo, uma por repo) a cada vez que o seletor abre e, com ele aberto, no refresh — fora do caminho do primeiro render e nunca no poll. O botão `repo: <ativo> ▾` não muda: a branch do ativo já está no pill `⎇`.
+- QUANDO o seletor abre ENTÃO cada linha mostra o repo à esquerda e, numa coluna encostada à direita do painel, a branch em que ele está agora, apagada e entre colchetes (ex.: `○ api ······ [develop]`). Revisão do dev (2026-11-10): o `api - develop` da 1.5.0 ficava confuso.
+- QUANDO a branch rastreia uma branch num remote ENTÃO a coluna mostra o upstream (`[origin/main]`, pedido do dev 2026-11-10); sem upstream, ou com ele apagado no remote (`gone`), o nome local (`[feature/x]`).
+- QUANDO o HEAD do repo está destacado ENTÃO a coluna mostra `[detached]`; QUANDO a branch não pôde ser lida ENTÃO a coluna fica vazia.
+- QUANDO falta largura ENTÃO a branch é cortada com `…` (sempre 1 espaço depois do repo); sem espaço para ela, a coluna fica vazia. O nome do repo não é cortado.
+- As branches são lidas (em paralelo entre repos; `symbolic-ref` e, numa branch, um `for-each-ref` do upstream) a cada vez que o seletor abre e, com ele aberto, no refresh — fora do caminho do primeiro render e nunca no poll. O botão `repo: <ativo> ▾` não muda: a branch do ativo já está no pill `⎇`.
 
 ## Fora do escopo
 - Submódulos (decisão do dev).

@@ -11,7 +11,7 @@ import { DETAIL_FORMAT, LOG_FORMAT, parseDetail, parseLog, parseStatus, remotesO
 import { defaultTagMessage, finishArgs, finishPushArgs, flowArgs, flowCliOf, flowMenuFor, nextVersion, parseFlowConfig, resumeArgs, topicFor, typeOf } from './flow'
 import { checkoutArgs, defaultPushRemotes, deleteBranchArgs, type MenuItem, menuFor, pushRuns, renameArgs } from './menu'
 import { drawPill, type PillProps } from './pilldraw'
-import { BRANCH_ARGS, FIND_ARGS, parseBranch, parseRepos, pickActive, repoLabel, repoOption } from './repos'
+import { BRANCH_ARGS, FIND_ARGS, UPSTREAM_ARGS, parseBranch, parseUpstream, parseRepos, pickActive, branchColumn, repoLabel } from './repos'
 import { addRemotePlan, isRemoteUrl, parseRemotes, userConfigArgs } from './settings'
 import type { SpinnerProps } from './spinner'
 
@@ -136,9 +136,16 @@ async function findRepos($: EngineInterface): Promise<boolean> {
   return active !== before
 }
 
+// The branch a repo is on, as its upstream (`origin/main`) when it tracks one on a remote.
+async function headOf($: EngineInterface, path: string): Promise<string | null> {
+  const branch = await gitIn($, path, BRANCH_ARGS).then(parseBranch, () => null)
+  if (!branch || branch === 'detached') return branch
+  return (await gitIn($, path, UPSTREAM_ARGS(branch)).then(parseUpstream, () => null)) ?? branch
+}
+
 // Reads the branch each repo is on, for the picker; a repo whose read fails shows none.
 async function loadBranches($: EngineInterface, list: readonly string[]): Promise<void> {
-  const heads = await Promise.all(list.map(path => gitIn($, path, BRANCH_ARGS).then(parseBranch, () => null)))
+  const heads = await Promise.all(list.map(path => headOf($, path)))
   const branches = Object.fromEntries(list.flatMap((path, i) => (heads[i] ? [[path, heads[i]]] : [])))
   await update($, reposState, r => ({ ...r, branches }))
 }
@@ -669,15 +676,19 @@ function renderHeader($: EngineInterface, ctx: Ctx) {
     </Box>,
   ]
   if (repos.isPicking)
-    for (const path of repos.list)
+    for (const path of repos.list) {
+      const label = `  ${path === repos.active ? '●' : '○'} ${repoLabel(path)}`
       lines.push(
         line(
           ctx,
+          // The branch goes inside the Button, as a dim Text child: a sibling of the Button on the row is not drawn.
           <Button key={`repo-option:${path}`} plain dimColor={path !== repos.active} onPress={() => selectRepo($, path)}>
-            {`  ${path === repos.active ? '●' : '○'} ${repoOption(path, repos.branches[path])}`}
+            {label}
+            <Text dimColor>{branchColumn(label, repos.branches[path], cols)}</Text>
           </Button>,
         ),
       )
+    }
   if (Input && view.isSearching)
     lines.push(
       line(

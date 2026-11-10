@@ -1,3 +1,5 @@
+import { truncate } from './format'
+
 // Folders never searched for repos: dependencies and build output (hidden ones, as .venv,
 // are pruned by name).
 const PRUNED = ['node_modules', 'vendor', 'dist', 'build', 'target']
@@ -36,7 +38,24 @@ export function parseBranch(out: { exitCode: number; stdout: string }): string |
   return out.exitCode === 0 ? out.stdout.trim() || null : null
 }
 
+// The remote branch a local branch tracks, and whether it is gone from the remote.
+export const UPSTREAM_ARGS = (branch: string) => ['for-each-ref', '--format=%(upstream:short)%00%(upstream:track)', `refs/heads/${branch}`]
+
+// The upstream from UPSTREAM_ARGS' output (`origin/main`); null when none, gone, or unread.
+export function parseUpstream(out: { exitCode: number; stdout: string }): string | null {
+  if (out.exitCode !== 0) return null
+  const [upstream = '', track = ''] = out.stdout.trim().split('\0')
+  return upstream && !track.includes('gone') ? upstream : null
+}
+
 export const repoLabel = (path: string) => (path === '.' ? '(this folder)' : path)
 
-// A picker option: the repo and the branch it is on, when known.
-export const repoOption = (path: string, branch?: string) => (branch ? `${repoLabel(path)} - ${branch}` : repoLabel(path))
+// A picker option's right column: spaces out to one cell short of the pane edge, then the
+// branch its repo is on in brackets, cut to fit; nothing when unknown or no room. Padded by
+// hand: a flex row in the header does not stretch to the pane, so it cannot push it there.
+export function branchColumn(label: string, branch: string | undefined, cols: number): string {
+  const room = cols - 1 - label.length - 1
+  if (!branch || room < 3) return ''
+  const tag = `[${truncate(branch, room - 2)}]`
+  return ' '.repeat(room - tag.length + 1) + tag
+}
