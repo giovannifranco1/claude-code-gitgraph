@@ -11,7 +11,7 @@ import { DETAIL_FORMAT, LOG_FORMAT, parseDetail, parseLog, parseStatus, remotesO
 import { defaultTagMessage, finishArgs, finishPushArgs, flowArgs, flowCliOf, flowMenuFor, nextVersion, parseFlowConfig, resumeArgs, topicFor, typeOf } from './flow'
 import { checkoutArgs, defaultPushRemotes, deleteBranchArgs, type MenuItem, menuFor, pushRuns, renameArgs } from './menu'
 import { drawPill, type PillProps } from './pilldraw'
-import { FIND_ARGS, parseRepos, pickActive } from './repos'
+import { BRANCH_ARGS, FIND_ARGS, parseBranch, parseRepos, pickActive, repoLabel, repoOption } from './repos'
 import { addRemotePlan, isRemoteUrl, parseRemotes, userConfigArgs } from './settings'
 import type { SpinnerProps } from './spinner'
 
@@ -85,7 +85,7 @@ const settingsState = atom({ plugin: 'gitgraph', key: 'settings' } as const, nul
 // Loaded when the pane opens and after git flow actions, not with every graph load.
 const flowState = atom({ plugin: 'gitgraph', key: 'flow' } as const, null as FlowInfo | null)
 // Searched when the pane opens and on refresh; every git the pane runs runs in `active`.
-const reposState = atom({ plugin: 'gitgraph', key: 'repos' } as const, { list: [], active: '.', isPicking: false } as Repos)
+const reposState = atom({ plugin: 'gitgraph', key: 'repos' } as const, { list: [], active: '.', isPicking: false, branches: {} } as Repos, { shape: 'repos-2' })
 
 // Everything transient a git action, a selection or a new menu closes.
 const CLOSED = {
@@ -115,10 +115,14 @@ let lastPillClick: { key: string; at: number; selected: string | null } = { key:
 
 const firstLine = (text: string) => text.split('\n').find(l => l.trim() !== '') ?? 'unknown error'
 
-// Runs in the repo the pane shows. Network commands may wait on a remote: a longer timeout.
+// Runs git in a repo. Network commands may wait on a remote: a longer timeout.
+const gitIn = ($: EngineInterface, cwd: string, args: string[], isNetwork = false) =>
+  $.process.run(['git', ...args], { cwd, timeoutMs: isNetwork ? NETWORK_TIMEOUT_MS : GIT_TIMEOUT_MS, env: GIT_ENV })
+
+// Runs in the repo the pane shows.
 async function git($: EngineInterface, args: string[], isNetwork = false) {
   const { active } = await read($, reposState)
-  return $.process.run(['git', ...args], { cwd: active, timeoutMs: isNetwork ? NETWORK_TIMEOUT_MS : GIT_TIMEOUT_MS, env: GIT_ENV })
+  return gitIn($, active, args, isNetwork)
 }
 
 // Lists the repos in the session folder and keeps the active one while it is still there;
@@ -126,8 +130,22 @@ async function git($: EngineInterface, args: string[], isNetwork = false) {
 async function findRepos($: EngineInterface): Promise<boolean> {
   const list = await $.process.run(FIND_ARGS, { timeoutMs: GIT_TIMEOUT_MS }).then(out => parseRepos(out.stdout), (): string[] => [])
   const before = (await read($, reposState)).active
-  const { active } = await update($, reposState, r => ({ ...r, list, active: pickActive(list, before) }))
+  const { active, isPicking } = await update($, reposState, r => ({ ...r, list, active: pickActive(list, before) }))
+  // Only an open picker shows branches; read off the graph's critical path.
+  if (isPicking) void loadBranches($, list)
   return active !== before
+}
+
+// Reads the branch each repo is on, for the picker; a repo whose read fails shows none.
+async function loadBranches($: EngineInterface, list: readonly string[]): Promise<void> {
+  const heads = await Promise.all(list.map(path => gitIn($, path, BRANCH_ARGS).then(parseBranch, () => null)))
+  const branches = Object.fromEntries(list.flatMap((path, i) => (heads[i] ? [[path, heads[i]]] : [])))
+  await update($, reposState, r => ({ ...r, branches }))
+}
+
+async function togglePicker($: EngineInterface): Promise<void> {
+  const { isPicking, list } = await update($, reposState, r => ({ ...r, isPicking: !r.isPicking }))
+  if (isPicking) await loadBranches($, list)
 }
 
 // Shows another repo: what was open belonged to the last one.
@@ -149,8 +167,6 @@ async function selectRepo($: EngineInterface, path: string): Promise<void> {
   await update($, reposState, r => ({ ...r, active: path, isPicking: false }))
   if (path !== before) await showRepo($)
 }
-
-const repoLabel = (path: string) => (path === '.' ? '(this folder)' : path)
 
 // What changes when commits, refs, HEAD or the working tree change.
 const signatureOf = (status: string, refs: string) => `${status}\0${refs}`
@@ -608,7 +624,7 @@ function renderHeader($: EngineInterface, ctx: Ctx) {
       {/* With several repos, the repo comes first: its options open as rows below the header's first row. */}
       {repos.list.length > 1 && (
         <Box flexShrink={0}>
-          <Button key="repo" plain dimColor={!repos.isPicking} onPress={() => update($, reposState, r => ({ ...r, isPicking: !r.isPicking }))}>
+          <Button key="repo" plain dimColor={!repos.isPicking} onPress={() => togglePicker($)}>
             {`repo: ${repoLabel(repos.active)} ${repos.isPicking ? '▴' : '▾'}`}
           </Button>
         </Box>
@@ -658,7 +674,7 @@ function renderHeader($: EngineInterface, ctx: Ctx) {
         line(
           ctx,
           <Button key={`repo-option:${path}`} plain dimColor={path !== repos.active} onPress={() => selectRepo($, path)}>
-            {`  ${path === repos.active ? '●' : '○'} ${repoLabel(path)}`}
+            {`  ${path === repos.active ? '●' : '○'} ${repoOption(path, repos.branches[path])}`}
           </Button>,
         ),
       )

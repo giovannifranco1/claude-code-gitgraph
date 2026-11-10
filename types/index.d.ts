@@ -101,11 +101,11 @@ export type RemoteInfo = { name: string; fetchUrl: string; pushUrl: string }
 export type UserConfig = { name: string; email: string }
 export type RepoSettings = { local: UserConfig; global: UserConfig; remotes: RemoteInfo[] }
 // The repos found in the session folder, by path relative to it (`.` is the folder), the one
-// shown, and whether the repo dropdown is open.
-export type Repos = { list: string[]; active: string; isPicking: boolean }
+// shown, whether the repo dropdown is open, and the branch each repo is on (absent: unknown).
+export type Repos = { list: string[]; active: string; isPicking: boolean; branches: Record<string, string> }
 
 declare module 'claude-code' {
   interface PluginState {
-    gitgraph: { graph: Graph; view: Shaped<View>; detail: CommitDetail | null; isRound: boolean; settings: RepoSettings | null; hasNerdFont: boolean; graphVersion: number; flow: FlowInfo | null; repos: Repos }
+    gitgraph: { graph: Graph; view: Shaped<View>; detail: CommitDetail | null; isRound: boolean; settings: RepoSettings | null; hasNerdFont: boolean; graphVersion: number; flow: FlowInfo | null; repos: Shaped<Repos> }
   }
 }
