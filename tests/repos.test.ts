@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { FIND_ARGS, parseRepos, pickActive } from '../hooks/repos'
+import { BRANCH_ARGS, FIND_ARGS, parseBranch, parseRepos, pickActive, repoOption } from '../hooks/repos'
 
 test('MR-01 the search reaches repos three levels down and prunes heavy and hidden folders', async () => {
   expect(FIND_ARGS[0]).toBe('find')
@@ -24,4 +24,18 @@ test('MR-02 the active repo is kept while it exists, else the first one', async 
   expect(pickActive(['.', 'web'], 'api')).toBe('.')
   // No repo found: the session folder, which shows "not a git repository" as before.
   expect(pickActive([], '.')).toBe('.')
+})
+
+test('MR-04 the branch a repo is on comes from its symbolic HEAD', async () => {
+  expect(BRANCH_ARGS).toEqual(['symbolic-ref', '--short', '-q', 'HEAD'])
+  expect(parseBranch({ exitCode: 0, stdout: 'feature/x\n' })).toBe('feature/x')
+  // `symbolic-ref -q` exits 1, silent, on a detached HEAD; any other failure is unknown.
+  expect(parseBranch({ exitCode: 1, stdout: '' })).toBe('detached')
+  expect(parseBranch({ exitCode: 128, stdout: '' })).toBeNull()
+})
+
+test('MR-04 a picker option reads "<repo> - <branch>"', async () => {
+  expect(repoOption('api', 'develop')).toBe('api - develop')
+  expect(repoOption('.', 'main')).toBe('(this folder) - main')
+  expect(repoOption('web', undefined)).toBe('web')
 })

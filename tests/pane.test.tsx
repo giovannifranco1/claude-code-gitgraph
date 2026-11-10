@@ -36,6 +36,8 @@ type Fake = {
   // Each call's working directory, in the order of `calls`; what the repo search prints.
   cwds: string[]
   repos?: string
+  // The branch each repo's HEAD points at, by repo path; `null` is a detached HEAD.
+  heads?: Record<string, string | null>
 }
 
 const FLOW_CONFIG = [
@@ -90,6 +92,10 @@ function answer(fake: Fake, raw: readonly string[], cwd = '.') {
   // `isRepo: false` is the session folder only: the repos found below it are repos.
   if (!fake.isRepo && cwd === '.') return fail('fatal: not a git repository')
   switch (verb) {
+    case 'symbolic-ref': {
+      const head = fake.heads?.[cwd] === undefined ? (fake.branch ?? 'main') : fake.heads[cwd]
+      return head === null ? { ...ok(), exitCode: 1 } : ok(`${head}\n`)
+    }
     case 'log':
       return ok(logOf(fake))
     case 'status':
@@ -983,6 +989,24 @@ test('MR-02 with several repos a dropdown beside the hash search picks the one t
   expect(await ui.find({ type: 'Text', text: /bia@x\.io/ })).toBeUndefined()
   expect(await ui.find({ type: 'Button', key: 'repo-option:api' })).toBeUndefined()
   expect((await ui.find({ type: 'Button', key: 'repo' }))?.text).toContain('api')
+  await ui.unmount()
+})
+
+test('MR-04 each picker option shows the branch its repo is on', async ($, on) => {
+  const fake = newFake({ repos: './.git\n./api/.git\n./web/.git\n', heads: { '.': 'main', api: 'develop', web: null } })
+  await setup($, on, fake)
+  const ui = await $.ui.mount(pane('terminal'))
+  expect((await ui.find({ type: 'Button', key: 'repo' }))?.text).not.toContain(' - ')
+  await ui.press({ key: 'repo' })
+  expect((await ui.find({ type: 'Button', key: 'repo-option:.' }))?.text).toContain('(this folder) - main')
+  expect((await ui.find({ type: 'Button', key: 'repo-option:api' }))?.text).toContain('api - develop')
+  expect((await ui.find({ type: 'Button', key: 'repo-option:web' }))?.text).toContain('web - detached')
+  // Opening the picker reads the branches again: one changed meanwhile.
+  await ui.press({ key: 'repo' })
+  fake.heads = { ...fake.heads, api: 'feature/y' }
+  await ui.press({ key: 'repo' })
+  expect((await ui.find({ type: 'Button', key: 'repo-option:api' }))?.text).toContain('api - feature/y')
+  expect(fake.cwds.filter((_, i) => fake.calls[i]?.[1] === 'symbolic-ref')).toContain('web')
   await ui.unmount()
 })
 
