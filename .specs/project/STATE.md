@@ -14,6 +14,7 @@
 - 2026-10-28: clique simples na pílula volta a abrir os detalhes na hora (a espera de 450 ms para descartar duplo clique ficou lenta para o dev); o duplo clique faz checkout e devolve a seleção de antes do primeiro clique.
 - 2026-10-28: release 1.4.0: reset soft do branch atual para um commit (GG-19) nos detalhes, ações dos detalhes quebrando em linhas; clique simples na pílula abre os detalhes na hora.
 - 2026-11-10: seletor de repos mostra a branch de cada repo como `<repo> - <branch>` (MR-04), lida ao abrir o seletor; átomo `repos` passou a ter shape (`repos-2`). Release 1.5.0.
+- 2026-11-10: release 1.5.1: no seletor de repos, a branch vai numa coluna à direita (`[develop]`, apagada), com o upstream quando há um no remote (`[origin/main]`); o `<repo> - <branch>` da 1.5.0 ficava confuso.
 - 2026-10-22: release 1.0.0 (tag `1.0.0`), repositório `giovannifranco1/claude-code-gitgraph`.
 - 2026-10-22: painel abre só via `/gitgraph` (não disputa espaço com /filetree e /flow).
 - 2026-10-22: grafo mostra todas as branches (`--all`) por padrão, com toggle para só a atual.
