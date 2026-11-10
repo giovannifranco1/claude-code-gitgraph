@@ -25,6 +25,7 @@
 - (resolvido) Hot-reload de mods foi ativado depois na sessão de criação.
 
 ## Lições
+- 2026-11-10: coluna à direita no seletor de repos: quatro tentativas com o `[branch]` num elemento irmão do Button na linha (`Box` com flex ou `Text`) não desenharam a branch (ou sumiram com o nome) no terminal; o texto **dentro** do Button (filho `Text dimColor`, como na doc do `ButtonProps`) é desenhado. O kit de testes não roda o layout, então não pegou nenhuma. Alinhamento à direita: espaços calculados a partir de `ctx.cols` (`branchColumn`), dentro do próprio Button.
 - 2026-10-27: a barra do rodapé estourava a borda direita porque media os Buttons com moldura só pelo label: no terminal eles são `[ label ]` (+4 células). Toda largura de item deve contar o que é desenhado.
 - 2026-10-27: no terminal o fundo de um badge ocupa a célula inteira: badges em linhas vizinhas sempre se tocam; não existe meia linha de espaço.
 - 2026-10-22: a engine recusa carregar o módulo se `$` for colocado num objeto (bound/spread/destructuring de um ctx): passe `$` como parâmetro e chame `$.noun.event(...)` direto.

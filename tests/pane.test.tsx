@@ -38,6 +38,8 @@ type Fake = {
   repos?: string
   // The branch each repo's HEAD points at, by repo path; `null` is a detached HEAD.
   heads?: Record<string, string | null>
+  // The upstream of each repo's branch, by repo path; none when absent.
+  upstreams?: Record<string, string>
 }
 
 const FLOW_CONFIG = [
@@ -96,6 +98,9 @@ function answer(fake: Fake, raw: readonly string[], cwd = '.') {
       const head = fake.heads?.[cwd] === undefined ? (fake.branch ?? 'main') : fake.heads[cwd]
       return head === null ? { ...ok(), exitCode: 1 } : ok(`${head}\n`)
     }
+    case 'for-each-ref':
+      if (rest[0]?.startsWith('--format=%(upstream')) return ok(`${fake.upstreams?.[cwd] ?? ''}\0\n`)
+      return ok(`${M} refs/heads/main\n${B} refs/heads/feat\n${(fake.remotes ?? ['origin']).map(r => `${M} refs/remotes/${r}/main\n`).join('')}rev${fake.rev} refs/heads/moving\n`)
     case 'log':
       return ok(logOf(fake))
     case 'status':
@@ -113,8 +118,6 @@ function answer(fake: Fake, raw: readonly string[], cwd = '.') {
     }
     case 'tag':
       return ok('1.0.0\n1.0.1\n')
-    case 'for-each-ref':
-      return ok(`${M} refs/heads/main\n${B} refs/heads/feat\n${(fake.remotes ?? ['origin']).map(r => `${M} refs/remotes/${r}/main\n`).join('')}rev${fake.rev} refs/heads/moving\n`)
     case 'show':
       return ok([B, 'Bia', 'bia@x.io', '1699980000', 'Work on feat\n\nDetails here\n'].join(US) + RS + '\n\n3\t1\tsrc/feat.ts\n')
     case 'push':
@@ -992,20 +995,23 @@ test('MR-02 with several repos a dropdown beside the hash search picks the one t
   await ui.unmount()
 })
 
-test('MR-04 each picker option shows the branch its repo is on', async ($, on) => {
-  const fake = newFake({ repos: './.git\n./api/.git\n./web/.git\n', heads: { '.': 'main', api: 'develop', web: null } })
+test('MR-04 each picker option shows the branch its repo is on in a right column', async ($, on) => {
+  const fake = newFake({ repos: './.git\n./api/.git\n./web/.git\n', heads: { '.': 'main', api: 'develop', web: null }, upstreams: { '.': 'origin/main' } })
   await setup($, on, fake)
   const ui = await $.ui.mount(pane('terminal'))
-  expect((await ui.find({ type: 'Button', key: 'repo' }))?.text).not.toContain(' - ')
+  expect(await ui.find({ type: 'Text', text: /\[main\]/ })).toBeUndefined()
   await ui.press({ key: 'repo' })
-  expect((await ui.find({ type: 'Button', key: 'repo-option:.' }))?.text).toContain('(this folder) - main')
-  expect((await ui.find({ type: 'Button', key: 'repo-option:api' }))?.text).toContain('api - develop')
-  expect((await ui.find({ type: 'Button', key: 'repo-option:web' }))?.text).toContain('web - detached')
+  // One button per row: the repo on the left, its branch dim at the right end.
+  expect((await ui.find({ type: 'Button', key: 'repo-option:api' }))?.text).toMatch(/api +\[develop\]$/)
+  // On a remote: its upstream; not pushed: the local name.
+  expect(await ui.find({ type: 'Text', text: /\[origin\/main\]/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /\[develop\]/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /\[detached\]/ })).toBeDefined()
   // Opening the picker reads the branches again: one changed meanwhile.
   await ui.press({ key: 'repo' })
   fake.heads = { ...fake.heads, api: 'feature/y' }
   await ui.press({ key: 'repo' })
-  expect((await ui.find({ type: 'Button', key: 'repo-option:api' }))?.text).toContain('api - feature/y')
+  expect(await ui.find({ type: 'Text', text: /\[feature\/y\]/ })).toBeDefined()
   expect(fake.cwds.filter((_, i) => fake.calls[i]?.[1] === 'symbolic-ref')).toContain('web')
   await ui.unmount()
 })
