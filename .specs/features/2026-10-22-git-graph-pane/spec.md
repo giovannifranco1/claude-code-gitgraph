@@ -59,7 +59,7 @@ Como dev usando o Claude Code, quero um painel lateral com o grafo de commits do
 
 ### GG-12 — Menu de branch (botão direito), como o Git Graph do VS Code
 - QUANDO o dev clica com o botão **direito** numa pílula ENTÃO abre, abaixo da linha, o menu daquela ref; clique **esquerdo** na pílula seleciona o commit.
-- O mesmo menu é acessível por botões `⋯ <ref>` no detalhe do commit (teclado e superfícies sem `Client`).
+- O mesmo menu é acessível pelos botões `<ref> ▾` da linha `Branch actions:` no topo do detalhe do commit (teclado, VS Code e ferramentas onde o botão direito não chega ao mod) — ver RM-01 em `2026-11-18-ref-menu-buttons`.
 - **Branch local:** Checkout (não na atual), Renomear… (campo; `git branch -m <velho> <novo>`, nome validado como em GG-10), **Push branch…** (abre a escolha de remotes: um `☑/☐` por remote + `todos`; começa com os remotes que a branch rastreia, senão `origin`, senão o primeiro; **Enviar** roda `git push -u <remote> <branch>` por remote marcado e reporta cada falha pelo remote; sem remote marcado não há Enviar), Merge na atual, Rebase da atual sobre esta (não na atual), Excluir (`git branch -d`, não na atual), Copiar nome.
 - **Branch remota:** Checkout (cria local rastreando: `git switch --track <remote>/<b>`), Fetch (`git fetch <remote> <b>`), Merge na atual, Excluir no remoto (`git push <remote> --delete <b>`), Copiar nome.
 - **Tag:** Push tag… (`git push <remote> refs/tags/<tag>`, mesma escolha de remotes), Excluir tag (`git tag -d`), Copiar nome.

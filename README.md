@@ -58,7 +58,7 @@ Then open the pane with:
 
   <img src="media/details.png" alt="A commit opened in the pane: hash pill, author, date, full message, changed files with +/- bars and the commit actions" width="800">
 
-- **Right-click a branch pill** for its menu, as in the VS Code extension:
+- **Right-click a branch pill** for its menu, as in the VS Code extension (where right clicks do not reach the pane, open a commit and use its **Branch actions** buttons):
   - **Local branch:** checkout, rename, push branch, merge into the current branch, rebase the current branch on it, delete branch (with an optional `force`, off by default), copy name
   - **Remote branch:** checkout as a new tracking branch, fetch, merge, delete on the remote, copy name
   - **Tag:** push, delete, copy name

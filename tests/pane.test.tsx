@@ -381,14 +381,30 @@ test('GG-12 a left click on a pill selects its commit at once', async ($, on) =>
   await ui.unmount()
 })
 
-test('GG-12 the menu is reachable from the commit details and renames with a validated name', async ($, on) => {
+test('RM-01 a commit without refs shows no branch actions row', async ($, on) => {
+  await setup($, on, newFake())
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: A })
+  expect(await ui.find({ type: 'Text', text: /bia@x\.io/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Branch actions:/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('GG-12 RM-01 the menu is reachable from the commit details and renames with a validated name', async ($, on) => {
   const fake = newFake()
   await setup($, on, fake)
   for (const surface of ['terminal', 'vscode'] as const) {
     const ui = await $.ui.mount(pane(surface))
     await ui.press({ key: B })
+    expect(await ui.find({ type: 'Text', text: /Branch actions:/ })).toBeDefined()
+    expect((await ui.find({ type: 'Button', key: 'refmenu-0' }))?.text).toBe('feat ▾')
+    expect((await ui.find({ type: 'Button', key: 'refmenu-1' }))?.text).toBe('v0.1 ▾')
+    expect(await ui.find({ type: 'Text', text: /^Refs:/ })).toBeUndefined()
     await ui.press({ key: 'refmenu-0' })
     expect(await ui.find({ key: 'menu-merge' })).toBeDefined()
+    await ui.press({ key: 'refmenu-0' })
+    expect(await ui.find({ key: 'menu-merge' })).toBeUndefined()
+    await ui.press({ key: 'refmenu-0' })
     await ui.press({ key: 'menu-close' })
     expect(await ui.find({ key: 'menu-merge' })).toBeUndefined()
     await ui.press({ key: B })
