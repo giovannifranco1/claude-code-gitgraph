@@ -941,7 +941,7 @@ test('GF-05 a release finish carries its tag message; a failed push says the fin
   await setup($, on, fake, [], toasts)
   const ui = await $.ui.mount(pane('terminal'))
   await ui.press({ key: 'flow-finish' })
-  expect((await ui.find({ type: 'Input', key: 'flow-tag' }))?.props).toMatchObject({ value: 'Release 1.1.0' })
+  expect((await ui.find({ type: 'Input', key: 'flow-tag' }))?.props).toMatchObject({ value: '1.1.0' })
   await ui.input({ key: 'flow-tag', text: 'Big release', kind: 'change' })
   await ui.press({ key: 'flow-finish-run' })
   await ui.press({ key: 'flow-finish-run' })

@@ -4,8 +4,6 @@ import type { MenuItem } from './menu'
 export const KINDS: FlowKind[] = ['feature', 'bugfix', 'release', 'hotfix']
 const SEMVER = /^(v?)(\d+)\.(\d+)\.(\d+)$/
 
-const title = (kind: FlowKind) => kind[0]?.toUpperCase() + kind.slice(1)
-
 // `git flow version`: git-flow-next names itself; any other answer is another git flow.
 export function flowCliOf(exitCode: number, stdout: string): FlowCli {
   if (exitCode !== 0) return 'none'
@@ -83,7 +81,8 @@ export function nextVersion(tags: string[], kind: FlowKind): string {
   return kind === 'release' ? `${top?.v ?? ''}${major}.${minor + 1}.0` : `${top?.v ?? ''}${major}.${minor}.${patch + 1}`
 }
 
-export const defaultTagMessage = ({ kind, name }: FlowTopic) => `${title(kind)} ${name}`
+// The tag's message: its version alone, as the tag is named (git flow needs one for an annotated tag).
+export const defaultTagMessage = ({ name }: FlowTopic) => name
 
 export const updateLabel = (type: FlowType) => (type.strategy === 'rebase' ? `Rebase on ${type.parent}` : `Merge ${type.parent} in`)
 

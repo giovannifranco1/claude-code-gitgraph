@@ -94,13 +94,13 @@ test('GF-05 finish follows the switches, and a tagged type always carries its ta
   const release = { kind: 'release', name: '1.2.0', branch: 'release/1.2.0' } as const
   expect(finishArgs(feature, config(), ON, null)).toEqual(['flow', 'feature', 'finish', 'login', '--no-ff', '--keep'])
   expect(finishArgs(feature, config(), { ...ON, isNoFf: false, isKeep: false }, null)).toEqual(['flow', 'feature', 'finish', 'login', '--ff', '--no-keep'])
-  expect(finishArgs(release, config(), ON, null)).toEqual(['flow', 'release', 'finish', '1.2.0', '--no-ff', '--keep', '-m', 'Release 1.2.0'])
+  expect(finishArgs(release, config(), ON, null)).toEqual(['flow', 'release', 'finish', '1.2.0', '--no-ff', '--keep', '-m', '1.2.0'])
   expect(finishArgs(release, config(), ON, '  Big one  ')).toEqual(['flow', 'release', 'finish', '1.2.0', '--no-ff', '--keep', '-m', 'Big one'])
-  expect(finishArgs(release, config(), ON, '   ')).toContain('Release 1.2.0')
+  expect(finishArgs(release, config(), ON, '   ').at(-1)).toBe('1.2.0')
 })
 
-test('GF-05 the tag message names the type and the version', async () => {
-  expect(defaultTagMessage({ kind: 'hotfix', name: '1.0.2', branch: 'hotfix/1.0.2' })).toBe('Hotfix 1.0.2')
+test('GF-05 the tag message is the version alone, as the tag is named', async () => {
+  expect(defaultTagMessage({ kind: 'hotfix', name: '1.0.2', branch: 'hotfix/1.0.2' })).toBe('1.0.2')
 })
 
 test('GF-05 the push after finish sends the parent and the bases that follow it, with the tags', async () => {
