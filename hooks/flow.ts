@@ -12,16 +12,20 @@ export function flowCliOf(exitCode: number, stdout: string): FlowCli {
   return stdout.includes('git-flow-next') ? 'next' : 'other'
 }
 
+// The remote to push to when nothing names one: origin when the repo has one, else its
+// first (a repo whose only remote is `github` pushes there).
+export const preferredRemote = (remotes: string[]): string | undefined => (remotes.includes('origin') ? 'origin' : remotes[0])
+
 // `git config --get-regexp ^gitflow\.` → the work types, the bases and the remote; null
 // where no work type is set up. git-flow-next's own keys first, else git flow AVH's
 // (`gitflow.prefix.<type>`), read the way git-flow-next reads them.
-export function parseFlowConfig(stdout: string): FlowConfig | null {
+export function parseFlowConfig(stdout: string, remotes: string[] = []): FlowConfig | null {
   const values = new Map<string, string>()
   for (const line of stdout.split('\n')) {
     const at = line.indexOf(' ')
     if (at > 0) values.set(line.slice(0, at), line.slice(at + 1).trim())
   }
-  const remote = values.get('gitflow.origin') || 'origin'
+  const remote = values.get('gitflow.origin') || (preferredRemote(remotes) ?? 'origin')
   const get = (branch: string, key: string) => values.get(`gitflow.branch.${branch}.${key}`) ?? ''
   const types = KINDS.flatMap((kind): FlowType[] => {
     const prefix = get(kind, 'prefix')

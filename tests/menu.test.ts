@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import type { FlowConfig } from '../types'
-import { checkoutArgs, deleteBranchArgs, defaultPushRemotes, menuFor, pushRuns, renameArgs, splitRemote } from '../hooks/menu'
+import { checkoutArgs, deleteBranchArgs, defaultPushRemotes, menuFor, menuGroups, pushRuns, renameArgs, splitRemote } from '../hooks/menu'
 
 const ids = (items: { id: string }[]) => items.map(i => i.id)
 
@@ -96,4 +96,12 @@ test('GF-07 a git flow work branch menu leads with its flow actions; other refs 
 test('GG-12 a branch is deleted with -d, or -D when force is ticked', async () => {
   expect(deleteBranchArgs('feat', false)).toEqual(['branch', '-d', 'feat'])
   expect(deleteBranchArgs('feat', true)).toEqual(['branch', '-D', 'feat'])
+})
+
+test('GG-12 the menu is a list in groups: git flow, branch actions, rename and copy, then delete', async () => {
+  const groups = (items: { id: string }[]) => menuGroups(items as never).map(ids)
+  expect(groups(menuFor({ kind: 'branch', label: 'feat', remotes: ['origin'] }, ['origin']))).toEqual([['checkout', 'push', 'merge', 'rebase'], ['rename', 'copy'], ['delete']])
+  expect(groups(menuFor({ kind: 'head', label: 'main', remotes: [] }, ['up']))).toEqual([['push'], ['rename', 'copy']])
+  expect(groups(menuFor({ kind: 'remote', label: 'origin/feat', remotes: [] }, ['origin']))).toEqual([['checkout', 'fetch', 'merge'], ['copy'], ['delete']])
+  expect(groups([{ id: 'flow-finish' }, { id: 'flow-publish' }, { id: 'checkout' }, { id: 'copy' }])).toEqual([['flow-finish', 'flow-publish'], ['checkout'], ['copy']])
 })

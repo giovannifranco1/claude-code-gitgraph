@@ -60,3 +60,17 @@ export function wrapRows(widths: number[], cols: number, gap: number): number[][
   })
   return rows
 }
+
+// A bar of groups (widths of each group's items) on rows of `cols`: all on one row with a
+// separator between groups when they fit, else each group on rows of its own, wrapped
+// inside itself; a group is never split across rows it shares with another. Each cell
+// is `[group, item]`, or 'separator'.
+export type BarCell = [number, number] | 'separator'
+
+export function wrapGroups(groups: number[][], cols: number, gap: number): BarCell[][] {
+  const shown = groups.map((widths, g) => ({ widths, g })).filter(({ widths }) => widths.length > 0)
+  const cells = shown.flatMap(({ widths, g }, n): BarCell[] => [...(n > 0 ? ['separator' as const] : []), ...widths.map((_, i): BarCell => [g, i])])
+  const width = (cell: BarCell) => (cell === 'separator' ? 1 : (groups[cell[0]]?.[cell[1]] ?? 0))
+  if (wrapRows(cells.map(width), cols, gap).length === 1) return [cells]
+  return shown.flatMap(({ widths, g }) => wrapRows(widths, cols, gap).map(row => row.map((i): BarCell => [g, i])))
+}

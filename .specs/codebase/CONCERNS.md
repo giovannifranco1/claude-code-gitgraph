@@ -3,7 +3,7 @@
 - Repos grandes: limitar `git log` (padrão 300 commits) para não estourar render (100k chars por árvore).
 - Ações que mudam o repo (checkout/cherry-pick) com working tree suja podem falhar: mostrar stderr em toast, nunca forçar.
 - Auto-refresh custa 2 processos git (status + for-each-ref) por chamada Bash e a cada 5s, só com o painel aberto. Em repos enormes, `status` pode pesar.
-- Detecção de Nerd Font só olha fontes instaladas, não a fonte do terminal: opção `badges: square` contorna.
+- Detecção de Nerd Font só olha fontes instaladas, não a fonte do terminal: opção `badges: square` contorna. Roda no `session.start` e a cada `/gitgraph` (o start não dispara após `/clear`/`/resume`).
 - Altura fixa por linha corta conteúdo longo no detalhe (8 linhas de mensagem, 20 arquivos).
 - `$.ui.scroll` até a busca não é coberto por teste (o kit não implementa).
 - Lanes em histórico com muitos merges podem ficar largas: truncar colunas do grafo pela largura do painel.

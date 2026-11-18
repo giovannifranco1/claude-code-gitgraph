@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { findByHash, isHashQuery, topOf, visibleRange, wrapRows } from '../hooks/virtual'
+import { findByHash, isHashQuery, topOf, visibleRange, wrapGroups, wrapRows } from '../hooks/virtual'
 
 const ones = (n: number) => Array.from({ length: n }, () => 1)
 
@@ -35,4 +35,22 @@ test('GF-01 bar items wrap onto the next row when the pane is too narrow', async
   expect(wrapRows([1, 9, 8, 9, 8], 25, 2)).toEqual([[0, 1, 2], [3, 4]])
   expect(wrapRows([1, 40, 3], 20, 2)).toEqual([[0], [1], [2]])
   expect(wrapRows([], 20, 2)).toEqual([])
+})
+
+test('GF-01 the bar keeps its groups whole: on one row with a separator, else each group on rows of its own', async () => {
+  // types 4 × 9, actions [ finish ] [ rebase ] [ publish ]: 10, 10, 11
+  const groups = [[9, 9, 9, 9], [10, 10, 11]]
+  expect(wrapGroups(groups, 80, 1)).toEqual([[[0, 0], [0, 1], [0, 2], [0, 3], 'separator', [1, 0], [1, 1], [1, 2]]])
+  expect(wrapGroups(groups, 60, 1)).toEqual([
+    [[0, 0], [0, 1], [0, 2], [0, 3]],
+    [[1, 0], [1, 1], [1, 2]],
+  ])
+  // a group wider than the row still wraps inside itself
+  expect(wrapGroups(groups, 25, 1)).toEqual([
+    [[0, 0], [0, 1]],
+    [[0, 2], [0, 3]],
+    [[1, 0], [1, 1]],
+    [[1, 2]],
+  ])
+  expect(wrapGroups([[9, 9], []], 80, 1)).toEqual([[[0, 0], [0, 1]]])
 })

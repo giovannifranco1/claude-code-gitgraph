@@ -22,11 +22,17 @@
 - 2026-10-22: gitflow clássico (git-flow-next) no repositório do mod.
 - 2026-10-22: ações de Git Flow (GF-01..GF-08) no rodapé fixo do painel + menu de branch, via CLI do git-flow-next (sem AVH); finish com `--no-ff`, push, `--keep` e mensagem de tag ligados por padrão.
 - 2026-10-22: todo git do mod roda com `GIT_EDITOR=true`, `GIT_MERGE_AUTOEDIT=no` e `GIT_TERMINAL_PROMPT=0` (nunca editor nem prompt); o timeout longo é só para comandos de rede.
+- 2026-11-18: hotfix 1.6.1: Nerd Font verificada a cada `/gitgraph`; remote como segmento da pílula num tom escuro da cor dela (`shade`) (no lugar do `⇄`), nome cortado antes do remote, primeira pílula pode usar a coluna Description inteira; ações do commit atrás de um ícone ⋯ nos detalhes (View `isActionsOpen`, atom `view-9`); listas alinhadas à esquerda com separador `┈`; Git Flow usa `preferredRemote` (origin, senão o primeiro) e recebe `-c gitflow.origin=`; menu de ref em lista com grupos (`menuGroups`); cabeçalho com a largura da linha; barra do Git Flow quebra por grupo (`wrapGroups`).
 
 ## Blockers
 - (resolvido) Hot-reload de mods foi ativado depois na sessão de criação.
 
 ## Lições
+- 2026-11-18: os caps Nerd Font (`\ue0b6`/`\ue0b4`, área de uso privado) somem quando o arquivo é reescrito a partir de texto copiado do terminal: editar em volta das constantes `CAP_*`, nunca reescrevê-las, e conferir com `xxd`.
+- 2026-11-18: `session.start` dispara uma vez por processo e **não** depois de `/clear`/`/resume`; o `$.state` daquela sessão volta ao inicial. Tudo que o render precisa e é detectado no start (Nerd Font) tem de ser refeito ao abrir o painel.
+- 2026-11-18: a engine só aceita passar `$` a funções declaradas no topo do arquivo (não a uma `const` dentro do `register`): o módulo nem carrega e todos os testes do pane quebram.
+- 2026-11-18: `metaOf(ctx, '', '')` media o cabeçalho com hash de 0 caracteres (`short('')`): 7 colunas a mais, mais o `EDGE_SAFETY`. Medir o cabeçalho com os mesmos rótulos que ele desenha.
+- 2026-11-18: o `find` do kit de testes não junta filhos de um `Text` (`{a}{b}`): texto que o teste lê inteiro vai como uma string só.
 - 2026-11-18: a cada release, acrescentar a entrada da versão no `CHANGELOG.md` (a tela ☰ lê o arquivo da pasta do mod e marca a versão do plugin.json).
 - 2026-11-10: coluna à direita no seletor de repos: quatro tentativas com o `[branch]` num elemento irmão do Button na linha (`Box` com flex ou `Text`) não desenharam a branch (ou sumiram com o nome) no terminal; o texto **dentro** do Button (filho `Text dimColor`, como na doc do `ButtonProps`) é desenhado. O kit de testes não roda o layout, então não pegou nenhuma. Alinhamento à direita: espaços calculados a partir de `ctx.cols` (`branchColumn`), dentro do próprio Button.
 - 2026-10-27: a barra do rodapé estourava a borda direita porque media os Buttons com moldura só pelo label: no terminal eles são `[ label ]` (+4 células). Toda largura de item deve contar o que é desenhado.
@@ -51,6 +57,8 @@
 - /simplify 2026-10-27 (pulado): `cellWidth` genérico por code point no lugar de `.length` nos itens da barra.
 - /simplify 2026-10-22 (pulado, registrado): trocar os booleanos de formulário da View por uma união discriminada; detectar duplo clique dentro do pill.tsx; `loadSettings` com `--show-scope --get-regexp`; `framed` somando alturas de `{node, height}`; dividir `renderSettings`.
 - /simplify 2026-10-22 (git flow, pulado): Continue/Abort também para merge/rebase do menu (detectar pelo status); memoizar o rodapé entre passos de scroll; `run` genérico no `MenuItem`.
+- /simplify 2026-11-18 (pulado): nomes de remote via `git config --get-regexp` em vez do `git remote` extra no `loadFlow`; checar a fonte só quando o estado foi perdido; `openForm` único para push/delete/rename; campo `group` no `MenuItem` em vez de `GROUP_OF` por id.
+- Bloco escuro entre pílulas vizinhas no modo quadrado (print de 2026-11-18): não reproduzido; reavaliar.
 - Ver ROADMAP M2.
 
 ## Preferences

@@ -24,7 +24,8 @@ export function fitGraph(cells: Cell[], max: number): Cell[] {
   return [...cells.slice(0, Math.max(0, max - 1)), { ch: '…', color: cells[max - 1]?.color ?? 0 }]
 }
 
-export const short = (hash: string) => hash.slice(0, 7)
+export const HASH_W = 7
+export const short = (hash: string) => hash.slice(0, HASH_W)
 
 // Keeps both ends: a URL's host and its repository name.
 export function truncateMiddle(text: string, max: number): string {
