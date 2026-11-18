@@ -14,8 +14,8 @@ gitgraph/
 │   ├── flow.ts                  # git flow: config gitflow.*, tópicos, próxima versão, argv de start/finish/update/publish
 │   ├── repos.ts                 # argv do find de repos, parse da lista, repo ativo, branch de cada repo e label do seletor
 │   ├── settings.ts              # git remote -v, git config user.*, validação de remote
-│   ├── virtual.ts               # janela visível do scroll, busca por hash
-│   ├── pilldraw.tsx             # desenho da pílula (compartilhado)
+│   ├── virtual.ts               # janela visível do scroll (engine e própria), largura do grafo, busca por hash
+│   ├── pilldraw.tsx             # desenho da pílula por segmentos, `shade` (compartilhado)
 │   ├── pill.tsx                 # Client: pílula com clique direito/duplo
 │   └── spinner.tsx              # Client: spinner animado
 ├── types/index.d.ts             # contrato de $.state

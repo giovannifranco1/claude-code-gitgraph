@@ -6,4 +6,7 @@
 - Detecção de Nerd Font só olha fontes instaladas, não a fonte do terminal: opção `badges: square` contorna. Roda no `session.start` e a cada `/gitgraph` (o start não dispara após `/clear`/`/resume`).
 - Altura fixa por linha corta conteúdo longo no detalhe (8 linhas de mensagem, 20 arquivos).
 - `$.ui.scroll` até a busca não é coberto por teste (o kit não implementa).
+- Scroll próprio do terminal docked: o kit entrega o `ui.scroll` sem `by`/`offset` (sem pane real), então o hook só é coberto pela lógica pura (`windowAt`, `clampTop`); a janela usa `top` negativo numa `Box` absoluta para cortar um commit aberto no topo — conferido no terminal (tmux), não no kit.
+- A última linha da área do pane docked é da engine (`bodyRows` é uma a menos que a área visível): o mod não desenha nela.
+- Ícones Nerd Font mudam de codepoint entre versões (o fantasma do Font Awesome `\uf6e2` não existe no 3.x): conferir na `cmap` das fontes instaladas antes de escolher um glifo.
 - Lanes em histórico com muitos merges podem ficar largas: truncar colunas do grafo pela largura do painel.
