@@ -316,12 +316,12 @@ async function searchCommit($: EngineInterface, value: string): Promise<void> {
   await update($, viewState, v => ({ ...v, scrollTo: null }))
 }
 
+// Whether the open menu is this ref's, on this commit.
+const isMenuOpen = (menu: View['menu'], hash: string, badge: Badge) => menu?.hash === hash && menu.badge.label === badge.label && menu.badge.kind === badge.kind
+
 async function openMenu($: EngineInterface, hash: string, badge: Badge): Promise<void> {
   if ((await read($, flowState)) === null) await loadFlow($)
-  await update($, viewState, (v): View => {
-    const isSame = v.menu?.hash === hash && v.menu.badge.label === badge.label && v.menu.badge.kind === badge.kind
-    return { ...v, ...CLOSED, menu: isSame ? null : { hash, badge } }
-  })
+  await update($, viewState, (v): View => ({ ...v, ...CLOSED, menu: isMenuOpen(v.menu, hash, badge) ? null : { hash, badge } }))
 }
 
 async function runAction($: EngineInterface, args: string[], done: string, isNetwork = false): Promise<void> {
@@ -1010,9 +1010,32 @@ function renderFiles(ctx: Ctx, files: FileStat[]) {
   ]
 }
 
+// A framed button per ref of the commit, opening the menu a right click on its pill opens:
+// the way in where the surface does not pass right clicks to the mod. The label is a single
+// string (vscode drops nested children).
+function refMenuRows($: EngineInterface, ctx: Ctx, hash: string, badges: Badge[]) {
+  const { Button } = ctx.els
+  if (!badges.length) return []
+  const items: BarItem[] = [
+    barText(ctx, 'Branch actions:'),
+    ...badges.map((b, i) => {
+      const label = `${b.label} ▾`
+      return {
+        node: (
+          <Button key={`refmenu-${i}`} variant={isMenuOpen(ctx.view.menu, hash, b) ? 'primary' : undefined} onPress={() => openMenu($, hash, b)}>
+            {label}
+          </Button>
+        ),
+        width: buttonWidth(label, false),
+      }
+    }),
+  ]
+  return buttonRows(ctx, 'refmenu-row', items)
+}
+
 function renderDetail($: EngineInterface, ctx: Ctx, { commit, cells }: GraphRow) {
   const { els, detail, graph, view } = ctx
-  const { Text, Button } = els
+  const { Text } = els
   const { Input } = ctx
   const branch = localBranch(commit.refs)
   const lane = laneColor(cells)
@@ -1038,28 +1061,13 @@ function renderDetail($: EngineInterface, ctx: Ctx, { commit, cells }: GraphRow)
         </Text>,
       ),
     )
+    rows.push(...refMenuRows($, ctx, commit.hash, badges))
     if (body.length && body[0] !== '') {
       rows.push(blank(ctx), ...body.slice(0, BODY_LINES).map(l => line(ctx, <Text wrap="truncate-end">{l}</Text>)))
       if (body.length > BODY_LINES) rows.push(line(ctx, <Text dimColor>…</Text>))
     }
     rows.push(blank(ctx), ...renderFiles(ctx, detail.files))
   }
-  if (badges.length)
-    rows.push(
-      blank(ctx),
-      line(
-        ctx,
-        [
-          <Text dimColor>Refs:</Text>,
-          ...badges.map((b, i) => (
-            <Button key={`refmenu-${i}`} plain onPress={() => openMenu($, commit.hash, b)}>
-              ⋯ {b.label}
-            </Button>
-          )),
-        ],
-        1,
-      ),
-    )
   rows.push(blank(ctx))
   if (view.running) rows.push(view.menu ? blank(ctx) : renderRunning(ctx))
   else {
