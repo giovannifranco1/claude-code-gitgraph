@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { parseDetail, parseLog, parseRefs, parseStatus, remotesOf, UNCOMMITTED, withUncommitted } from '../hooks/log'
+import { localsOf, parseDetail, parseSync, parseLog, parseRefs, parseStatus, remotesOf, UNCOMMITTED, withUncommitted } from '../hooks/log'
 
 const US = '\x1f'
 const RS = '\x1e'
@@ -93,4 +93,14 @@ test('GG-04 symbolic remote HEADs are not refs of their own', async () => {
     { kind: 'remote', name: 'origin/main' },
     { kind: 'remote', name: 'github/main' },
   ])
+})
+
+test('GG-24 the local branch names, from the refs listing', async () => {
+  expect(localsOf('a1 refs/heads/main\nb2 refs/heads/feature/x\nc3 refs/remotes/origin/main\nd4 refs/tags/v1\n')).toEqual(['main', 'feature/x'])
+})
+
+test('FD-07 the upstream of the branch and how far it is ahead of and behind it, from the status', async () => {
+  expect(parseSync('# branch.head feature/x\n# branch.upstream github/feature/x\n# branch.ab +2 -1\n')).toEqual({ remote: 'github', ahead: 2, behind: 1 })
+  expect(parseSync('# branch.head feature/x\n# branch.upstream origin/feature/x\n# branch.ab +0 -0\n')).toEqual({ remote: 'origin', ahead: 0, behind: 0 })
+  expect(parseSync('# branch.head feature/x\n')).toBeNull()
 })

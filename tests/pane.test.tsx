@@ -44,6 +44,10 @@ type Fake = {
   branchRefs?: string
   // No Nerd Font found by the font check.
   hasNoNerdFont?: boolean
+  // The status's upstream lines (`# branch.upstream …`, `# branch.ab …`); none when absent.
+  sync?: string
+  // The mod's store ($.store), kept between sessions.
+  store?: Map<string, unknown>
 }
 
 const FLOW_CONFIG = [
@@ -115,7 +119,7 @@ function answer(fake: Fake, raw: readonly string[], cwd = '.') {
     case 'log':
       return ok(logOf(fake))
     case 'status':
-      return ok(`# branch.oid ${fake.head ?? M}\n# branch.head ${fake.branch ?? 'main'}\n1 .M N... 100644 100644 100644 x y src/a.ts\n${fake.isConflicted ? 'u UU N... 100644 100644 100644 100644 a b c src/b.ts\n' : ''}`)
+      return ok(`# branch.oid ${fake.head ?? M}\n# branch.head ${fake.branch ?? 'main'}\n${fake.sync ?? ''}1 .M N... 100644 100644 100644 x y src/a.ts\n${fake.isConflicted ? 'u UU N... 100644 100644 100644 100644 a b c src/b.ts\n' : ''}`)
     case 'flow': {
       const cli = fake.flow ?? 'next'
       if (cli === 'none') return { ...fail("git: 'flow' is not a git command."), exitCode: 1 }
@@ -167,6 +171,12 @@ async function setup($: Engine, on: On, fake: Fake, copied: string[] = [], toast
     if (fake.hold && e.argv.includes('push')) await fake.hold
     return { value: answer(fake, e.argv, e.init?.cwd) }
   })
+  const store = (fake.store ??= new Map())
+  on('store.get', (_, e) => ({ value: store.get(e.key) }))
+  on('store.set', (_, e) => {
+    store.set(e.key, e.value)
+    return { value: undefined }
+  })
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('tool.call', () => ({ result: {} }))
   on('command.run', () => ({ text: '' }))
@@ -201,8 +211,16 @@ test('GG-01 /gitgraph opens the pane and draws commits, refs and the graph', asy
     const ui = await $.ui.mount(pane(surface))
     expect((await ui.find({ type: 'Text', text: /Merge feat/ }))?.text).toContain('Merge feat')
     const head = await ui.find({ type: 'Client', key: `pill:${M}:0` })
-    expect(head?.props.props).toMatchObject({ name: '● main', remotes: 'origin', isBold: true })
-    expect((await ui.find({ type: 'Client', key: `pill:${B}:1` }))?.props.props).toMatchObject({ name: '◆ v0.1' })
+    // the checked-out branch: a pin before its name, in its own color; then its remote
+    const segments = (head?.props.props as { segments: { text: string; bg: string; isBold?: boolean; icon?: { text: string; fg: string } }[] }).segments
+    expect(segments.map(g => `${g.icon?.text ?? ''}${g.text}`)).toEqual(['\uf058  main', 'origin'])
+    // in the dark shade of the lane, as the remote's segment
+    expect(segments[0]?.icon?.fg).toBe(segments[1]?.bg)
+    expect(segments[0]?.isBold).toBe(true)
+    // a tag: its icon on the tag color (the icon in its dark shade), then the version on that shade
+    const tag = (await ui.find({ type: 'Client', key: `pill:${B}:1` }))?.props.props as { segments: { text: string; bg: string; icon?: { text: string; fg: string } }[] }
+    expect(tag.segments.map(g => `${g.icon?.text ?? ''}${g.text}`)).toEqual(['\uf02b', 'v0.1'])
+    expect(tag.segments[0]?.icon?.fg).toBe(tag.segments[1]?.bg)
     expect(await ui.find({ type: 'Text', text: /─╮/ })).toBeDefined()
     await ui.unmount()
   }
@@ -284,7 +302,7 @@ test('GG-05 the scope toggle reloads with HEAD only', async ($, on) => {
 test('GG-06 past 300 commits a load-more button fetches the next page', async ($, on) => {
   const fake = newFake({ extra: 300 })
   await setup($, on, fake)
-  const ui = await $.ui.mount(pane('terminal'))
+  const ui = await $.ui.mount(pane('desktop'))
   await ui.press({ key: 'more' })
   expect(logCalls(fake).at(-1)).toContain('-n601')
   await ui.unmount()
@@ -395,6 +413,8 @@ test('GG-10 a new branch name is validated and passed as its own argument', asyn
   await setup($, on, fake)
   const ui = await $.ui.mount(pane('terminal'))
   await ui.press({ key: B })
+  // the field draws its own colon after the label
+  expect((await ui.find({ type: 'Input', key: 'new-branch' }))?.props.label).toBe('New branch here')
   await ui.input({ key: 'new-branch', text: '-D' })
   await ui.input({ key: 'new-branch', text: 'Bad Name' })
   await ui.input({ key: 'new-branch', text: 'x$(rm)' })
@@ -425,8 +445,8 @@ test('GG-11 pills are rounded with a Nerd Font and fall back to text pills witho
   expect((await ui.find({ type: 'Client', key: `pill:${M}:0` }))?.props.props).toMatchObject({ isRound: true })
   await ui.unmount()
   const vs = await $.ui.mount(pane('vscode'))
-  expect((await vs.find({ type: 'Text', text: /● main/ }))?.text).toContain('origin')
-  expect(await vs.find({ type: 'Text', text: /◆ v0\.1/ })).toBeDefined()
+  expect((await vs.find({ type: 'Text', text: /\uf058 +main/ }))?.text).toContain('origin')
+  expect(await vs.find({ type: 'Text', text: /v0\.1/ })).toBeDefined()
   expect(await vs.find({ type: 'Text', text: /^\ue0b4/ })).toBeDefined()
   await vs.unmount()
 })
@@ -649,14 +669,14 @@ test('GG-05 the all-branches option is a switch with no keyboard shortcut', asyn
   await ui.unmount()
 })
 
-test('GG-15 only the rows near the window are drawn; the rest are spacers', async ($, on) => {
+test('GG-15 where the engine scrolls, only the rows near the window are drawn; the rest are spacers', async ($, on) => {
   await setup($, on, newFake({ extra: 300 }))
-  const top = await $.ui.mount(pane('terminal'))
+  const top = await $.ui.mount(pane('desktop'))
   expect(await top.find({ type: 'Button', key: M })).toBeDefined()
   expect(await top.find({ type: 'Button', key: 'e0000250' })).toBeUndefined()
   expect(await top.find({ type: 'Box', key: 'space-after' })).toBeDefined()
   await top.unmount()
-  const deep = await $.ui.mount(pane('terminal', 100, 255))
+  const deep = await $.ui.mount(pane('desktop', 100, 255))
   expect(await deep.find({ type: 'Button', key: 'e0000250' })).toBeDefined()
   expect(await deep.find({ type: 'Button', key: M })).toBeUndefined()
   expect(await deep.find({ type: 'Box', key: 'space-before' })).toBeDefined()
@@ -747,45 +767,49 @@ const flowCalls = (fake: Fake) => gitCalls(fake).filter(c => c[1] === 'flow' && 
 const envOf = (fake: Fake, argv: string[]) => fake.envs[callOf(fake, argv)]
 const GIT_ENV = { GIT_TERMINAL_PROMPT: '0', GIT_EDITOR: 'true', GIT_MERGE_AUTOEDIT: 'no' }
 
-test('GF-01 the footer bar shows the git flow actions as icons, with no base names', async ($, on) => {
+test('GF-01 the footer is one row that opens the Git Flow dialog: a row per type with its start, no finish off a work branch', async ($, on) => {
   await setup($, on, newFake())
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount(pane(surface))
+    expect(await ui.find({ key: 'flow-start-feature' })).toBeUndefined()
+    expect((await ui.find({ type: 'Button', key: 'flow-open' }))?.text).toMatch(/Git Flow$/)
+    await ui.press({ key: 'flow-open' })
     for (const kind of ['feature', 'release', 'hotfix']) {
-      const text = (await ui.find({ type: 'Button', key: `flow-start-${kind}` }))?.text ?? ''
-      expect(text).toContain(kind)
-      expect(text).not.toContain('←')
+      expect((await ui.find({ type: 'Box', key: `flow-row-${kind}` }))?.text).toContain(kind)
+      expect((await ui.find({ type: 'Button', key: `flow-start-${kind}` }))?.text).toBe('start')
     }
     expect(await ui.find({ key: 'flow-finish' })).toBeUndefined()
-    expect(await ui.find({ key: 'flow-name' })).toBeUndefined()
+    await ui.press({ key: 'flow-menu-close' })
+    expect(await ui.find({ key: 'flow-start-feature' })).toBeUndefined()
     await ui.unmount()
   }
 })
 
-test('GF-01 on a docked terminal pane the footer is pinned to the bottom of the window', async ($, on) => {
-  await setup($, on, newFake({ extra: 100 }))
-  const ui = await $.ui.mount(pane('terminal', 100, 30))
-  expect((await ui.find({ type: 'Box', key: 'flow-footer' }))?.props).toMatchObject({ position: 'absolute', top: 30 + 40 - 2 })
+test('GG-21 GF-01 on a docked terminal pane the mod scrolls its rows: the pane holds still at its height, the footer below a window of rows', async ($, on) => {
+  await setup($, on, newFake({ extra: 300 }))
+  // the engine's offset does not move it: the tree never scrolls there
+  const ui = await $.ui.mount(pane('terminal', 100, 255))
+  expect(await ui.find({ type: 'Button', key: M })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'e0000250' })).toBeUndefined()
+  expect(await ui.find({ type: 'Box', key: 'space-before' })).toBeUndefined()
+  const footer = (await ui.find({ type: 'Box', key: 'flow-footer' }))?.props
+  expect(footer).toMatchObject({ height: 2 })
+  expect(footer?.position).toBeUndefined()
+  // the header's rows, the window, the footer's two: the pane's 40
+  const window = (await ui.find({ type: 'Box', key: 'rows-window' }))?.props.height as number
+  expect(window).toBeGreaterThan(30)
+  expect(window).toBeLessThan(40 - 2)
   await ui.unmount()
 })
 
-test('GF-01 a form grows the pinned footer by its rows, keeping it on the bottom edge', async ($, on) => {
+test('FD-01 an open dialog leaves the pinned footer as it is, on the bottom edge', async ($, on) => {
   await setup($, on, newFake())
   const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: 'flow-open' })
   await ui.press({ key: 'flow-start-feature' })
-  expect((await ui.find({ type: 'Box', key: 'flow-footer' }))?.props).toMatchObject({ top: 40 - 3, height: 3 })
+  expect((await ui.find({ type: 'Box', key: 'flow-footer' }))?.props).toMatchObject({ height: 2 })
+  expect(await ui.find({ type: 'Box', key: 'flow-dialog' })).toBeDefined()
   await ui.unmount()
-})
-
-test('GF-01 the bar counts the frame of its buttons and wide icons, wrapping before the right edge', async ($, on) => {
-  await setup($, on, newFake({ branch: 'feature/login' }))
-  // 54 columns held the bar on one row when only the labels were counted; it takes 67.
-  const narrow = await $.ui.mount(pane('terminal', 54))
-  expect((await narrow.find({ type: 'Box', key: 'flow-footer' }))?.props).toMatchObject({ height: 3 })
-  await narrow.unmount()
-  const wide = await $.ui.mount(pane('terminal', 68))
-  expect((await wide.find({ type: 'Box', key: 'flow-footer' }))?.props).toMatchObject({ height: 2 })
-  await wide.unmount()
 })
 
 test('GF-01 elsewhere (other surfaces, an inline pane) the footer closes the list, after the last commit', async ($, on) => {
@@ -797,6 +821,7 @@ test('GF-01 elsewhere (other surfaces, an inline pane) the footer closes the lis
   expect(await inline.find({ type: 'Box', key: 'flow-footer' })).toBeUndefined()
   await inline.unmount()
   const ui2 = await $.ui.mount(pane('desktop'))
+  await ui2.press({ key: 'flow-open' })
   expect(await ui2.find({ type: 'Button', key: 'flow-start-feature' })).toBeDefined()
   await ui2.unmount()
 })
@@ -806,9 +831,10 @@ for (const [over, text, name] of [
   [{ flow: 'other' }, /need git-flow-next/, 'another git flow'],
   [{ flowConfig: '' }, /main · develop · feature\//, 'not set up'],
 ] as const)
-  test(`GF-02 the drawer says when git flow is ${name}, with no actions`, async ($, on) => {
+  test(`GF-02 the Git Flow dialog says when git flow is ${name}, with no actions`, async ($, on) => {
     await setup($, on, newFake(over))
     const ui = await $.ui.mount(pane('terminal'))
+    await ui.press({ key: 'flow-open' })
     expect(await ui.find({ type: 'Text', text })).toBeDefined()
     expect(await ui.find({ key: 'flow-start-feature' })).toBeUndefined()
     await ui.unmount()
@@ -818,6 +844,7 @@ test('GF-02 Start git flow sets it up with the standard names (git flow init -d)
   const fake = newFake({ flowConfig: '' })
   await setup($, on, fake)
   const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: 'flow-open' })
   await ui.press({ key: 'flow-init' })
   expect(flowCalls(fake)).toEqual([])
   await ui.press({ key: 'flow-init' })
@@ -829,6 +856,7 @@ test('FI-01 Set up git flow opens a form prefilled from the branches, and inits 
   const fake = newFake({ flowConfig: '', branchRefs: 'refs/heads/master\nrefs/heads/dev\nrefs/remotes/origin/feat/login\n' })
   await setup($, on, fake)
   const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: 'flow-open' })
   expect((await ui.find({ type: 'Button', key: 'flow-init' }))?.text).toBe('Use defaults')
   await ui.press({ key: 'flow-init-open' })
   for (const [key, value] of [['main', 'master'], ['develop', 'dev'], ['feature', 'feat/'], ['bugfix', 'bugfix/'], ['tag', '']] as const)
@@ -847,6 +875,7 @@ test('FI-01 an invalid field runs nothing and says which one', async ($, on) => 
   const toasts: string[] = []
   await setup($, on, fake, [], toasts)
   const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: 'flow-open' })
   await ui.press({ key: 'flow-init-open' })
   await ui.input({ key: 'flow-init-feature', text: 'my feat/', kind: 'change' })
   await ui.press({ key: 'flow-init-run' })
@@ -880,6 +909,7 @@ test('GF-03 start validates the full branch name and passes the name as its own 
   const fake = newFake()
   await setup($, on, fake)
   const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: 'flow-open' })
   await ui.press({ key: 'flow-start-feature' })
   await ui.input({ key: 'flow-name', text: 'Bad Name' })
   await ui.input({ key: 'flow-name', text: '$(rm -rf)' })
@@ -894,28 +924,28 @@ test('GF-03 start validates the full branch name and passes the name as its own 
 test('GF-03 a release starts with the next version filled in', async ($, on) => {
   await setup($, on, newFake())
   const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: 'flow-open' })
   await ui.press({ key: 'flow-start-release' })
   expect((await ui.find({ type: 'Input', key: 'flow-name' }))?.props).toMatchObject({ value: '1.1.0' })
+  await ui.press({ key: 'flow-open' })
   await ui.press({ key: 'flow-start-hotfix' })
   expect((await ui.find({ type: 'Input', key: 'flow-name' }))?.props).toMatchObject({ value: '1.0.2' })
   await ui.unmount()
 })
 
-test('GF-04 on a work branch the drawer offers update (confirmed) and publish', async ($, on) => {
+test('GF-04 FD-03 on a work branch the Git Flow dialog offers its update, asked in a dialog, then run; no publish there', async ($, on) => {
   const fake = newFake({ branch: 'feature/login' })
   await setup($, on, fake)
   const ui = await $.ui.mount(pane('terminal'))
-  expect(await ui.find({ type: 'Text', text: /feature\/login/ })).toBeDefined()
+  await ui.press({ key: 'flow-open' })
   expect((await ui.find({ type: 'Button', key: 'flow-update' }))?.text).toContain('rebase')
+  expect(await ui.find({ key: 'flow-publish' })).toBeUndefined()
   await ui.press({ key: 'flow-update' })
   expect(flowCalls(fake)).toEqual([])
-  await ui.press({ key: 'flow-update' })
-  await ui.press({ key: 'flow-publish' })
-  await ui.press({ key: 'flow-publish' })
-  expect(flowCalls(fake)).toEqual([
-    ['git', 'flow', 'feature', 'update', 'login'],
-    ['git', 'flow', 'feature', 'publish', 'login'],
-  ])
+  expect(await ui.find({ type: 'Text', text: /Rebase feature\/login on develop\?/ })).toBeDefined()
+  expect((await ui.find({ type: 'Button', key: 'flow-confirm-run' }))?.text).toBe('Rebase')
+  await ui.press({ key: 'flow-confirm-run' })
+  expect(flowCalls(fake)).toEqual([['git', 'flow', 'feature', 'update', 'login']])
   await ui.unmount()
 })
 
@@ -923,10 +953,10 @@ test('GF-05 finish follows the switches, then pushes the parent with the tags', 
   const fake = newFake({ branch: 'feature/login' })
   await setup($, on, fake)
   const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: 'flow-open' })
   await ui.press({ key: 'flow-finish' })
   expect(flowCalls(fake)).toEqual([])
   await ui.press({ key: 'flow-opt-keep' })
-  await ui.press({ key: 'flow-finish-run' })
   await ui.press({ key: 'flow-finish-run' })
   const finish = ['flow', 'feature', 'finish', 'login', '--no-ff', '--no-keep']
   expect(callOf(fake, finish)).toBeGreaterThan(-1)
@@ -940,10 +970,10 @@ test('GF-05 a release finish carries its tag message; a failed push says the fin
   const fake = newFake({ branch: 'release/1.1.0', failPush: 'origin' })
   await setup($, on, fake, [], toasts)
   const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: 'flow-open' })
   await ui.press({ key: 'flow-finish' })
-  expect((await ui.find({ type: 'Input', key: 'flow-tag' }))?.props).toMatchObject({ value: '1.1.0' })
+  expect((await ui.find({ type: 'Input', key: 'flow-tag' }))?.props).toMatchObject({ value: '1.1.0', label: 'Tag message' })
   await ui.input({ key: 'flow-tag', text: 'Big release', kind: 'change' })
-  await ui.press({ key: 'flow-finish-run' })
   await ui.press({ key: 'flow-finish-run' })
   expect(callOf(fake, ['flow', 'release', 'finish', '1.1.0', '--no-ff', '--keep', '-m', 'Big release'])).toBeGreaterThan(-1)
   expect(callOf(fake, ['push', '--follow-tags', 'origin', 'main', 'develop'])).toBeGreaterThan(-1)
@@ -955,8 +985,8 @@ test('GF-05 a failed finish does not push', async ($, on) => {
   const fake = newFake({ branch: 'feature/login', conflictOn: 'finish' })
   await setup($, on, fake)
   const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: 'flow-open' })
   await ui.press({ key: 'flow-finish' })
-  await ui.press({ key: 'flow-finish-run' })
   await ui.press({ key: 'flow-finish-run' })
   expect(fake.calls.some(c => c[1] === 'push')).toBe(false)
   await ui.unmount()
@@ -966,8 +996,8 @@ test('GF-06 a finish stopped by a conflict offers continue and abort', async ($,
   const fake = newFake({ branch: 'feature/login', conflictOn: 'finish' })
   await setup($, on, fake)
   const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: 'flow-open' })
   await ui.press({ key: 'flow-finish' })
-  await ui.press({ key: 'flow-finish-run' })
   await ui.press({ key: 'flow-finish-run' })
   expect(await ui.find({ type: 'Text', text: /Conflict/ })).toBeDefined()
   await ui.press({ key: 'flow-continue' })
@@ -980,8 +1010,9 @@ test('GF-06 an update stopped by a conflict aborts the rebase on the second pres
   const fake = newFake({ branch: 'feature/login', conflictOn: 'update' })
   await setup($, on, fake)
   const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: 'flow-open' })
   await ui.press({ key: 'flow-update' })
-  await ui.press({ key: 'flow-update' })
+  await ui.press({ key: 'flow-confirm-run' })
   await ui.press({ key: 'flow-abort' })
   await ui.press({ key: 'flow-abort' })
   expect(callOf(fake, ['rebase', '--abort'])).toBeGreaterThan(-1)
@@ -997,26 +1028,15 @@ test('GF-07 a right click on a work branch offers its git flow actions; finish o
   await ui.press({ key: 'menu-flow-finish' })
   expect(await ui.find({ key: 'flow-finish-run' })).toBeDefined()
   await ui.press({ key: 'flow-finish-run' })
-  await ui.press({ key: 'flow-finish-run' })
   expect(callOf(fake, ['flow', 'feature', 'finish', 'login', '--no-ff', '--keep'])).toBeGreaterThan(-1)
   await ui.unmount()
-})
-
-test('GF-01 on a narrow pane the bar goes on in a second row; a wide one keeps one row', async ($, on) => {
-  await setup($, on, newFake({ branch: 'feature/login' }))
-  const narrow = await $.ui.mount(pane('terminal', 40))
-  expect((await narrow.find({ type: 'Box', key: 'flow-footer' }))?.props).toMatchObject({ height: 3 })
-  expect(await narrow.find({ type: 'Button', key: 'flow-publish' })).toBeDefined()
-  await narrow.unmount()
-  const wide = await $.ui.mount(pane('terminal', 100))
-  expect((await wide.find({ type: 'Box', key: 'flow-footer' }))?.props).toMatchObject({ height: 2 })
-  await wide.unmount()
 })
 
 test('GF-02 a repository with git flow AVH config gets the actions, not an empty bar', async ($, on) => {
   const avh = 'gitflow.branch.master main\ngitflow.branch.develop develop\ngitflow.prefix.feature feature/\ngitflow.prefix.hotfix hotfix/\n'
   await setup($, on, newFake({ flowConfig: avh }))
   const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: 'flow-open' })
   expect(await ui.find({ type: 'Button', key: 'flow-start-feature' })).toBeDefined()
   expect(await ui.find({ type: 'Button', key: 'flow-start-hotfix' })).toBeDefined()
   await ui.unmount()
@@ -1026,10 +1046,12 @@ test('GF-08 git flow runs with an empty hooks folder of the mod: repo hooks stay
   const fake = newFake({ branch: 'feature/login' })
   await setup($, on, fake)
   const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: 'flow-open' })
   await ui.press({ key: 'flow-start-feature' })
   await ui.input({ key: 'flow-name', text: 'search' })
-  await ui.press({ key: 'flow-publish' })
-  await ui.press({ key: 'flow-publish' })
+  await ui.press({ key: 'flow-open' })
+  await ui.press({ key: 'flow-update' })
+  await ui.press({ key: 'flow-confirm-run' })
   const flows = fake.configs.filter(c => c.startsWith('flow: core.hooksPath='))
   expect(flows.length).toBe(2)
   expect(flows.every(c => /^flow: core\.hooksPath=.+\/nohooks$/.test(c))).toBe(true)
@@ -1038,28 +1060,28 @@ test('GF-08 git flow runs with an empty hooks folder of the mod: repo hooks stay
   await ui.unmount()
 })
 
-test('GF-08 publish and finish run only on a second press, in the bar and in the branch menu', async ($, on) => {
+test('GF-08 FD-03 publish runs only from the branch menu, asked in a dialog; cancel runs nothing', async ($, on) => {
   const fake = newFake({ branch: 'feature/login', headRefs: 'HEAD -> feature/login' })
   await setup($, on, fake)
   const ui = await $.ui.mount(pane('terminal'))
-  await ui.press({ key: 'flow-publish' })
-  await ui.press({ key: 'flow-finish' })
-  await ui.press({ key: 'flow-finish-run' })
+  await ui.pointer({ type: 'down', x: 1, y: 0, button: 'right', in: `pill:${M}:0` })
+  await ui.press({ key: 'menu-flow-publish' })
+  await ui.press({ key: 'flow-confirm-cancel' })
+  expect(await ui.find({ type: 'Box', key: 'flow-dialog' })).toBeUndefined()
   expect(flowCalls(fake)).toEqual([])
   await ui.pointer({ type: 'down', x: 1, y: 0, button: 'right', in: `pill:${M}:0` })
   await ui.press({ key: 'menu-flow-publish' })
-  expect(flowCalls(fake)).toEqual([])
-  await ui.press({ key: 'menu-flow-publish' })
+  await ui.press({ key: 'flow-confirm-run' })
   expect(flowCalls(fake)).toEqual([['git', 'flow', 'feature', 'publish', 'login']])
   await ui.unmount()
 })
 
-test('GF-01 the bar is always showing: no title to open, and finish, rebase and publish as words', async ($, on) => {
+test('GF-01 on a work branch its type row in the Git Flow dialog has start, rebase and finish as words', async ($, on) => {
   await setup($, on, newFake({ branch: 'feature/login' }))
   const ui = await $.ui.mount(pane('terminal'))
-  expect(await ui.find({ key: 'flow-toggle' })).toBeUndefined()
-  for (const key of ['flow-finish', 'flow-update', 'flow-publish']) expect((await ui.find({ type: 'Button', key }))?.text).toMatch(/^(finish|rebase|publish)$/)
-  expect(await ui.find({ key: 'flow-delete' })).toBeUndefined()
+  await ui.press({ key: 'flow-open' })
+  expect((await ui.find({ type: 'Box', key: 'flow-row-feature' }))?.text).toMatch(/feature *start *rebase *finish/)
+  expect((await ui.find({ type: 'Box', key: 'flow-row-release' }))?.text).not.toMatch(/finish/)
   await ui.unmount()
 })
 
@@ -1206,8 +1228,8 @@ test('GF-09 with no origin and no gitflow.origin, git flow runs and the finish p
   const fake = newFake({ remotes: ['github'], branch: 'hotfix/1.0.2', headRefs: 'HEAD -> hotfix/1.0.2, github/main' })
   await setup($, on, fake)
   const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: 'flow-open' })
   await ui.press({ key: 'flow-finish' })
-  await ui.press({ key: 'flow-finish-run' })
   await ui.press({ key: 'flow-finish-run' })
   expect(fake.configs).toContain('flow: gitflow.origin=github')
   expect(callOf(fake, ['push', '--follow-tags', 'github', 'main', 'develop'])).toBeGreaterThan(-1)
@@ -1223,5 +1245,162 @@ test('GG-12 the branch menu is a list, one item a row, its groups split by a rul
   expect(await ui.find({ type: 'Box', key: 'menu-rule-1' })).toBeDefined()
   expect(await ui.find({ type: 'Box', key: 'menu-rule-2' })).toBeDefined()
   expect(await ui.find({ type: 'Box', key: 'menu-rule-3' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('FD-01 FD-02 on a docked terminal pane finish opens a dialog over the graph: centered, framed, its switches a row each', async ($, on) => {
+  const fake = newFake({ branch: 'feature/login' })
+  await setup($, on, fake)
+  const ui = await $.ui.mount(pane('terminal', 100))
+  await ui.press({ key: 'flow-open' })
+  await ui.press({ key: 'flow-finish' })
+  const dialog = await ui.find({ type: 'Box', key: 'flow-dialog' })
+  expect(dialog?.props).toMatchObject({ position: 'absolute', width: 60, left: 20 })
+  expect(await ui.find({ type: 'Text', text: /^Finish feature\/login$/ })).toBeDefined()
+  for (const key of ['flow-opt-noff', 'flow-opt-push', 'flow-opt-keep']) expect(await ui.find({ type: 'Box', key: `${key}-row` })).toBeDefined()
+  // a Nerd Font icon takes two cells: two spaces keep one before the label
+  expect((await ui.find({ type: 'Button', key: 'flow-opt-noff' }))?.text).toBe('\uf205  merge commit (--no-ff)')
+  await ui.press({ key: 'flow-finish-cancel' })
+  expect(await ui.find({ type: 'Box', key: 'flow-dialog' })).toBeUndefined()
+  expect(flowCalls(fake)).toEqual([])
+  await ui.unmount()
+})
+
+test('FD-02 start opens the dialog with the name field; a run closes it', async ($, on) => {
+  const fake = newFake({ branch: 'main' })
+  await setup($, on, fake)
+  const ui = await $.ui.mount(pane('terminal', 100))
+  await ui.press({ key: 'flow-open' })
+  await ui.press({ key: 'flow-start-feature' })
+  expect(await ui.find({ type: 'Box', key: 'flow-dialog' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^New feature$/ })).toBeDefined()
+  await ui.input({ key: 'flow-name', text: 'search' })
+  expect(callOf(fake, ['flow', 'feature', 'start', 'search'])).toBeGreaterThan(-1)
+  expect(await ui.find({ type: 'Box', key: 'flow-dialog' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('FD-04 off a docked terminal pane the dialog content sits under the footer bar, no layer over the graph', async ($, on) => {
+  const fake = newFake({ branch: 'feature/login' })
+  await setup($, on, fake)
+  const ui = await $.ui.mount(pane('desktop', 100))
+  await ui.press({ key: 'flow-open' })
+  await ui.press({ key: 'flow-update' })
+  expect(await ui.find({ type: 'Box', key: 'flow-dialog' })).toBeUndefined()
+  await ui.press({ key: 'flow-confirm-run' })
+  expect(flowCalls(fake)).toEqual([['git', 'flow', 'feature', 'update', 'login']])
+  await ui.unmount()
+})
+
+test('MD-01 on a docked terminal pane the branch menu is a dialog over the graph; close shuts it', async ($, on) => {
+  await setup($, on, newFake())
+  const ui = await $.ui.mount(pane('terminal', 100))
+  await ui.pointer({ type: 'down', x: 1, y: 0, button: 'right', in: `pill:${B}:0` })
+  expect((await ui.find({ type: 'Box', key: 'menu-dialog' }))?.props).toMatchObject({ position: 'absolute', width: 60 })
+  expect(await ui.find({ type: 'Box', key: 'menu-row-checkout' })).toBeDefined()
+  await ui.press({ key: 'menu-close' })
+  expect(await ui.find({ type: 'Box', key: 'menu-dialog' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('MD-02 on a docked terminal pane the commit actions icon opens them as a dialog; close shuts it', async ($, on) => {
+  await setup($, on, newFake())
+  const ui = await $.ui.mount(pane('terminal', 100))
+  await ui.press({ key: B })
+  await ui.press({ key: 'detail-actions-toggle' })
+  expect((await ui.find({ type: 'Box', key: 'actions-dialog' }))?.props).toMatchObject({ position: 'absolute' })
+  expect(await ui.find({ type: 'Box', key: 'detail-row-reset' })).toBeDefined()
+  await ui.press({ key: 'actions-close' })
+  expect(await ui.find({ type: 'Box', key: 'actions-dialog' })).toBeUndefined()
+  expect(await ui.find({ type: 'Button', key: 'reset' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('MD-03 off a docked terminal pane the branch menu and the commit actions stay in the row, no dialog', async ($, on) => {
+  await setup($, on, newFake())
+  const ui = await $.ui.mount(pane('desktop', 100))
+  await ui.press({ key: B })
+  await ui.press({ key: 'detail-actions-toggle' })
+  expect(await ui.find({ type: 'Box', key: 'actions-dialog' })).toBeUndefined()
+  expect(await ui.find({ type: 'Box', key: 'detail-row-reset' })).toBeDefined()
+  await ui.press({ key: 'refmenu-0' })
+  expect(await ui.find({ type: 'Box', key: 'menu-dialog' })).toBeUndefined()
+  expect(await ui.find({ type: 'Box', key: 'menu-row-copy' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('GG-23 settings hide the author and the hash columns, the header with them; the choice is kept for the next session', async ($, on) => {
+  const fake = newFake()
+  await setup($, on, fake)
+  const ui = await $.ui.mount(pane('terminal', 100))
+  expect((await ui.find({ type: 'Button', key: M }))?.text).toMatch(/Ana .*aaaaaaa/)
+  await ui.press({ key: 'settings' })
+  await ui.press({ key: 'cfg-col-author' })
+  await ui.press({ key: 'cfg-col-hash' })
+  await ui.press({ key: 'settings-back' })
+  const row = (await ui.find({ type: 'Button', key: M }))?.text ?? ''
+  expect(row).not.toMatch(/Ana|aaaaaaa/)
+  expect((await ui.find({ type: 'Text', text: /^Graph +Description/ }))?.text).not.toMatch(/Author|Commit/)
+  expect(fake.store?.get('columns')).toEqual({ isAuthor: false, isHash: false })
+  await ui.unmount()
+})
+
+test('GG-23 a saved choice of columns applies when the pane opens', async ($, on) => {
+  const fake = newFake({ store: new Map([['columns', { isAuthor: false, isHash: true }]]) })
+  await setup($, on, fake)
+  const ui = await $.ui.mount(pane('terminal', 100))
+  const row = (await ui.find({ type: 'Button', key: M }))?.text ?? ''
+  expect(row).not.toMatch(/Ana/)
+  expect(row).toMatch(/aaaaaaa$/)
+  await ui.unmount()
+})
+
+test('GG-24 a branch only on a remote (merged, deleted here) leads with a ghost, as a tag with its icon: icon segment, then the name on its dark shade', async ($, on) => {
+  await setup($, on, newFake({ headRefs: 'HEAD -> main, origin/main, origin/feature/gone' }))
+  const ui = await $.ui.mount(pane('terminal', 120))
+  const gone = (await ui.find({ type: 'Client', key: `pill:${M}:1` }))?.props.props as { segments: { text: string; bg: string; icon?: { text: string; fg: string } }[] }
+  expect(gone.segments.map(g => `${g.icon?.text ?? ''}${g.text}`)).toEqual(['\u{f02a0}', 'origin/feature/gone'])
+  expect(gone.segments[0]?.icon?.fg).toBe(gone.segments[1]?.bg)
+  await ui.unmount()
+})
+
+test('FD-06 the footer row says where git flow stands: the work branch, or why it is off', async ($, on) => {
+  await setup($, on, newFake({ branch: 'feature/login' }))
+  const work = await $.ui.mount(pane('terminal'))
+  expect((await work.find({ type: 'Button', key: 'flow-open' }))?.text).toMatch(/Git Flow · feature\/login · from develop · not published$/)
+  await work.unmount()
+})
+
+for (const [sync, end] of [
+  ['# branch.upstream github/feature/login\n# branch.ab +2 -1\n', /from develop · ↑2 ↓1 github$/],
+  ['# branch.upstream github/feature/login\n# branch.ab +3 -0\n', /from develop · ↑3 github$/],
+  ['# branch.upstream github/feature/login\n# branch.ab +0 -0\n', /from develop · in sync with github$/],
+] as const)
+  test(`FD-07 the footer row says how the work branch stands with its upstream: ${end.source}`, async ($, on) => {
+    await setup($, on, newFake({ branch: 'feature/login', sync }))
+    const ui = await $.ui.mount(pane('terminal'))
+    expect((await ui.find({ type: 'Button', key: 'flow-open' }))?.text).toMatch(end)
+    await ui.unmount()
+  })
+
+for (const [over, end, name] of [
+  [{ branch: 'main' }, /Git Flow$/, 'off a work branch'],
+  [{ flow: 'none' }, /Git Flow · not installed$/, 'not installed'],
+  [{ flowConfig: '' }, /Git Flow · not set up$/, 'not set up'],
+] as const)
+  test(`FD-06 the footer row ${name}`, async ($, on) => {
+    await setup($, on, newFake(over))
+    const ui = await $.ui.mount(pane('terminal'))
+    expect((await ui.find({ type: 'Button', key: 'flow-open' }))?.text).toMatch(end)
+    await ui.unmount()
+  })
+
+test('GG-24 a remote branch whose local branch sits on another commit is no ghost', async ($, on) => {
+  // `feat` is a local branch (on B): origin/feat here only lags behind it
+  await setup($, on, newFake({ headRefs: 'HEAD -> main, origin/main, origin/feat' }))
+  const ui = await $.ui.mount(pane('terminal', 120))
+  const behind = (await ui.find({ type: 'Client', key: `pill:${M}:1` }))?.props.props as { segments: { text: string; icon?: unknown }[] }
+  expect(behind.segments.map(g => g.text)).toEqual(['origin/feat'])
+  expect(behind.segments[0]?.icon).toBeUndefined()
   await ui.unmount()
 })

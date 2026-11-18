@@ -11,7 +11,8 @@ export type Commit = {
 }
 
 export type BadgeKind = 'head' | 'detached' | 'branch' | 'remote' | 'tag'
-export type Badge = { kind: BadgeKind; label: string; remotes: string[] }
+// `isGone`: a remote branch with no local branch of its name (merged and deleted here).
+export type Badge = { kind: BadgeKind; label: string; remotes: string[]; isGone?: true }
 
 export type Cell = { ch: string; color: number }
 export type GraphRow = { commit: Commit; cells: Cell[] }
@@ -36,6 +37,10 @@ export type Graph = {
   // Unmerged paths: a merge, rebase or finish stopped on a conflict.
   conflicts: number
   remotes: string[]
+  // The local branch names: a remote branch with none of its name is gone here (merged, deleted).
+  locals?: string[]
+  // The checked-out branch against its upstream; null where it has none (not published).
+  sync?: { remote: string; ahead: number; behind: number } | null
   hasMore: boolean
   error?: string
 }
@@ -100,6 +105,10 @@ export type FlowView = {
   conflict: FlowConflict | null
   // The init form: under the footer bar where git flow is not set up, in settings to reconfigure.
   init: FlowInitForm | null
+  // The update or publish the dialog is asking about.
+  confirming: { action: 'update' | 'publish'; topic: FlowTopic } | null
+  // The Git Flow dialog, opened from the footer: a row per type, its start, update and finish.
+  isMenuOpen: boolean
 }
 
 // The mod's CHANGELOG.md, read when its screen opens, and the version installed.
@@ -118,8 +127,11 @@ export type RepoSettings = { local: UserConfig; global: UserConfig; remotes: Rem
 // shown, whether the repo dropdown is open, and the branch each repo is on (absent: unknown).
 export type Repos = { list: string[]; active: string; isPicking: boolean; branches: Record<string, string> }
 
+// The list's optional columns, chosen in settings and kept in the mod's store between sessions.
+export type Columns = { isAuthor: boolean; isHash: boolean }
+
 declare module 'claude-code' {
   interface PluginState {
-    gitgraph: { graph: Graph; view: Shaped<View>; detail: CommitDetail | null; isRound: boolean; settings: RepoSettings | null; hasNerdFont: boolean; graphVersion: number; flow: FlowInfo | null; repos: Shaped<Repos>; changelog: Changelog | null }
+    gitgraph: { graph: Graph; view: Shaped<View>; detail: CommitDetail | null; isRound: boolean; settings: RepoSettings | null; hasNerdFont: boolean; graphVersion: number; scrollTop: number; columns: Columns; flow: FlowInfo | null; repos: Shaped<Repos>; changelog: Changelog | null }
   }
 }
