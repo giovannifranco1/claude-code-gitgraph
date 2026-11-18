@@ -78,6 +78,9 @@ export type View = {
   flow: FlowView
   // The open commit's actions list, opened from its icon (closed for each commit opened).
   isActionsOpen: boolean
+  // An action shown in a dialog on a docked terminal pane (a fetch): its label while it runs,
+  // then the error it failed with; null once done or dismissed.
+  notice: { label: string; error: string | null } | null
 }
 
 // Git Flow (git-flow-next), as the repository's `gitflow.*` config sets it up.
@@ -105,8 +108,8 @@ export type FlowView = {
   conflict: FlowConflict | null
   // The init form: under the footer bar where git flow is not set up, in settings to reconfigure.
   init: FlowInitForm | null
-  // The update or publish the dialog is asking about.
-  confirming: { action: 'update' | 'publish'; topic: FlowTopic } | null
+  // The update the dialog is asking about.
+  confirming: { action: 'update'; topic: FlowTopic } | null
   // The Git Flow dialog, opened from the footer: a row per type, its start, update and finish.
   isMenuOpen: boolean
 }

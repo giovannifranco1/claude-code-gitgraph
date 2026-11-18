@@ -21,6 +21,7 @@ type Fake = {
   head?: string
   remotes?: string[]
   failPush?: string
+  failFetch?: boolean
   clock?: ReturnType<typeof mock.clock>
   // Git Flow: which CLI answers `git flow`, the repository's gitflow.* config, the branch
   // checked out, and a flow verb that stops on a conflict.
@@ -29,7 +30,7 @@ type Fake = {
   branch?: string
   conflictOn?: string
   isConflicted?: boolean
-  // A push waits on this, so a test can look at the pane while the action runs.
+  // A push or a fetch waits on this, so a test can look at the pane while the action runs.
   hold?: Promise<void>
   // `-c` settings a call carried, as `<verb>: <key=value>`.
   configs: string[]
@@ -135,6 +136,8 @@ function answer(fake: Fake, raw: readonly string[], cwd = '.') {
       return ok('1.0.0\n1.0.1\n')
     case 'show':
       return ok([B, 'Bia', 'bia@x.io', '1699980000', 'Work on feat\n\nDetails here\n'].join(US) + RS + '\n\n3\t1\tsrc/feat.ts\n')
+    case 'fetch':
+      return fake.failFetch ? fail('fatal: unable to access remote') : ok()
     case 'push':
       return rest.includes(fake.failPush ?? '\0') ? fail('fatal: could not read Username') : ok()
     case 'config': {
@@ -168,7 +171,7 @@ async function setup($: Engine, on: On, fake: Fake, copied: string[] = [], toast
   })
   on('process.run', async (_, e) => {
     fake.envs.push({ ...(e.init?.env ?? {}) })
-    if (fake.hold && e.argv.includes('push')) await fake.hold
+    if (fake.hold && (e.argv.includes('push') || e.argv.includes('fetch'))) await fake.hold
     return { value: answer(fake, e.argv, e.init?.cwd) }
   })
   const store = (fake.store ??= new Map())
@@ -345,7 +348,7 @@ test('GG-19 the commit actions sit behind an icon: closed, none show; open, a li
   expect(await ui.find({ type: 'Input', key: 'new-branch' })).toBeDefined()
   await ui.press({ key: 'detail-actions-toggle' })
   for (const key of ['copy', 'checkout', 'pick', 'reset']) expect(await ui.find({ type: 'Box', key: `detail-row-${key}` })).toBeDefined()
-  expect(await ui.find({ type: 'Box', key: 'detail-rule-2' })).toBeDefined()
+  expect(await ui.find({ type: 'Box', key: 'detail-gap-2' })).toBeDefined()
   await ui.press({ key: 'reset' })
   expect((await ui.find({ type: 'Button', key: 'reset' }))?.text).toMatch(/^Confirm: Reset main here \(soft\)\? ◂$/)
   // another commit opens with the list closed
@@ -468,10 +471,18 @@ test('GG-12 a right click on a pill opens its branch menu; push asks for the rem
   await ui.unmount()
 })
 
-test('GG-12 a left click on a pill selects its commit at once', async ($, on) => {
-  await setup($, on, newFake())
+test('GG-12 a left click on a pill opens its branch menu, a later one closes it; the commit text opens the details', async ($, on) => {
+  const fake = newFake()
+  await setup($, on, fake)
   const ui = await $.ui.mount(pane('terminal'))
   await ui.pointer({ type: 'down', x: 1, y: 0, button: 'left', in: `pill:${B}:0` })
+  expect(await ui.find({ type: 'Box', key: 'menu-row-checkout' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /bia@x\.io/ })).toBeUndefined()
+  await fake.clock?.advance(1_000)
+  await ui.pointer({ type: 'down', x: 1, y: 0, button: 'left', in: `pill:${B}:0` })
+  expect(await ui.find({ type: 'Box', key: 'menu-row-checkout' })).toBeUndefined()
+  expect(callOf(fake, ['checkout', 'feat'])).toBe(-1)
+  await ui.press({ key: B })
   expect(await ui.find({ type: 'Text', text: /bia@x\.io/ })).toBeDefined()
   await ui.unmount()
 })
@@ -620,7 +631,7 @@ test('GG-13 remotes can be added, re-pointed, fetched and removed', async ($, on
   await ui.unmount()
 })
 
-test('GG-14 a double click on a branch pill checks it out; a single click does not', async ($, on) => {
+test('GG-14 a double click on a branch pill checks it out and leaves no menu open; a single click does not', async ($, on) => {
   const fake = newFake()
   await setup($, on, fake)
   const ui = await $.ui.mount(pane('terminal'))
@@ -628,21 +639,7 @@ test('GG-14 a double click on a branch pill checks it out; a single click does n
   expect(callOf(fake, ['checkout', 'feat'])).toBe(-1)
   await ui.pointer({ type: 'down', x: 1, y: 0, button: 'left', in: `pill:${B}:0` })
   expect(callOf(fake, ['checkout', 'feat'])).toBeGreaterThan(-1)
-  expect(await ui.find({ type: 'Text', text: /bia@x\.io/ })).toBeUndefined()
-  await ui.unmount()
-})
-
-test('GG-14 a double click puts back the commit that was open before it', async ($, on) => {
-  const fake = newFake()
-  await setup($, on, fake)
-  const ui = await $.ui.mount(pane('terminal'))
-  await ui.press({ key: M })
-  await ui.pointer({ type: 'down', x: 1, y: 0, button: 'left', in: `pill:${B}:0` })
-  await ui.pointer({ type: 'down', x: 1, y: 0, button: 'left', in: `pill:${B}:0` })
-  expect(callOf(fake, ['checkout', 'feat'])).toBeGreaterThan(-1)
-  // M's details again, not feat's: a branch made from them starts at M.
-  await ui.input({ key: 'new-branch', text: 'from-here' })
-  expect(fake.calls).toContainEqual(['git', 'branch', 'from-here', M])
+  expect(await ui.find({ type: 'Box', key: 'menu-row-checkout' })).toBeUndefined()
   await ui.unmount()
 })
 
@@ -733,15 +730,15 @@ test('GG-17 refresh reloads the graph and the open commit, then flashes a check'
   await ui.unmount()
 })
 
-test('GG-18 the fetch button fetches every remote and reloads the graph', async ($, on) => {
+test('GG-18 off a docked terminal pane the fetch button fetches every remote, reloads the graph and says so in a toast', async ($, on) => {
   const toasts: string[] = []
   const fake = newFake()
   await setup($, on, fake, [], toasts)
-  const ui = await $.ui.mount(pane('terminal'))
+  const ui = await $.ui.mount(pane('desktop'))
   const logs = logCalls(fake).length
   await ui.press({ key: 'fetch' })
   expect(callOf(fake, ['fetch', '--all'])).toBeGreaterThan(-1)
-  expect(toasts.at(-1)).toBe('Fetched all remotes ✓')
+  expect(toasts.at(-1)).toBe('Fetched remote(s) ✓')
   expect(logCalls(fake).length).toBe(logs + 1)
   await ui.unmount()
 })
@@ -1060,19 +1057,13 @@ test('GF-08 git flow runs with an empty hooks folder of the mod: repo hooks stay
   await ui.unmount()
 })
 
-test('GF-08 FD-03 publish runs only from the branch menu, asked in a dialog; cancel runs nothing', async ($, on) => {
-  const fake = newFake({ branch: 'feature/login', headRefs: 'HEAD -> feature/login' })
-  await setup($, on, fake)
+test('GF-08 the branch menu has no publish: Push branch… publishes a branch', async ($, on) => {
+  await setup($, on, newFake({ branch: 'feature/login', headRefs: 'HEAD -> feature/login' }))
   const ui = await $.ui.mount(pane('terminal'))
   await ui.pointer({ type: 'down', x: 1, y: 0, button: 'right', in: `pill:${M}:0` })
-  await ui.press({ key: 'menu-flow-publish' })
-  await ui.press({ key: 'flow-confirm-cancel' })
-  expect(await ui.find({ type: 'Box', key: 'flow-dialog' })).toBeUndefined()
-  expect(flowCalls(fake)).toEqual([])
-  await ui.pointer({ type: 'down', x: 1, y: 0, button: 'right', in: `pill:${M}:0` })
-  await ui.press({ key: 'menu-flow-publish' })
-  await ui.press({ key: 'flow-confirm-run' })
-  expect(flowCalls(fake)).toEqual([['git', 'flow', 'feature', 'publish', 'login']])
+  expect(await ui.find({ key: 'menu-flow-publish' })).toBeUndefined()
+  expect(await ui.find({ key: 'menu-flow-update' })).toBeDefined()
+  expect(await ui.find({ key: 'menu-push' })).toBeDefined()
   await ui.unmount()
 })
 
@@ -1085,10 +1076,10 @@ test('GF-01 on a work branch its type row in the Git Flow dialog has start, reba
   await ui.unmount()
 })
 
-test('GG-12 Delete branch asks with force off; it runs on a second press, -D only when force is ticked', async ($, on) => {
+test('GG-12 off a docked terminal pane Delete branch asks with force off; it runs on a second press, -D only when force is ticked', async ($, on) => {
   const fake = newFake()
   await setup($, on, fake)
-  const ui = await $.ui.mount(pane('terminal'))
+  const ui = await $.ui.mount(pane('desktop'))
   await ui.pointer({ type: 'down', x: 1, y: 0, button: 'right', in: `pill:${B}:0` })
   expect((await ui.find({ type: 'Button', key: 'menu-delete' }))?.text?.trim()).toBe('Delete branch…')
   await ui.press({ key: 'menu-delete' })
@@ -1242,9 +1233,9 @@ test('GG-12 the branch menu is a list, one item a row, its groups split by a rul
   await ui.pointer({ type: 'down', x: 1, y: 0, button: 'right', in: `pill:${B}:0` })
   for (const id of ['checkout', 'push', 'merge', 'rebase', 'rename', 'copy', 'delete'])
     expect(await ui.find({ type: 'Box', key: `menu-row-${id}` })).toBeDefined()
-  expect(await ui.find({ type: 'Box', key: 'menu-rule-1' })).toBeDefined()
-  expect(await ui.find({ type: 'Box', key: 'menu-rule-2' })).toBeDefined()
-  expect(await ui.find({ type: 'Box', key: 'menu-rule-3' })).toBeUndefined()
+  expect(await ui.find({ type: 'Box', key: 'menu-gap-1' })).toBeDefined()
+  expect(await ui.find({ type: 'Box', key: 'menu-gap-2' })).toBeDefined()
+  expect(await ui.find({ type: 'Box', key: 'menu-gap-3' })).toBeUndefined()
   await ui.unmount()
 })
 
@@ -1402,5 +1393,91 @@ test('GG-24 a remote branch whose local branch sits on another commit is no ghos
   const behind = (await ui.find({ type: 'Client', key: `pill:${M}:1` }))?.props.props as { segments: { text: string; icon?: unknown }[] }
   expect(behind.segments.map(g => g.text)).toEqual(['origin/feat'])
   expect(behind.segments[0]?.icon).toBeUndefined()
+  await ui.unmount()
+})
+
+test('MD-04 on a docked terminal pane Push branch… is a dialog of its own: the remotes, then push; cancel goes back to the menu', async ($, on) => {
+  const fake = newFake({ remotes: ['origin', 'github'] })
+  await setup($, on, fake)
+  const ui = await $.ui.mount(pane('terminal', 100))
+  await ui.pointer({ type: 'down', x: 1, y: 0, button: 'right', in: `pill:${B}:0` })
+  await ui.press({ key: 'menu-push' })
+  expect(await ui.find({ type: 'Text', text: /^Push feat$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Box', key: 'menu-row-checkout' })).toBeUndefined()
+  expect(await ui.find({ type: 'Button', key: 'push-remote-github' })).toBeDefined()
+  await ui.press({ key: 'push-cancel' })
+  expect(await ui.find({ type: 'Box', key: 'menu-row-checkout' })).toBeDefined()
+  await ui.press({ key: 'menu-push' })
+  await ui.press({ key: 'push-run' })
+  expect(callOf(fake, ['push', '-u', 'origin', 'feat'])).toBeGreaterThan(-1)
+  await ui.unmount()
+})
+
+test('MD-04 on a docked terminal pane Delete branch… is a dialog: force off, it runs on the first press', async ($, on) => {
+  const fake = newFake()
+  await setup($, on, fake)
+  const ui = await $.ui.mount(pane('terminal', 100))
+  await ui.pointer({ type: 'down', x: 1, y: 0, button: 'right', in: `pill:${B}:0` })
+  await ui.press({ key: 'menu-delete' })
+  expect(await ui.find({ type: 'Text', text: /^Delete feat$/ })).toBeDefined()
+  await ui.press({ key: 'menu-opt-force' })
+  await ui.press({ key: 'menu-delete-run' })
+  expect(callOf(fake, ['branch', '-D', 'feat'])).toBeGreaterThan(-1)
+  await ui.unmount()
+})
+
+test('MD-04 on a docked terminal pane Rename… is a dialog with the name field; cancel goes back to the menu', async ($, on) => {
+  const fake = newFake()
+  await setup($, on, fake)
+  const ui = await $.ui.mount(pane('terminal', 100))
+  await ui.pointer({ type: 'down', x: 1, y: 0, button: 'right', in: `pill:${B}:0` })
+  await ui.press({ key: 'menu-rename' })
+  expect(await ui.find({ type: 'Text', text: /^Rename feat$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Input', key: 'rename' })).toBeDefined()
+  await ui.press({ key: 'rename-cancel' })
+  expect(await ui.find({ type: 'Box', key: 'menu-row-checkout' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('GG-25 on a docked terminal pane a fetch shows in a dialog while it runs; done, the dialog goes and a toast says so', async ($, on) => {
+  const toasts: string[] = []
+  const fake = newFake()
+  await setup($, on, fake, [], toasts)
+  const ui = await $.ui.mount(pane('terminal', 100))
+  await ui.press({ key: 'fetch' })
+  expect(callOf(fake, ['fetch', '--all'])).toBeGreaterThan(-1)
+  expect(await ui.find({ type: 'Box', key: 'notice-dialog' })).toBeUndefined()
+  expect(toasts.at(-1)).toBe('Fetched remote(s) ✓')
+  await ui.unmount()
+})
+
+test('GG-25 a failed fetch keeps the dialog: the error centered over a centered Dismiss', async ($, on) => {
+  const toasts: string[] = []
+  const fake = newFake({ failFetch: true })
+  await setup($, on, fake, [], toasts)
+  const ui = await $.ui.mount(pane('terminal', 100))
+  await ui.press({ key: 'fetch' })
+  expect(await ui.find({ type: 'Text', text: /fatal: unable to access remote/ })).toBeDefined()
+  expect((await ui.find({ type: 'Box', key: 'notice-actions' }))?.props).toMatchObject({ justifyContent: 'center' })
+  expect(toasts.some(t => /unable to access/.test(t))).toBe(true)
+  await ui.press({ key: 'notice-dismiss' })
+  expect(await ui.find({ type: 'Box', key: 'notice-dialog' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('GG-25 while a fetch runs the dialog shows its spinner and label; dismissed, the outcome comes as a toast', async ($, on) => {
+  const toasts: string[] = []
+  let release = () => {}
+  const fake = newFake({ hold: new Promise<void>(r => (release = r)) })
+  await setup($, on, fake, [], toasts)
+  const ui = await $.ui.mount(pane('terminal', 100))
+  const pressing = ui.press({ key: 'fetch' })
+  await fake.clock?.advance(10)
+  expect(await ui.find({ type: 'Text', text: /Fetching remote\(s\)…/ })).toBeDefined()
+  await ui.press({ key: 'notice-dismiss' })
+  expect(await ui.find({ type: 'Box', key: 'notice-dialog' })).toBeUndefined()
+  release()
+  await pressing
+  expect(toasts.at(-1)).toBe('Fetched remote(s) ✓')
   await ui.unmount()
 })

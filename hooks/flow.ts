@@ -86,7 +86,7 @@ export const defaultTagMessage = ({ name }: FlowTopic) => name
 
 export const updateLabel = (type: FlowType) => (type.strategy === 'rebase' ? `Rebase on ${type.parent}` : `Merge ${type.parent} in`)
 
-export const flowArgs = (verb: 'start' | 'update' | 'publish', { kind, name }: FlowTopic) => ['flow', kind, verb, name]
+export const flowArgs = (verb: 'start' | 'update', { kind, name }: FlowTopic) => ['flow', kind, verb, name]
 
 // A tagged type always gets `-m`: without it git flow would open an editor for the tag.
 export function finishArgs(topic: FlowTopic, config: FlowConfig, opts: FlowOptions, tagMessage: string | null): string[] {
@@ -115,6 +115,5 @@ export function flowMenuFor(branch: string, config: FlowConfig | null): MenuItem
   return [
     { id: 'flow-finish', label: `Finish ${topic.kind}`, flow: { action: 'finish', topic } },
     { id: 'flow-update', label: updateLabel(type), flow: { action: 'update', topic } },
-    { id: 'flow-publish', label: 'Publish', isNetwork: true, flow: { action: 'publish', topic } },
   ]
 }
