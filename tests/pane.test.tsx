@@ -200,6 +200,53 @@ test('GG-01 /gitgraph opens the pane and draws commits, refs and the graph', asy
   expect(logCalls(fake)[0]).toContain('--all')
 })
 
+const CHANGELOG = `# Changelog
+
+## [1.6.0] - 2026-11-18
+
+### Adicionado
+
+- Changelog no painel.
+
+## [1.5.1] - 2026-11-10
+
+### Corrigido
+
+- Coluna de branch.
+`
+
+function mockFiles(on: On, files: Record<string, string>) {
+  on('fs.read', (_, e) => {
+    const text = Object.entries(files).find(([f]) => e.path.endsWith(f))?.[1]
+    return text === undefined ? { deny: `ENOENT: ${e.path}` } : { value: text }
+  })
+}
+
+test('CL-02 the changelog icon swaps the graph for the versions, the installed one marked', async ($, on) => {
+  mockFiles(on, { '/CHANGELOG.md': CHANGELOG, '/.claude-plugin/plugin.json': '{ "version": "1.5.1" }' })
+  await setup($, on, newFake())
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: 'changelog' })
+  expect(await ui.find({ type: 'Text', text: /Merge feat/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /^v1\.6\.0 · 2026-11-18$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /• Changelog no painel\./ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Adicionado/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /your version/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^v1\.5\.1 · 2026-11-10 · your version$/ })).toBeDefined()
+  await ui.press({ key: 'changelog-back' })
+  expect(await ui.find({ type: 'Text', text: /Merge feat/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('CL-02 without a readable CHANGELOG.md the screen says so', async ($, on) => {
+  mockFiles(on, {})
+  await setup($, on, newFake())
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: 'changelog' })
+  expect(await ui.find({ type: 'Text', text: /Could not read the mod's CHANGELOG\.md/ })).toBeDefined()
+  await ui.unmount()
+})
+
 test('GG-02 outside a repository the pane says so', async ($, on) => {
   await setup($, on, newFake({ isRepo: false }))
   const ui = await $.ui.mount(pane('terminal'))
