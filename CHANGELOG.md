@@ -6,14 +6,17 @@ Mudanças do Git Graph (`gitgraph`) por versão, no formato [Keep a Changelog](h
 
 ### Adicionado
 
-- Ações em modal: no terminal docked, iniciar, finalizar, fazer rebase/merge e publicar com o Git Flow, o menu de uma branch e as ações de um commit abrem num quadro flutuante sobre o grafo. O botão principal da modal roda no primeiro clique (a modal já é a confirmação, no lugar do `Confirm: …?`); `cancel`/`close` fecha sem rodar nada.
-- Rodapé do Git Flow enxuto, só o botão sob uma linha: `⑂ Git Flow · feature/login · from develop · ↑2 ↓1 github` abre a modal **Git Flow**, com uma linha por tipo (`start` e, no tipo da branch atual, `rebase`/`merge` e `finish`). Diz também quando o git flow não está instalado ou configurado. Publish fica no menu da branch.
-- Ações do commit (Checkout, Cherry-pick, Copy hash, Reset … here) atrás do ícone ⋯ na linha do assunto, nos detalhes.
+- Ações em modal: no terminal docked, iniciar, finalizar e fazer rebase/merge com o Git Flow, o menu de uma branch (e o push, o delete e o rename dele, cada um na sua modal) e as ações de um commit abrem num quadro flutuante sobre o grafo. O botão principal da modal roda no primeiro clique (a modal já é a confirmação, no lugar do `Confirm: …?`); `cancel`/`close` fecha sem rodar nada.
+- Rodapé do Git Flow enxuto, só o botão sob uma linha: `⑂ Git Flow · feature/login · from develop · ↑2 ↓1 github` abre a modal **Git Flow**, com uma linha por tipo (`start` e, no tipo da branch atual, `rebase`/`merge` e `finish`). Diz também quando o git flow não está instalado ou configurado.
 - Colunas opcionais: em Settings, **Columns** liga e desliga `author` e `hash` na lista; vale para todos os repositórios e fica salvo entre sessões.
 - Branch que só existe no remote (já mergeada e apagada aqui) aparece com um ícone de fantasma num segmento à esquerda, como a tag.
+- O fetch (☁) mostra uma modal no meio do painel enquanto roda (spinner e "Fetching remote(s)…", centralizados, sobre um botão **Dismiss**). Ao terminar, a modal fecha e o toast avisa; se falhar, a modal fica com o erro. No terminal docked; nas outras superfícies, só o toast.
 
 ### Alterado
 
+- Sai o **Publish** do Git Flow (rodapé e menu da branch): **Push branch…** já publica a branch.
+- Listas (menu de branch, ações do commit) sem o separador `┈`: os grupos ficam separados por uma linha em branco.
+- Um clique (esquerdo) num badge abre o menu da branch, e outro clique fecha; o texto do commit abre os detalhes. O duplo clique no badge continua fazendo checkout (e fecha o menu que o primeiro clique abriu); o clique direito continua abrindo o menu.
 - Pílulas por segmentos: a branch em checkout tem um check antes do nome, no tom escuro da cor dela (no lugar da bolinha preta); a tag tem o ícone de etiqueta num segmento na cor dela e a versão no tom escuro.
 - A coluna do grafo tem a largura das linhas na tela, não a do trecho mais largo do histórico: onde há poucas branches, a Description começa logo depois do grafo.
 - Mensagem padrão da tag no finish é só a versão (`0.1.4`), não `Hotfix 0.1.4`.

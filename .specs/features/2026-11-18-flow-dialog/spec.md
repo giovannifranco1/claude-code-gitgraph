@@ -20,8 +20,8 @@ Como dev usando o painel, quero que iniciar, finalizar, fazer rebase/merge ou pu
 - Finish: título `Finish <branch>`, switches `no-ff`, `push`, `keep branch` (um por linha), mensagem da tag quando o tipo tem tag, `[ Finish ]` e `cancel`.
 - Dentro da modal o botão principal roda **no primeiro clique**: a modal já é a confirmação.
 
-### FD-03 — Update e Publish confirmados na modal
-- QUANDO o dev aperta rebase/merge ou publish (rodapé ou menu da branch) ENTÃO abre a modal `Rebase <branch> on <parent>?` / `Merge <parent> into <branch>?` / `Publish <branch> to <remote>?` com `[ Rebase|Merge|Publish ]` e `cancel` — no lugar do clique duplo com `Confirm: …?`.
+### FD-03 — Update confirmado na modal
+- QUANDO o dev aperta rebase/merge (modal Git Flow ou menu da branch) ENTÃO abre a modal `Rebase <branch> on <parent>?` / `Merge <parent> into <branch>?` com `[ Rebase|Merge ]` e `cancel` — no lugar do clique duplo com `Confirm: …?`. (Publish saiu: ver FD-06.)
 
 ### FD-04 — Fora do terminal docked
 - QUANDO o painel não está docked no terminal (inline, desktop, VS Code) ENTÃO os mesmos conteúdos aparecem sob a barra do rodapé, como hoje (sem camada absoluta).
@@ -36,6 +36,18 @@ Como dev usando o painel, quero que iniciar, finalizar, fazer rebase/merge ou pu
 
 ### MD-02 — Ações do commit como modal
 - QUANDO o painel está docked no terminal e o ícone ⋯ dos detalhes é apertado ENTÃO as ações (Checkout, Cherry-pick, Copy hash, Reset) aparecem na modal: título `Commit <hash>`, `close` embaixo; moldura na cor da lane.
+
+### MD-04 — Push, Delete e Rename em modal própria (pedido do dev)
+- No terminal docked, **Push branch…**, **Delete branch…** e **Rename…** trocam a lista do menu por uma modal própria (`Push feat`: remotes e `Push to …`; `Delete feat`: switch de force e `Delete`, no primeiro clique; `Rename feat`: o campo do nome). `cancel` volta para a lista.
+
+### MD-05 — Listas sem separador (pedido do dev)
+- Menu de branch e ações do commit: grupos separados por uma linha em branco (`<prefix>-gap-<n>`), sem o `┈` da 1.6.1.
+
+### MD-06 — Clique no badge abre o menu (pedido do dev)
+- Clique esquerdo (ou direito) num badge abre o menu da ref; de novo, fecha. O texto do commit abre os detalhes. O duplo clique no badge continua fazendo checkout (pedido do dev) e fecha o menu que o primeiro clique abriu; o tempo vem de `$.clock.now()`, que o `mock.clock` controla nos testes.
+
+### GG-25 — Fetch em modal (pedido do dev)
+- No terminal docked, o fetch (☁) abre uma modal sem título: spinner + `Fetching remote(s)…` enquanto roda, centralizados, sobre `[ Dismiss ]` centralizado. Ao terminar, a modal fecha; se falhar, fica com o erro em vermelho. O toast do resultado sai sempre (pedido do dev). Genérico em `withRunning(…, asNotice)` / `runActions(…, asNotice)`; só o fetch usa por ora.
 
 ### MD-03 — Fora do terminal docked
 - Menu e ações continuam no quadro sob a linha / nos detalhes, como antes.
@@ -57,7 +69,7 @@ Como dev usando o painel, quero que iniciar, finalizar, fazer rebase/merge ou pu
 - Vale para todos os repositórios e fica salvo entre sessões no store do mod (`columns`); o render lê de `$.state`, carregado no início da sessão e a cada `/gitgraph`.
 
 ### FD-06 — Git Flow numa modal aberta pelo rodapé (pedido do dev)
-- O rodapé vira uma linha só: uma linha separadora em cima e o botão `⑂ Git Flow` sozinho na linha de baixo (traços ao lado do botão recusados pelo dev), com o contexto depois dele: a branch de git flow em checkout (`Git Flow · feature/login`), ou `not installed` / `needs git-flow-next` / `not set up`; nada numa branch comum. Ele abre a modal **Git Flow**: uma linha por tipo (feature, bugfix, release, hotfix) com `start` e, no tipo da branch atual, `rebase`/`merge` e `finish`. Publish sai daqui (fica no menu da branch).
+- O rodapé vira uma linha só: uma linha separadora em cima e o botão `⑂ Git Flow` sozinho na linha de baixo (traços ao lado do botão recusados pelo dev), com o contexto depois dele: a branch de git flow em checkout (`Git Flow · feature/login`), ou `not installed` / `needs git-flow-next` / `not set up`; nada numa branch comum. Ele abre a modal **Git Flow**: uma linha por tipo (feature, bugfix, release, hotfix) com `start` e, no tipo da branch atual, `rebase`/`merge` e `finish`. Publish sai de todo lugar: **Push branch…** do menu já publica (pedido do dev).
 - Sem git flow instalado/configurado, a modal diz por quê e oferece o set-up (o formulário de init vira a modal `Set up git flow`).
 - O rodapé só cresce com uma ação rodando (spinner) ou um conflito (Continue/Abort).
 
