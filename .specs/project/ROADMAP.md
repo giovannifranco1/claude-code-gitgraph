@@ -12,7 +12,12 @@
 ## M3 — Vários repositórios (2026-10-27)
 - [x] F3 `2026-10-27-multi-repo` — descoberta de repos até 3 níveis, dropdown `repo:` no começo do header, busca por hash atrás do ícone ⌕, todo git no repo ativo (MR-01..MR-03)
 
-## M4 — Ideias futuras
+## M4 — Acesso e configuração (2026-11-18) — lançado como 1.6.0
+- [x] RM-01 `2026-11-18-ref-menu-buttons` — botões `Branch actions:` no topo dos detalhes abrem o menu de ref sem botão direito
+- [x] FI-01..02 `2026-11-18-flow-init-custom` — init do git flow com nomes próprios (form detectando master/dev/feat/…) e Reconfigure nas Settings
+- [x] CL-01..02 `2026-11-18-changelog` — CHANGELOG.md (PT-BR) e tela ☰ Changelog com a versão instalada marcada
+
+## M5 — Ideias futuras
 - Diff de arquivo no painel (preview)
 - Busca/filtro por mensagem/autor
 - Push/pull/fetch, stash, tags

@@ -2,6 +2,18 @@
 
 Mudanças do Git Graph (`gitgraph`) por versão, no formato [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e com versões em [SemVer](https://semver.org/lang/pt-BR/).
 
+## [1.6.0] - 2026-11-18
+
+### Adicionado
+
+- Changelog no painel: o ícone ☰ no header mostra o que mudou em cada versão, com a sua marcada.
+- Git Flow com nomes próprios: **Set up git flow…** abre um formulário (branch principal, de desenvolvimento, prefixos de feature/bugfix/release/hotfix e prefixo de tag) já preenchido com o que o repo usa (`master`, `dev`, `feat/`, `fix/`…). **Use defaults** continua com os nomes padrão.
+- Settings mostra os nomes do Git Flow configurado e **Reconfigure…** para trocá-los.
+
+### Corrigido
+
+- O menu de uma branch ou tag abre sem botão direito: os detalhes do commit têm, no topo, a linha **Branch actions:** com um botão por ref. Antes, a linha `Refs: ⋯` ficava no fim e saía vazia no VS Code.
+
 ## [1.5.1] - 2026-11-10
 
 ### Corrigido
