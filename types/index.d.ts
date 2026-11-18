@@ -71,6 +71,8 @@ export type View = {
   refresh: 'idle' | 'running' | 'done'
   isOpen: boolean
   flow: FlowView
+  // The open commit's actions list, opened from its icon (closed for each commit opened).
+  isActionsOpen: boolean
 }
 
 // Git Flow (git-flow-next), as the repository's `gitflow.*` config sets it up.

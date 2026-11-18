@@ -3,7 +3,7 @@ import type { Badge, BadgeKind, Ref } from '../types'
 const ORDER: BadgeKind[] = ['head', 'detached', 'branch', 'remote', 'tag']
 
 // One badge per local branch, its remote-tracking refs folded into it as the
-// VS Code Git Graph does (`main ⇄ origin`); remotes without a local stand alone.
+// VS Code Git Graph does (`main` with an `origin` segment); remotes without a local stand alone.
 export function badgesOf(refs: Ref[]): Badge[] {
   const badges: Badge[] = []
   const locals = new Map<string, Badge>()
@@ -26,38 +26,47 @@ export function badgesOf(refs: Ref[]): Badge[] {
   return badges.sort((a, b) => ORDER.indexOf(a.kind) - ORDER.indexOf(b.kind))
 }
 
-// The badge's text, split so the remotes can be drawn dimmer than the name.
+// The badge's text: its name, and its remotes for the dark segment drawn after it.
 export function badgeParts(badge: Badge): { name: string; remotes: string } {
   const icon = badge.kind === 'head' ? '● ' : badge.kind === 'tag' ? '◆ ' : ''
-  return { name: ` ${icon}${badge.label}`, remotes: badge.remotes.length ? ` ⇄ ${badge.remotes.join(' ')}` : '' }
+  return { name: ` ${icon}${badge.label}`, remotes: badge.remotes.join(' ') }
 }
 
+// ` name ` and, with remotes, ` origin ` after it (round caps take the pads' cells).
 export function badgeWidth(badge: Badge): number {
   const { name, remotes } = badgeParts(badge)
-  return name.length + remotes.length + 1
+  return name.length + 1 + (remotes ? remotes.length + 2 : 0)
 }
 
 // Six letters and an ellipsis: shorter than that a pill no longer names its ref.
 const MIN_LABEL = 7
 
-// The badge drawn within `room` columns (gap included): remotes dropped first,
-// then the name cut with an ellipsis; null when even that does not fit.
+// The badge within `room` columns (gap included), its name cut with an ellipsis where
+// needed; null when that leaves fewer than MIN_LABEL letters.
+function cut(badge: Badge, room: number): Badge | null {
+  const over = badgeWidth(badge) + 1 - room
+  if (over <= 0) return badge
+  const keep = badge.label.length - over
+  return keep < MIN_LABEL ? null : { ...badge, label: `${badge.label.slice(0, keep - 1)}…` }
+}
+
+// The badge drawn within `room` columns: its name cut first while the remote segment
+// stays (a pushed branch still shows its remote), then the remotes dropped; null when
+// even the bare name cannot be kept.
 function shrink(badge: Badge, room: number): Badge | null {
-  if (badgeWidth(badge) + 1 <= room) return badge
-  const bare = { ...badge, remotes: [] }
-  const keep = bare.label.length - (badgeWidth(bare) + 1 - room)
-  if (keep >= bare.label.length) return bare
-  return keep < MIN_LABEL ? null : { ...bare, label: `${bare.label.slice(0, keep - 1)}…` }
+  return cut(badge, room) ?? (badge.remotes.length ? cut({ ...badge, remotes: [] }, room) : null)
 }
 
 // The pills that fit `max` columns, shortened where needed; the rest counted for a `+N` pill.
-// `width` is what they take, the `+N` pill and every gap included.
-export function fitBadges(badges: Badge[], max: number): { shown: Badge[]; hidden: number; width: number } {
+// The first may take the whole `column` (the subject then gets less) before it is cut: a
+// branch shows its full name. `width` is what they take, the `+N` pill and every gap included.
+export function fitBadges(badges: Badge[], max: number, column = max): { shown: Badge[]; hidden: number; width: number } {
   const plus = (n: number) => (n > 0 ? `+${n}`.length + 3 : 0)
   const shown: Badge[] = []
   let used = 0
   for (const badge of badges) {
-    const fitted = shrink(badge, max - used - plus(badges.length - shown.length - 1))
+    const room = shown.length === 0 ? Math.max(max, column) : max
+    const fitted = shrink(badge, room - used - plus(badges.length - shown.length - 1))
     if (!fitted) break
     shown.push(fitted)
     used += badgeWidth(fitted) + 1
