@@ -30,6 +30,8 @@ type Fake = {
   branch?: string
   conflictOn?: string
   isConflicted?: boolean
+  // Each pane open's `closeOnEscape`, in order.
+  opens?: (true | undefined)[]
   // A push or a fetch waits on this, so a test can look at the pane while the action runs.
   hold?: Promise<void>
   // `-c` settings a call carried, as `<verb>: <key=value>`.
@@ -160,7 +162,10 @@ function answer(fake: Fake, raw: readonly string[], cwd = '.') {
 async function setup($: Engine, on: On, fake: Fake, copied: string[] = [], toasts: string[] = []) {
   fake.clock = mock.clock(on)
   on('command.register', () => ({ value: { command: 'gitgraph' } }))
-  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('ui.open', (_, e) => {
+    fake.opens?.push(e.closeOnEscape)
+    return { value: { isPlaced: true } }
+  })
   on('ui.toast', (_, e) => {
     toasts.push(e.text)
     return { value: undefined }
@@ -230,6 +235,19 @@ test('GG-01 /gitgraph opens the pane and draws commits, refs and the graph', asy
   expect(logCalls(fake)[0]).toContain('--all')
 })
 
+test('MG-01 the text of a merge commit (subject, author, hash) is gray, as Git Graph in VS Code does; others are not', async ($, on) => {
+  await setup($, on, newFake())
+  const ui = await $.ui.mount(pane('terminal'))
+  expect((await ui.find({ type: 'Text', text: /^Merge feat/ }))?.props.color).toBe('#808080')
+  // the terminal draws a Button's children in the Button's style: the row's Button is dim too
+  expect((await ui.find({ type: 'Button', key: M }))?.props.dimColor).toBe(true)
+  expect((await ui.find({ type: 'Button', key: A }))?.props.dimColor).toBeFalsy()
+  expect((await ui.find({ type: 'Text', text: /^Work on main/ }))?.props.color).toBeUndefined()
+  const metas = await ui.findAll({ type: 'Text', text: /Ana|aaaaaaa|bbbbbbb/ })
+  expect(metas.filter(t => t.props.color === '#808080')).toHaveLength(1)
+  await ui.unmount()
+})
+
 const CHANGELOG = `# Changelog
 
 ## [1.6.0] - 2026-11-18
@@ -265,6 +283,28 @@ test('CL-02 the changelog icon swaps the graph for the versions, the installed o
   expect(await ui.find({ type: 'Text', text: /^v1\.5\.1 · 2026-11-10 · your version$/ })).toBeDefined()
   await ui.press({ key: 'changelog-back' })
   expect(await ui.find({ type: 'Text', text: /Merge feat/ })).toBeDefined()
+  await ui.unmount()
+})
+
+// The test engine cannot raise the person's close; `dismissModal` (what that close does with
+// a modal open) is covered in dismiss.test.ts.
+test('ESC-01 the pane takes Escape as its close only while a modal is open', async ($, on) => {
+  mockFiles(on, { '/CHANGELOG.md': CHANGELOG, '/.claude-plugin/plugin.json': '{ "version": "1.5.1" }' })
+  const opens: (true | undefined)[] = []
+  await setup($, on, newFake({ opens }))
+  const ui = await $.ui.mount(pane('terminal'))
+  expect(opens).toEqual([undefined])
+  await ui.press({ key: B })
+  expect(opens).toEqual([undefined])
+  await ui.press({ key: 'refmenu-0' })
+  expect(opens.at(-1)).toBe(true)
+  await ui.press({ key: 'menu-close' })
+  expect(opens.at(-1)).toBeUndefined()
+  await ui.press({ key: 'changelog' })
+  expect(opens.at(-1)).toBe(true)
+  await ui.press({ key: 'changelog-back' })
+  expect(opens.at(-1)).toBeUndefined()
+  expect(opens).toHaveLength(5)
   await ui.unmount()
 })
 
@@ -662,7 +702,9 @@ test('GG-05 the all-branches option is a switch with no keyboard shortcut', asyn
   await ui.press({ key: 'scope' })
   expect((await ui.find({ type: 'Button', key: 'scope' }))?.text).toContain('')
   for (const key of ['search-toggle', 'fetch', 'refresh', 'settings']) expect((await ui.find({ type: 'Button', key }))?.props.hotkey).toBeUndefined()
-  expect(await ui.find({ type: 'Text', text: /commits/ })).toBeDefined()
+  // the header holds only the branch: no commit count, no changes count
+  expect(await ui.find({ type: 'Text', text: /\d+\+? commits/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /● \d+ changes?/ })).toBeUndefined()
   await ui.unmount()
 })
 

@@ -33,7 +33,6 @@ export type Graph = {
   rows: GraphRow[]
   head: string
   branch: string
-  dirty: number
   // Unmerged paths: a merge, rebase or finish stopped on a conflict.
   conflicts: number
   remotes: string[]

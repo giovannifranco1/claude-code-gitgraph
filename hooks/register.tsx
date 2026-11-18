@@ -3,6 +3,7 @@ import type { ClientElements, Elements, EngineInterface, ProcessRunResult, Regis
 
 import type { Badge, BadgeKind, BadgeStyle, Cell, Changelog, Columns, CommitDetail, ConfigScope, FileStat, FlowConfig, FlowConflict, FlowInfo, FlowInitForm, FlowKind, FlowOptions, FlowTopic, FlowView, Graph, GraphRow, Ref, RepoSettings, Repos, Screen, View } from '../types'
 import { parseChangelog, versionOf } from './changelog'
+import { CLOSED, dismissModal, FLOW_CLOSED, hasModal } from './dismiss'
 import { badgeParts, badgesOf, diffBar, fitBadges } from './badges'
 import { isBranchNameCandidate } from './detect'
 import { absTime, fitGraph, HASH_W, relTime, short, truncate, truncateMiddle } from './format'
@@ -77,7 +78,7 @@ const NO_HOOKS = 'nohooks'
 const NERD_FONT_CHECK = 'ls ~/Library/Fonts /Library/Fonts ~/.local/share/fonts ~/.fonts /usr/share/fonts 2>/dev/null | grep -qi nerd'
 
 const DEFAULT_FLOW: FlowView = { starting: null, finishing: null, opts: { isNoFf: true, isPush: true, isKeep: true }, tagMessage: null, conflict: null, init: null, confirming: null, isMenuOpen: false }
-const EMPTY_GRAPH: Graph = { status: 'idle', rows: [], head: '', branch: '', dirty: 0, conflicts: 0, remotes: [], hasMore: false }
+const EMPTY_GRAPH: Graph = { status: 'idle', rows: [], head: '', branch: '', conflicts: 0, remotes: [], hasMore: false }
 const DEFAULT_VIEW: View = { scope: 'all', limit: PAGE, selected: null, confirm: null, menu: null, isRenaming: false, isDeleting: false, isForce: false, push: null, running: null, screen: 'graph', configScope: 'local', editingRemote: null, isAddingRemote: false, remoteDraft: '', scrollTo: null, isSearching: false, refresh: 'idle', isOpen: false, flow: DEFAULT_FLOW, isActionsOpen: false, notice: null }
 
 const graphState = atom({ plugin: 'gitgraph', key: 'graph' } as const, EMPTY_GRAPH)
@@ -102,22 +103,6 @@ const flowState = atom({ plugin: 'gitgraph', key: 'flow' } as const, null as Flo
 // The mod's CHANGELOG.md and installed version, for its screen; null until read.
 const changelogState = atom({ plugin: 'gitgraph', key: 'changelog' } as const, null as Changelog | null)
 const reposState = atom({ plugin: 'gitgraph', key: 'repos' } as const, { list: [], active: '.', isPicking: false, branches: {} } as Repos, { shape: 'repos-2' })
-
-// Everything transient a git action, a selection or a new menu closes.
-const CLOSED = {
-  confirm: null,
-  menu: null,
-  isRenaming: false,
-  isDeleting: false,
-  isForce: false,
-  push: null,
-  editingRemote: null,
-  isAddingRemote: false,
-  isActionsOpen: false,
-} satisfies Partial<View>
-
-// The git flow dialogs, closed when one opens another or a git flow action ends.
-const FLOW_CLOSED = { starting: null, finishing: null, tagMessage: null, init: null, confirming: null, isMenuOpen: false } satisfies Partial<FlowView>
 
 let generation = 0
 // What a render derives from the graph, worked out once per graph version.
@@ -179,7 +164,7 @@ async function togglePicker($: EngineInterface): Promise<void> {
 // Shows another repo: what was open belonged to the last one.
 async function showRepo($: EngineInterface): Promise<void> {
   const [view] = await Promise.all([
-    update($, viewState, (v): View => ({ ...v, ...CLOSED, flow: { ...v.flow, ...FLOW_CLOSED, conflict: null }, selected: null, limit: PAGE, scrollTo: null })),
+    setView($, (v): View => ({ ...v, ...CLOSED, flow: { ...v.flow, ...FLOW_CLOSED, conflict: null }, selected: null, limit: PAGE, scrollTo: null })),
     update($, detailState, () => null),
   ])
   await Promise.all([load($), loadFlow($), view.screen === 'settings' ? loadSettings($) : undefined])
@@ -207,6 +192,20 @@ function cacheOf(version: number, graph: Graph): GraphCache {
     indexOf: new Map(graph.rows.map((r, i) => [r.commit.hash, i])),
   }
 }
+
+// Every write of the view: while a modal is open the pane is opened again with
+// `closeOnEscape`, so Escape (on the pane, or at the empty prompt it hands the keys back to)
+// raises the person's `ui.close`, which closes the modal instead (see that hook).
+async function setView($: EngineInterface, change: (v: View) => View): Promise<View> {
+  // `update` may run `change` again on a miss: the last run's `v` is the value written over.
+  let before!: View
+  const view = await update($, viewState, v => ((before = v), change(v)))
+  if (view.isOpen && hasModal(view) !== hasModal(before)) await openPane($, view)
+  return view
+}
+
+// Opens the pane (or sets its manners again): Escape is its close while a modal is open.
+const openPane = ($: EngineInterface, view: View) => $.ui.open({ id: PANE, title: TITLE, ...(hasModal(view) && { closeOnEscape: true }) })
 
 async function setGraph($: EngineInterface, change: (g: Graph) => Graph): Promise<void> {
   const graph = await update($, graphState, change)
@@ -251,7 +250,6 @@ async function load($: EngineInterface, known?: RepoState): Promise<void> {
       rows: shown.map((commit, i) => ({ commit, cells: cells[i] ?? [] })),
       head,
       branch,
-      dirty,
       conflicts,
       remotes,
       locals: localsOf(refs.stdout),
@@ -282,7 +280,7 @@ async function poll($: EngineInterface): Promise<void> {
 
 async function select($: EngineInterface, hash: string): Promise<void> {
   const selected = (await read($, viewState)).selected === hash ? null : hash
-  await update($, viewState, v => ({ ...v, ...CLOSED, selected }))
+  await setView($, v => ({ ...v, ...CLOSED, selected }))
   await update($, detailState, () => null)
   if (selected) await loadDetail($, selected)
 }
@@ -296,14 +294,14 @@ async function loadDetail($: EngineInterface, hash: string): Promise<void> {
 // Reloads everything on screen; the button shows it running, then `✓ updated` for a moment.
 async function refreshAll($: EngineInterface): Promise<void> {
   if ((await read($, viewState)).refresh === 'running') return
-  await update($, viewState, (v): View => ({ ...v, refresh: 'running' }))
+  await setView($, (v): View => ({ ...v, refresh: 'running' }))
   try {
     if (await findRepos($)) return await showRepo($)
     const view = await read($, viewState)
     await Promise.all([load($), view.selected ? loadDetail($, view.selected) : undefined, view.screen === 'settings' ? loadSettings($) : undefined, (await read($, flowState)) ? loadFlow($) : undefined])
   } finally {
-    await update($, viewState, (v): View => ({ ...v, refresh: 'done' }))
-    $.clock.after(REFRESHED_MS, () => void update($, viewState, (v): View => (v.refresh === 'done' ? { ...v, refresh: 'idle' } : v)))
+    await setView($, (v): View => ({ ...v, refresh: 'done' }))
+    $.clock.after(REFRESHED_MS, () => void setView($, (v): View => (v.refresh === 'done' ? { ...v, refresh: 'idle' } : v)))
   }
 }
 
@@ -328,7 +326,7 @@ async function searchCommit($: EngineInterface, value: string): Promise<void> {
     $.ui.toast(exists ? `Commit ${query} is not among the ${graph.rows.length} loaded: use "Load more"` : `No commit with hash ${query}`)
     return
   }
-  await update($, viewState, v => ({ ...v, scrollTo: hash, menu: null, isSearching: false }))
+  await setView($, v => ({ ...v, scrollTo: hash, menu: null, isSearching: false }))
   if ((await read($, viewState)).selected !== hash) await select($, hash)
   // A pane scrolling its own rows draws the commit centered until the next scroll.
   if (ownScroll) return
@@ -338,7 +336,7 @@ async function searchCommit($: EngineInterface, value: string): Promise<void> {
   } catch {
     // no surface to scroll
   }
-  await update($, viewState, v => ({ ...v, scrollTo: null }))
+  await setView($, v => ({ ...v, scrollTo: null }))
 }
 
 // Whether the open menu is this ref's, on this commit.
@@ -346,7 +344,7 @@ const isMenuOpen = (menu: View['menu'], hash: string, badge: Badge) => menu?.has
 
 async function openMenu($: EngineInterface, hash: string, badge: Badge): Promise<void> {
   if ((await read($, flowState)) === null) await loadFlow($)
-  await update($, viewState, (v): View => ({ ...v, ...CLOSED, menu: isMenuOpen(v.menu, hash, badge) ? null : { hash, badge } }))
+  await setView($, (v): View => ({ ...v, ...CLOSED, menu: isMenuOpen(v.menu, hash, badge) ? null : { hash, badge } }))
 }
 
 async function runAction($: EngineInterface, args: string[], done: string, isNetwork = false): Promise<void> {
@@ -364,14 +362,14 @@ async function withRunning($: EngineInterface, label: string, done: string, work
   const hasNotice = asNotice && ownScroll !== null
   let failures: string[] = []
   try {
-    await update($, viewState, v => ({ ...v, running: label, confirm: null, notice: hasNotice ? { label, error: null } : v.notice }))
+    await setView($, v => ({ ...v, running: label, confirm: null, notice: hasNotice ? { label, error: null } : v.notice }))
     failures = await work()
   } finally {
     isRunning = false
-    await update($, viewState, v => ({ ...v, ...CLOSED, running: null }))
+    await setView($, v => ({ ...v, ...CLOSED, running: null }))
   }
   const outcome = failures.length === 0 ? done : failures.join(' · ')
-  if (hasNotice) await update($, viewState, v => ({ ...v, notice: failures.length && v.notice ? { ...v.notice, error: outcome } : null }))
+  if (hasNotice) await setView($, v => ({ ...v, notice: failures.length && v.notice ? { ...v.notice, error: outcome } : null }))
   $.ui.toast(outcome)
   await Promise.all([load($), (await read($, viewState)).screen === 'settings' ? loadSettings($) : undefined])
   return failures
@@ -418,7 +416,7 @@ async function runFlow($: EngineInterface, steps: FlowStep[], done: string, labe
   await loadFlow($)
 }
 
-const setFlow = ($: EngineInterface, fn: (f: FlowView) => FlowView) => update($, viewState, (v): View => ({ ...v, flow: fn(v.flow) }))
+const setFlow = ($: EngineInterface, fn: (f: FlowView) => FlowView) => setView($, (v): View => ({ ...v, flow: fn(v.flow) }))
 
 const readFlowConfig = async ($: EngineInterface) => (await read($, flowState))?.config ?? null
 
@@ -469,7 +467,7 @@ async function updateTopic($: EngineInterface, topic: FlowTopic): Promise<void> 
 
 // Opens the dialog asking for an update; again on the same one, closes it.
 async function toggleConfirm($: EngineInterface, action: 'update', topic: FlowTopic): Promise<void> {
-  await update($, viewState, (v): View => {
+  await setView($, (v): View => {
     const isOpen = v.flow.confirming?.action === action && v.flow.confirming.topic.branch === topic.branch
     return { ...v, ...CLOSED, flow: { ...v.flow, ...FLOW_CLOSED, confirming: isOpen ? null : { action, topic } } }
   })
@@ -477,7 +475,7 @@ async function toggleConfirm($: EngineInterface, action: 'update', topic: FlowTo
 
 // Opens the finish dialog; again on the same branch, closes it.
 async function toggleFinish($: EngineInterface, topic: FlowTopic): Promise<void> {
-  await update($, viewState, (v): View => ({
+  await setView($, (v): View => ({
     ...v,
     ...CLOSED,
     flow: { ...v.flow, ...FLOW_CLOSED, finishing: v.flow.finishing?.branch === topic.branch ? null : topic },
@@ -489,7 +487,7 @@ async function toggleFinish($: EngineInterface, topic: FlowTopic): Promise<void>
 async function openInit($: EngineInterface): Promise<void> {
   const config = await readFlowConfig($)
   const form = config ? initFormFor([], config) : initFormFor(branchNamesOf((await git($, BRANCH_REFS_ARGS)).stdout), null)
-  await update($, viewState, (v): View => ({ ...v, ...CLOSED, flow: { ...v.flow, ...FLOW_CLOSED, init: form } }))
+  await setView($, (v): View => ({ ...v, ...CLOSED, flow: { ...v.flow, ...FLOW_CLOSED, init: form } }))
 }
 
 const closeInit = ($: EngineInterface) => setFlow($, f => ({ ...f, init: null }))
@@ -528,7 +526,7 @@ async function readChangelog($: EngineInterface): Promise<Changelog> {
 async function openChangelog($: EngineInterface): Promise<void> {
   const isFirst = !changelogRead
   changelogRead ??= readChangelog($)
-  await Promise.all([update($, viewState, (v): View => ({ ...v, ...CLOSED, screen: 'changelog' })), isFirst && update($, changelogState, () => null)])
+  await Promise.all([setView($, (v): View => ({ ...v, ...CLOSED, screen: 'changelog' })), isFirst && update($, changelogState, () => null)])
   const changelog = await changelogRead
   await update($, changelogState, () => changelog)
 }
@@ -721,7 +719,6 @@ function renderHeader($: EngineInterface, ctx: Ctx) {
   const { Input, repos } = ctx
   const isAll = view.scope === 'all'
   const headRow = graph.rows.find(r => r.commit.hash === graph.head)
-  const count = graph.rows.length - (graph.dirty ? 1 : 0)
   const head = headName(graph)
   const lines = [
     <Box height={1} overflow="hidden" flexDirection="row" justifyContent="space-between" columnGap={2}>
@@ -736,27 +733,21 @@ function renderHeader($: EngineInterface, ctx: Ctx) {
       <Box flexShrink={1} flexGrow={1} overflow="hidden">
         <Text wrap="truncate-end">
           {renderPill(ctx, plainPill(ctx, `⎇ ${head}`, headRow ? laneColor(headRow.cells) : PALETTE[0] ?? '#4fc1ff', true))}
-          <Text dimColor>
-            {' '}
-            {count}
-            {graph.hasMore ? '+' : ''} commits
-          </Text>
-          {graph.dirty > 0 && <Text color="warning">{`  ● ${graph.dirty} ${graph.dirty === 1 ? 'change' : 'changes'}`}</Text>}
         </Text>
       </Box>
       <Box flexDirection="row" gap={2} flexShrink={0}>
         {switchButton(ctx, 'scope', 'all branches', isAll, async () => {
-          await update($, viewState, (v): View => ({ ...v, ...CLOSED, scope: v.scope === 'all' ? 'head' : 'all', limit: PAGE, selected: null }))
+          await setView($, (v): View => ({ ...v, ...CLOSED, scope: v.scope === 'all' ? 'head' : 'all', limit: PAGE, selected: null }))
           await load($)
         })}
         <Box flexDirection="row">
           {Input && (
-            <Button key="search-toggle" plain dimColor={!view.isSearching} onPress={() => update($, viewState, v => ({ ...v, isSearching: !v.isSearching }))}>
+            <Button key="search-toggle" plain dimColor={!view.isSearching} onPress={() => setView($, v => ({ ...v, isSearching: !v.isSearching }))}>
               {iconLabel(ctx, icons.search)}
             </Button>
           )}
           <Button key="settings" plain dimColor onPress={async () => {
-            await update($, viewState, (v): View => ({ ...v, ...CLOSED, screen: 'settings', selected: null }))
+            await setView($, (v): View => ({ ...v, ...CLOSED, screen: 'settings', selected: null }))
             await loadSettings($)
           }}>
             {iconLabel(ctx, icons.settings)}
@@ -808,6 +799,9 @@ function renderHeader($: EngineInterface, ctx: Ctx) {
   return { node: <Box flexDirection="column">{lines}</Box>, height: lines.length }
 }
 
+// A merge commit's text, as Git Graph in VS Code mutes merges.
+const MERGE_GRAY = '#808080'
+
 function renderRow($: EngineInterface, ctx: Ctx, { commit, cells }: GraphRow) {
   const { els, view, cols, graphWidth } = ctx
   const { Box, Text, Button } = els
@@ -835,6 +829,8 @@ function renderRow($: EngineInterface, ctx: Ctx, { commit, cells }: GraphRow) {
   const more = hidden > 0 ? `+${hidden}` : ''
   const room = Math.max(0, cols - fixed - width)
   const isSelected = view.selected === commit.hash
+  // A merge commit's text is gray: the Button dim too, in case a surface draws its children in its style.
+  const mergeColor = commit.parents.length > 1 ? MERGE_GRAY : undefined
   // With `Client`, each pill is its own instance so a right click opens its menu.
   return (
     <Box height={1} overflow="hidden" flexDirection="row">
@@ -858,11 +854,13 @@ function renderRow($: EngineInterface, ctx: Ctx, { commit, cells }: GraphRow) {
           {renderPill(ctx, plainPill(ctx, more, REMOTE_BG))}
         </Box>
       )}
-      <Button key={commit.hash} plain onPress={() => select($, commit.hash)}>
-        <Text backgroundColor={isSelected ? SELECTED_BG : undefined} weight={isSelected ? 'bold' : undefined}>
+      <Button key={commit.hash} plain dimColor={mergeColor ? true : undefined} onPress={() => select($, commit.hash)}>
+        <Text backgroundColor={isSelected ? SELECTED_BG : undefined} weight={isSelected ? 'bold' : undefined} color={mergeColor}>
           {truncate(commit.subject, room).padEnd(room)}
         </Text>
-        <Text dimColor>{meta}</Text>
+        <Text dimColor={!mergeColor} color={mergeColor}>
+          {meta}
+        </Text>
       </Button>
     </Box>
   )
@@ -877,7 +875,7 @@ function armedEntry($: EngineInterface, { view }: Ctx, armKey: string, label: st
   return {
     label: isArmed ? `Confirm: ${label.replace(/…$/, '')}?` : label,
     isActive: isArmed,
-    onPress: () => (isArmed ? run() : update($, viewState, v => ({ ...v, confirm: armKey }))),
+    onPress: () => (isArmed ? run() : setView($, v => ({ ...v, confirm: armKey }))),
   }
 }
 
@@ -914,7 +912,7 @@ function pushParts($: EngineInterface, ctx: Ctx, badge: Badge, item: MenuItem): 
   const { els: { Text, Button }, graph, view } = ctx
   const chosen = graph.remotes.filter(r => view.push?.includes(r))
   const isAll = chosen.length === graph.remotes.length
-  const setPush = (fn: (sel: string[]) => string[]) => update($, viewState, v => ({ ...v, push: fn(v.push ?? []) }))
+  const setPush = (fn: (sel: string[]) => string[]) => setView($, v => ({ ...v, push: fn(v.push ?? []) }))
   return {
     remotes: line(
       ctx,
@@ -950,7 +948,7 @@ function pushParts($: EngineInterface, ctx: Ctx, badge: Badge, item: MenuItem): 
         ) : (
           <Text dimColor>Select at least one remote</Text>
         ),
-        <Button key="push-cancel" plain dimColor onPress={() => update($, viewState, v => ({ ...v, push: null }))}>
+        <Button key="push-cancel" plain dimColor onPress={() => setView($, v => ({ ...v, push: null }))}>
           cancel
         </Button>,
       ],
@@ -987,26 +985,26 @@ function menuEntry($: EngineInterface, ctx: Ctx, badge: Badge, item: MenuItem): 
       isActive: false,
       onPress: async pe => {
         await copyText($, copy, `Copied "${copy}"`, pe.surface)
-        await update($, viewState, v => ({ ...v, menu: null }))
+        await setView($, v => ({ ...v, menu: null }))
       },
     }
   if (item.pushArgs)
     return {
       label: item.label,
       isActive: view.push !== null,
-      onPress: () => update($, viewState, v => ({ ...v, push: v.push ? null : defaultPushRemotes(badge, graph.remotes), isRenaming: false, isDeleting: false, confirm: null })),
+      onPress: () => setView($, v => ({ ...v, push: v.push ? null : defaultPushRemotes(badge, graph.remotes), isRenaming: false, isDeleting: false, confirm: null })),
     }
   if (item.deleteBranch !== undefined)
     return {
       label: item.label,
       isActive: view.isDeleting,
-      onPress: () => update($, viewState, v => ({ ...v, isDeleting: !v.isDeleting, isForce: false, isRenaming: false, push: null, confirm: null })),
+      onPress: () => setView($, v => ({ ...v, isDeleting: !v.isDeleting, isForce: false, isRenaming: false, push: null, confirm: null })),
     }
   if (item.isRename)
     return {
       label: item.label,
       isActive: view.isRenaming,
-      onPress: () => update($, viewState, v => ({ ...v, isRenaming: !v.isRenaming, isDeleting: false, push: null, confirm: null })),
+      onPress: () => setView($, v => ({ ...v, isRenaming: !v.isRenaming, isDeleting: false, push: null, confirm: null })),
     }
   const runs = item.runs ?? []
   return armedEntry($, ctx, `menu:${item.id}:${badge.kind}:${badge.label}`, item.label, () =>
@@ -1095,7 +1093,7 @@ function menuItemForm($: EngineInterface, ctx: Ctx, badge: Badge, item: MenuItem
       line(
         ctx,
         [
-          switchButton(ctx, 'menu-opt-force', 'force (deletes unmerged work)', view.isForce, () => update($, viewState, v => ({ ...v, isForce: !v.isForce }))),
+          switchButton(ctx, 'menu-opt-force', 'force (deletes unmerged work)', view.isForce, () => setView($, v => ({ ...v, isForce: !v.isForce }))),
           confirmButton($, ctx, 'menu-delete-run', `delete-branch:${branch}`, `Delete ${branch}`, () => runAction($, deleteBranchArgs(branch, view.isForce), `Deleted ${branch}`)),
         ],
         2,
@@ -1120,7 +1118,7 @@ function menuBody($: EngineInterface, ctx: Ctx, badge: Badge): RenderChildren[] 
   )
 }
 
-const closeMenuButton = ($: EngineInterface, ctx: Ctx) => closeButton(ctx, 'menu-close', () => update($, viewState, v => ({ ...v, menu: null, isRenaming: false })))
+const closeMenuButton = ($: EngineInterface, ctx: Ctx) => closeButton(ctx, 'menu-close', () => setView($, v => ({ ...v, menu: null, isRenaming: false })))
 
 // A ref's menu framed under its row (off a docked terminal pane): the pill and close, then the list.
 function renderMenu($: EngineInterface, ctx: Ctx, { cells }: GraphRow, badge: Badge) {
@@ -1145,14 +1143,14 @@ function menuFormDialog($: EngineInterface, ctx: Ctx, badge: Badge): Omit<Dialog
   if (view.isDeleting && branch !== undefined)
     return {
       title: `Delete ${branch}`,
-      rows: [line(ctx, switchButton(ctx, 'menu-opt-force', 'force (deletes unmerged work)', view.isForce, () => update($, viewState, v => ({ ...v, isForce: !v.isForce }))))],
+      rows: [line(ctx, switchButton(ctx, 'menu-opt-force', 'force (deletes unmerged work)', view.isForce, () => setView($, v => ({ ...v, isForce: !v.isForce }))))],
       actions: line(
         ctx,
         [
           <Button key="menu-delete-run" variant="primary" onPress={() => runAction($, deleteBranchArgs(branch, view.isForce), `Deleted ${branch}`)}>
             Delete
           </Button>,
-          closeButton(ctx, 'menu-delete-cancel', () => update($, viewState, v => ({ ...v, isDeleting: false, isForce: false })), 'cancel'),
+          closeButton(ctx, 'menu-delete-cancel', () => setView($, v => ({ ...v, isDeleting: false, isForce: false })), 'cancel'),
         ],
         2,
       ),
@@ -1161,7 +1159,7 @@ function menuFormDialog($: EngineInterface, ctx: Ctx, badge: Badge): Omit<Dialog
     return {
       title: `Rename ${badge.label}`,
       rows: [line(ctx, <Input key="rename" label="New name" value={badge.label} submitLabel="rename" autoFocus onSubmit={value => renameBranch($, badge.label, value)} />)],
-      actions: line(ctx, closeButton(ctx, 'rename-cancel', () => update($, viewState, v => ({ ...v, isRenaming: false })), 'cancel')),
+      actions: line(ctx, closeButton(ctx, 'rename-cancel', () => setView($, v => ({ ...v, isRenaming: false })), 'cancel')),
     }
   return null
 }
@@ -1177,7 +1175,7 @@ function menuDialog($: EngineInterface, ctx: Ctx, { cells }: GraphRow, badge: Ba
 
 // A commit's actions as a dialog (on a docked terminal pane).
 function actionsDialog($: EngineInterface, ctx: Ctx, { commit, cells }: GraphRow): Dialog {
-  const close = closeButton(ctx, 'actions-close', () => update($, viewState, v => ({ ...v, isActionsOpen: false, confirm: null })))
+  const close = closeButton(ctx, 'actions-close', () => setView($, v => ({ ...v, isActionsOpen: false, confirm: null })))
   return { title: `Commit ${short(commit.hash)}`, rows: commitActions($, ctx, commit), actions: line(ctx, close), color: laneColor(cells) }
 }
 
@@ -1282,7 +1280,7 @@ function renderDetail($: EngineInterface, ctx: Ctx, { commit, cells }: GraphRow)
           {renderPill(ctx, plainPill(ctx, short(commit.hash), lane, true))}
           <Text weight="bold">{subject}</Text>
         </Text>,
-        <Button key="detail-actions-toggle" plain dimColor={!view.isActionsOpen} onPress={() => update($, viewState, v => ({ ...v, isActionsOpen: !v.isActionsOpen, confirm: null }))}>
+        <Button key="detail-actions-toggle" plain dimColor={!view.isActionsOpen} onPress={() => setView($, v => ({ ...v, isActionsOpen: !v.isActionsOpen, confirm: null }))}>
           {iconLabel(ctx, icons.actions)}
         </Button>,
       ],
@@ -1321,7 +1319,7 @@ function screenHeader($: EngineInterface, ctx: Ctx, screen: Exclude<Screen, 'gra
   return [
     <Box flexDirection="row" justifyContent="space-between">
       <Text weight="bold">{title}</Text>
-      <Button key={`${screen}-back`} plain dimColor onPress={() => update($, viewState, (v): View => ({ ...v, screen: 'graph' }))}>
+      <Button key={`${screen}-back`} plain dimColor onPress={() => setView($, (v): View => ({ ...v, screen: 'graph' }))}>
         ← graph
       </Button>
     </Box>,
@@ -1372,7 +1370,7 @@ function renderSettings($: EngineInterface, ctx: Ctx, settings: RepoSettings | n
   const { Box, Text, Button } = els
   const { Input } = ctx
   const scopeButton = (scope: ConfigScope, label: string) => (
-    <Button key={`scope-${scope}`} plain onPress={() => update($, viewState, v => ({ ...v, configScope: scope }))}>
+    <Button key={`scope-${scope}`} plain onPress={() => setView($, v => ({ ...v, configScope: scope }))}>
       {view.configScope === scope ? '◉' : '○'} {label}
     </Button>
   )
@@ -1429,7 +1427,7 @@ function renderSettings($: EngineInterface, ctx: Ctx, settings: RepoSettings | n
                       fetch
                     </Button>
                     <Button key={`remote-edit-${r.name}`} plain dimColor onPress={() =>
-                      update($, viewState, v => ({ ...v, editingRemote: v.editingRemote === r.name ? null : r.name }))
+                      setView($, v => ({ ...v, editingRemote: v.editingRemote === r.name ? null : r.name }))
                     }>
                       edit URL
                     </Button>
@@ -1448,7 +1446,7 @@ function renderSettings($: EngineInterface, ctx: Ctx, settings: RepoSettings | n
             ) : (
               <Box flexDirection="column" marginTop={1}>
                 <Button key="remote-add" plain onPress={() =>
-                  update($, viewState, v => ({ ...v, isAddingRemote: !v.isAddingRemote, remoteDraft: '' }))
+                  setView($, v => ({ ...v, isAddingRemote: !v.isAddingRemote, remoteDraft: '' }))
                 }>
                   + Add remote
                 </Button>
@@ -1460,8 +1458,8 @@ function renderSettings($: EngineInterface, ctx: Ctx, settings: RepoSettings | n
                       placeholder="origin"
                       submitLabel="next"
                       autoFocus
-                      onInput={value => update($, viewState, v => ({ ...v, remoteDraft: value }))}
-                      onSubmit={value => update($, viewState, v => ({ ...v, remoteDraft: value }))}
+                      onInput={value => setView($, v => ({ ...v, remoteDraft: value }))}
+                      onSubmit={value => setView($, v => ({ ...v, remoteDraft: value }))}
                     />
                     <Input key="remote-new-url" label={`URL for ${view.remoteDraft.trim() || 'origin'}:`} placeholder="git@github.com:user/repo.git" submitLabel="add" onSubmit={value => addRemote($, value)} />
                   </Box>
@@ -1762,7 +1760,7 @@ function noticeDialog($: EngineInterface, ctx: Ctx, notice: NonNullable<View['no
       ? line(ctx, [renderSpinner(ctx, 'notice-spinner'), <Text>{notice.label}</Text>], 2, 'center')
       : line(ctx, <Text color="error">{notice.error}</Text>, 0, 'center')
   const dismiss = (
-    <Button key="notice-dismiss" onPress={() => update($, viewState, v => ({ ...v, notice: null }))}>
+    <Button key="notice-dismiss" onPress={() => setView($, v => ({ ...v, notice: null }))}>
       Dismiss
     </Button>
   )
@@ -1875,7 +1873,7 @@ async function renderPane($: EngineInterface, els: Ctx['els'], surface: string, 
 
   const loadMore = (
     <Button key="more" plain dimColor onPress={async () => {
-      await update($, viewState, v => ({ ...v, limit: v.limit + PAGE }))
+      await setView($, v => ({ ...v, limit: v.limit + PAGE }))
       await load($)
     }}>
       Load {PAGE} more commits
@@ -1960,17 +1958,23 @@ export const register: Register = (on, options) => {
   })
 
   on('command.run', { command: 'gitgraph' }, async $ => {
-    await update($, viewState, v => ({ ...v, isOpen: true }))
-    await $.ui.open({ id: PANE, title: TITLE })
+    await openPane($, await setView($, v => ({ ...v, isOpen: true })))
     await findRepos($)
     await Promise.all([load($), loadFlow($), detectFont($, style), loadColumns($)])
     const graph = await readGraph($)
     return { text: graph.status === 'no-repo' ? 'Git Graph: not a git repository.' : 'Git Graph opened.' }
   })
 
+  // The person's close (Escape, or the close mark) with a modal open closes the modal instead,
+  // keeping the pane: no `next`.
   on('ui.close', { id: PANE }, async ($, e, next) => {
-    await update($, viewState, v => ({ ...v, isOpen: false }))
-    return next(e)
+    let isDismissed = false
+    await setView($, v => {
+      const dismissed = e.origin.kind === 'person' ? dismissModal(v) : null
+      isDismissed = dismissed !== null
+      return dismissed ?? { ...v, isOpen: false }
+    })
+    return isDismissed ? { value: undefined } : next(e)
   }).catch(($, e, next) => next(e))
 
   // A pill posts `{ button }`: a click opens its ref's menu (again, closes it); a second left
@@ -1988,7 +1992,7 @@ export const register: Register = (on, options) => {
     lastPillClick = button === 'left' && !isDouble ? { key: e.element, at: now } : { key: '', at: 0 }
     if (!badge) return next(e)
     if (isDouble) {
-      await update($, viewState, v => ({ ...v, menu: null }))
+      await setView($, v => ({ ...v, menu: null }))
       await checkoutRef($, badge)
     } else await openMenu($, hash, badge)
     return next(e)
@@ -2001,7 +2005,7 @@ export const register: Register = (on, options) => {
     const { top, maxTop } = ownScroll
     await update($, scrollTopState, () => Math.max(0, Math.min(top + (e.by ?? 0), maxTop)))
     // A search's centered commit lets go at the first scroll, from where it was drawn.
-    if ((await read($, viewState)).scrollTo) await update($, viewState, v => ({ ...v, scrollTo: null }))
+    if ((await read($, viewState)).scrollTo) await setView($, v => ({ ...v, scrollTo: null }))
     return {}
   }).catch(($, e, next) => next(e))
 
