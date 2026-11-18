@@ -31,6 +31,7 @@
 - (resolvido) Hot-reload de mods foi ativado depois na sessão de criação.
 
 ## Lições
+- 2026-11-18: o estado do scroll próprio (`ownScroll`) vale só para o grafo: telas que retornam cedo no render (changelog, settings, mensagens) precisam zerá-lo, senão o hook `ui.scroll` segura a rolagem delas (o changelog parou de rolar na release/1.7.0).
 - 2026-11-18: dá para ver o painel de verdade sem prints: `tmux new-session -d -x 170 -y 45 "claude --plugin-dir ."`, `send-keys /gitgraph`, `capture-pane -p`; o mod recarrega a cada edição. Um texto provisório no rodapé mostra valores do render (foi assim que achamos o `bodyRows` uma linha menor que a área).
 - 2026-11-18: o painel docked rolado pela engine move o conteúdo antes do mod redesenhar: tudo `position="absolute"` "fixo" na janela treme. A saída é o mod rolar as próprias linhas (`ui.scroll` sem `next`).
 - 2026-11-18: no kit, `$.store` é evento: o teste responde `store.get`/`store.set` com um `Map` (`fake.store`).
