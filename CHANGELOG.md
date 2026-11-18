@@ -2,6 +2,20 @@
 
 Mudanças do Git Graph (`gitgraph`) por versão, no formato [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e com versões em [SemVer](https://semver.org/lang/pt-BR/).
 
+## [1.6.1] - 2026-11-18
+
+### Corrigido
+
+- As pílulas voltam a ser redondas (e os ícones Nerd Font a aparecer) depois de `/clear` ou `/resume`: a fonte é verificada de novo a cada `/gitgraph`.
+- O remote de uma branch é um segmento colado à pílula, num tom escuro da cor dela e texto claro (` develop ` ` origin `), no lugar do `⇄ origin`. Sem espaço, o nome da branch encurta antes e o remote só sai por último: antes ele sumia em nomes longos (`feature/…`, `hotfix/…`) e o push parecia não atualizar a branch.
+- A primeira pílula usa a coluna Description inteira antes de cortar o nome com `…`.
+- Git Flow num repo sem `origin` (ex.: remote `github`): finish, publish e o push depois do finish usam o remote do repo.
+- Menu de branch em lista, um item por linha e grupos separados por linha; o formulário (push, delete, rename) abre logo abaixo do item.
+- Cabeçalho `Author`/`Commit` alinhado com as colunas (antes deslocado e com `Commit` cortado).
+- Barra do Git Flow não quebra mais no meio: sem espaço, as ações da branch (finish, rebase, publish) descem juntas para a linha de baixo.
+- As ações do commit (Checkout, Cherry-pick, Copy hash, Reset … here) saem do fim dos detalhes e ficam atrás de um ícone ⋯ na linha do assunto: ele abre a mesma lista do menu de branch.
+- Listas (menu de branch, ações do commit) alinhadas à esquerda, com separador fino `┈` do tamanho do item mais longo.
+
 ## [1.6.0] - 2026-11-18
 
 ### Adicionado

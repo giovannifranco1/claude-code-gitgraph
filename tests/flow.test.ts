@@ -163,3 +163,11 @@ test('GF-02 a config with no work type is not set up', async () => {
   expect(parseFlowConfig('gitflow.branch.feature/x.base develop\n')).toBeNull()
   expect(parseFlowConfig('gitflow.branch.main.type base\n')).toBeNull()
 })
+
+test('GF-09 without gitflow.origin the remote is origin when there is one, else the repository\'s first', async () => {
+  expect(parseFlowConfig(NEXT_CONFIG, ['github'])?.remote).toBe('github')
+  expect(parseFlowConfig(NEXT_CONFIG, ['github', 'origin'])?.remote).toBe('origin')
+  expect(parseFlowConfig(NEXT_CONFIG, [])?.remote).toBe('origin')
+  expect(parseFlowConfig(`${NEXT_CONFIG}gitflow.origin upstream\n`, ['github'])?.remote).toBe('upstream')
+  expect(parseFlowConfig(AVH_CONFIG, ['github'])?.remote).toBe('github')
+})

@@ -1,7 +1,8 @@
 import { expect, test } from 'claude-code/testing'
 
-import { badgesOf, badgeWidth, diffBar, fitBadges } from '../hooks/badges'
+import { badgeParts, badgesOf, badgeWidth, diffBar, fitBadges } from '../hooks/badges'
 import { parseRefs } from '../hooks/log'
+import { shade } from '../hooks/pilldraw'
 
 test('GG-04 a local branch and its remote share one badge, HEAD first, tags last', async () => {
   const refs = parseRefs('tag: v1.0, feat, HEAD -> main, origin/main, upstream/feat, upstream/main', ['origin', 'upstream'])
@@ -23,7 +24,7 @@ test('GG-04 remote-only branches and a detached HEAD get badges of their own', a
 
 test('GG-04 a badge is as wide as its padded text', async () => {
   expect(badgeWidth({ kind: 'branch', label: 'feat', remotes: [] })).toBe(' feat '.length)
-  expect(badgeWidth({ kind: 'head', label: 'main', remotes: ['origin'] })).toBe(' ● main ⇄ origin '.length)
+  expect(badgeWidth({ kind: 'head', label: 'main', remotes: ['origin'] })).toBe(' ● main  origin '.length)
   expect(badgeWidth({ kind: 'tag', label: 'v1', remotes: [] })).toBe(' ◆ v1 '.length)
 })
 
@@ -49,7 +50,7 @@ test('GG-11 a pill that does not fit is shortened before it is counted away', as
   const long = { kind: 'branch' as const, label: 'feature/long-name', remotes: [] }
   // ' feature/lon… ' + gap = 15
   expect(fitBadges([long], 15)).toEqual({ shown: [{ ...long, label: 'feature/lon…' }], hidden: 0, width: 15 })
-  // remotes go first: ' main ' + gap = 7 fits where ' main ⇄ origin ' + gap = 16 does not
+  // a name too short to cut drops its remote segment: ' ● main ' + gap = 9
   expect(fitBadges([{ kind: 'head', label: 'main', remotes: ['origin'] }], 12)).toEqual({
     shown: [{ kind: 'head', label: 'main', remotes: [] }],
     hidden: 0,
@@ -57,4 +58,35 @@ test('GG-11 a pill that does not fit is shortened before it is counted away', as
   })
   // under six letters of name it is not worth a pill
   expect(fitBadges([long], 9)).toEqual({ shown: [], hidden: 1, width: 5 })
+})
+
+test('GG-04 a long branch keeps its remote segment, the name cut first, so a pushed branch still shows its remote', async () => {
+  const hotfix = { kind: 'head' as const, label: 'hotfix/0.1.4', remotes: ['github'] }
+  // ' ● hotfix/0.1.4 ' + ' github ' + gap = 25
+  expect(fitBadges([hotfix], 25).shown).toEqual([hotfix])
+  expect(fitBadges([hotfix], 20)).toEqual({ shown: [{ ...hotfix, label: 'hotfix…' }], hidden: 0, width: 20 })
+  // below six letters with the remote, the bare name is cut instead
+  expect(fitBadges([hotfix], 16)).toEqual({ shown: [{ kind: 'head', label: 'hotfix/0.1…', remotes: [] }], hidden: 0, width: 16 })
+})
+
+test('GG-04 the remotes are a segment of their own after the name', async () => {
+  expect(badgeParts({ kind: 'branch', label: 'feat', remotes: ['origin', 'up'] })).toEqual({ name: ' feat', remotes: 'origin up' })
+  expect(badgeParts({ kind: 'branch', label: 'feat', remotes: [] }).remotes).toBe('')
+})
+
+test('GG-11 the first pill takes the whole column before it is cut; the others keep room for the subject', async () => {
+  const long = { kind: 'head' as const, label: 'feature/phren-research', remotes: ['github'] }
+  const tag = { kind: 'tag' as const, label: 'v1', remotes: [] }
+  // ' ● feature/phren-research ' + ' github ' + gap = 35: whole within a 40-wide column, past a 20 budget
+  expect(fitBadges([long], 20, 40)).toEqual({ shown: [long], hidden: 0, width: 35 })
+  // the next pill gets what the subject budget leaves: none here, so +1 (5 wide, in the column too)
+  expect(fitBadges([long, tag], 20, 40)).toEqual({ shown: [long], hidden: 1, width: 35 + 5 })
+  // without a column given, the budget is the same for all
+  expect(fitBadges([long], 20)).toEqual({ shown: [{ ...long, label: 'featur…' }], hidden: 0, width: 20 })
+})
+
+test('GG-04 the remote segment is a dark shade of the pill color', async () => {
+  expect(shade('#4fc1ff', 0.45)).toBe('#245773')
+  expect(shade('#9d9d9d', 0.5)).toBe('#4f4f4f')
+  expect(shade('blue', 0.5)).toBe('blue')
 })

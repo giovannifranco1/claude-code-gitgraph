@@ -1,5 +1,5 @@
 import type { Badge, FlowConfig, FlowTopic } from '../types'
-import { flowMenuFor } from './flow'
+import { flowMenuFor, preferredRemote } from './flow'
 
 export type MenuItem = {
   id: string
@@ -49,7 +49,7 @@ export const pushRuns = (item: MenuItem, remotes: string[]): string[][] =>
 export function defaultPushRemotes(badge: Badge, remotes: string[]): string[] {
   const tracked = badge.remotes.filter(r => remotes.includes(r))
   if (tracked.length) return tracked
-  const first = remotes.includes('origin') ? 'origin' : remotes[0]
+  const first = preferredRemote(remotes)
   return first ? [first] : []
 }
 
@@ -104,4 +104,15 @@ export function menuFor(badge: Badge, remotes: string[], flow: FlowConfig | null
     default:
       return []
   }
+}
+
+// The menu's groups, drawn as a list with a rule between them: git flow, the branch
+// actions, rename and copy, then the deletes last.
+const GROUP_OF: Record<string, number> = { rename: 2, copy: 2, delete: 3 }
+const groupOf = (id: string) => (id.startsWith('flow-') ? 0 : (GROUP_OF[id] ?? 1))
+
+export function menuGroups(items: MenuItem[]): MenuItem[][] {
+  const groups: MenuItem[][] = [[], [], [], []]
+  for (const item of items) groups[groupOf(item.id)]?.push(item)
+  return groups.filter(g => g.length > 0)
 }

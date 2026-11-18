@@ -1,17 +1,17 @@
 import { atom, read, update } from 'claude-code'
-import type { ClientElements, Elements, EngineInterface, ProcessRunResult, Register, RenderChildren } from 'claude-code'
+import type { ClientElements, Elements, EngineInterface, ProcessRunResult, Register, RenderChildren, RenderSurface } from 'claude-code'
 
 import type { Badge, BadgeKind, BadgeStyle, Cell, Changelog, CommitDetail, ConfigScope, FileStat, FlowConfig, FlowConflict, FlowInfo, FlowInitForm, FlowKind, FlowOptions, FlowTopic, FlowView, Graph, GraphRow, Ref, RepoSettings, Repos, Screen, View } from '../types'
 import { parseChangelog, versionOf } from './changelog'
 import { badgeParts, badgesOf, diffBar, fitBadges } from './badges'
 import { isBranchNameCandidate } from './detect'
-import { absTime, fitGraph, relTime, short, truncate, truncateMiddle } from './format'
+import { absTime, fitGraph, HASH_W, relTime, short, truncate, truncateMiddle } from './format'
 import { layout } from './lanes'
-import { findByHash, isHashQuery, topOf, visibleRange, wrapRows } from './virtual'
+import { findByHash, isHashQuery, topOf, visibleRange, wrapGroups, wrapRows } from './virtual'
 import { DETAIL_FORMAT, LOG_FORMAT, parseDetail, parseLog, parseStatus, remotesOf, UNCOMMITTED, withUncommitted } from './log'
 import { defaultTagMessage, finishArgs, finishPushArgs, flowArgs, flowCliOf, flowMenuFor, nextVersion, parseFlowConfig, resumeArgs, topicFor, typeOf } from './flow'
 import { BRANCH_REFS_ARGS, branchNamesOf, DEFAULT_FORM, initArgs, initFormError, initFormFor, staleBaseArgs, trimForm } from './flowinit'
-import { checkoutArgs, defaultPushRemotes, deleteBranchArgs, type MenuItem, menuFor, pushRuns, renameArgs } from './menu'
+import { checkoutArgs, defaultPushRemotes, deleteBranchArgs, type MenuItem, menuFor, menuGroups, pushRuns, renameArgs } from './menu'
 import { drawPill, type PillProps } from './pilldraw'
 import { BRANCH_ARGS, FIND_ARGS, UPSTREAM_ARGS, parseBranch, parseUpstream, parseRepos, pickActive, branchColumn, repoLabel } from './repos'
 import { addRemotePlan, isRemoteUrl, parseRemotes, userConfigArgs } from './settings'
@@ -57,8 +57,9 @@ const ICONS = {
     bugfix: '\uf188',
     release: '\uf02b',
     hotfix: '\uf06d',
+    actions: '\uf142',
   },
-  plain: { on: '◉', off: '○', fetch: '☁', refresh: '↻', settings: '⚙', search: '⌕', changelog: '☰', feature: '✦', bugfix: '✱', release: '◆', hotfix: '▲' },
+  plain: { on: '◉', off: '○', fetch: '☁', refresh: '↻', settings: '⚙', search: '⌕', changelog: '☰', feature: '✦', bugfix: '✱', release: '◆', hotfix: '▲', actions: '⋯' },
 }
 // No git the pane runs opens an editor (merge, rebase or tag messages) or asks for a password.
 const GIT_ENV = { GIT_TERMINAL_PROMPT: '0', GIT_EDITOR: 'true', GIT_MERGE_AUTOEDIT: 'no' }
@@ -72,7 +73,7 @@ const NERD_FONT_CHECK = 'ls ~/Library/Fonts /Library/Fonts ~/.local/share/fonts 
 
 const DEFAULT_FLOW: FlowView = { starting: null, finishing: null, opts: { isNoFf: true, isPush: true, isKeep: true }, tagMessage: null, conflict: null, init: null }
 const EMPTY_GRAPH: Graph = { status: 'idle', rows: [], head: '', branch: '', dirty: 0, conflicts: 0, remotes: [], hasMore: false }
-const DEFAULT_VIEW: View = { scope: 'all', limit: PAGE, selected: null, confirm: null, menu: null, isRenaming: false, isDeleting: false, isForce: false, push: null, running: null, screen: 'graph', configScope: 'local', editingRemote: null, isAddingRemote: false, remoteDraft: '', scrollTo: null, isSearching: false, refresh: 'idle', isOpen: false, flow: DEFAULT_FLOW }
+const DEFAULT_VIEW: View = { scope: 'all', limit: PAGE, selected: null, confirm: null, menu: null, isRenaming: false, isDeleting: false, isForce: false, push: null, running: null, screen: 'graph', configScope: 'local', editingRemote: null, isAddingRemote: false, remoteDraft: '', scrollTo: null, isSearching: false, refresh: 'idle', isOpen: false, flow: DEFAULT_FLOW, isActionsOpen: false }
 
 const graphState = atom({ plugin: 'gitgraph', key: 'graph' } as const, EMPTY_GRAPH)
 // Bumped with every graph write: renders read this small number and keep the graph
@@ -80,7 +81,7 @@ const graphState = atom({ plugin: 'gitgraph', key: 'graph' } as const, EMPTY_GRA
 const versionState = atom({ plugin: 'gitgraph', key: 'graphVersion' } as const, 0)
 // Tagged with the shape of View: a view an older version kept (without fields added
 // since) reads as absent after an update, instead of breaking the render.
-const viewState = atom({ plugin: 'gitgraph', key: 'view' } as const, DEFAULT_VIEW, { shape: 'view-8' })
+const viewState = atom({ plugin: 'gitgraph', key: 'view' } as const, DEFAULT_VIEW, { shape: 'view-9' })
 const detailState = atom({ plugin: 'gitgraph', key: 'detail' } as const, null as CommitDetail | null)
 const roundState = atom({ plugin: 'gitgraph', key: 'isRound' } as const, false)
 const nerdState = atom({ plugin: 'gitgraph', key: 'hasNerdFont' } as const, false)
@@ -102,6 +103,7 @@ const CLOSED = {
   push: null,
   editingRemote: null,
   isAddingRemote: false,
+  isActionsOpen: false,
 } satisfies Partial<View>
 
 // The git flow forms under the footer bar, closed when a git flow action ends.
@@ -375,9 +377,13 @@ const stepName = (args: string[]) => (args[0] === 'flow' ? `git flow ${args.slic
 // Runs the steps in order and stops at the first that fails. When the stop left unmerged
 // files, `conflict` is kept to continue or abort; any other outcome clears it.
 async function runFlow($: EngineInterface, steps: FlowStep[], done: string, label: string, conflict?: FlowConflict): Promise<void> {
+  // git flow gets the remote the pane pushes to: where the repo sets none and has no
+  // origin, git-flow-next would look for an origin that is not there.
+  const remote = (await readFlowConfig($))?.remote ?? 'origin'
+  const flowEnv = ['-c', `core.hooksPath=${$.plugin.root}/${NO_HOOKS}`, '-c', `gitflow.origin=${remote}`]
   const failures = await withRunning($, label, done, async () => {
     for (const step of steps) {
-      const out = await git($, step.args[0] === 'flow' ? ['-c', `core.hooksPath=${$.plugin.root}/${NO_HOOKS}`, ...step.args] : step.args, step.isNetwork)
+      const out = await git($, step.args[0] === 'flow' ? [...flowEnv, ...step.args] : step.args, step.isNetwork)
       if (out.exitCode !== 0) return [`${step.failed ?? `${stepName(step.args)} failed`}: ${firstLine(out.stderr || out.stdout)}`]
     }
     return []
@@ -395,16 +401,17 @@ const readFlowConfig = async ($: EngineInterface) => (await read($, flowState))?
 // What git flow knows here. The installed CLI is asked until one is found.
 async function loadFlow($: EngineInterface): Promise<void> {
   const known = await read($, flowState)
-  const [version, config, tags] = await Promise.all([
+  const [version, config, tags, remotes] = await Promise.all([
     known && known.cli !== 'none' ? undefined : git($, ['flow', 'version']),
     git($, ['config', '--get-regexp', '^gitflow\\.']),
     git($, ['tag', '--list']),
+    git($, ['remote']),
   ])
   const cli = version ? flowCliOf(version.exitCode, version.stdout) : (known?.cli ?? 'none')
   const tagList = tags.stdout.split('\n').filter(Boolean)
   await update($, flowState, () => ({
     cli,
-    config: cli === 'none' ? null : parseFlowConfig(config.stdout),
+    config: cli === 'none' ? null : parseFlowConfig(config.stdout, remotes.stdout.split('\n').filter(Boolean)),
     next: { release: nextVersion(tagList, 'release'), hotfix: nextVersion(tagList, 'hotfix') },
   }))
 }
@@ -562,8 +569,6 @@ async function renameBranch($: EngineInterface, from: string, value: string): Pr
   if (name) await runAction($, renameArgs(from, name), `Branch ${from} renamed to ${name}`)
 }
 
-const localBranch = (refs: Ref[]) => refs.find(r => (r.kind === 'head' && r.name !== 'HEAD') || r.kind === 'branch')?.name
-const isCheckedOut = (refs: Ref[]) => refs.some(r => r.kind === 'head' && r.name !== 'HEAD')
 const laneColor = (cells: Cell[]) => PALETTE[(cells.find(c => c.ch === '●' || c.ch === '○')?.color ?? 0) % PALETTE.length] ?? '#4fc1ff'
 
 function groupCells(cells: Cell[]): { text: string; color: number }[] {
@@ -620,33 +625,32 @@ const plainPill = ({ isRound }: Ctx, name: string, bg: string, isBold = false): 
   isRound,
 })
 
-function copyButton($: EngineInterface, { els: { Button } }: Ctx, key: string, label: string, text: string, copied: string, close = false) {
-  return (
-    <Button key={key} onPress={async pe => {
-      const res = await $.ui.copy({ text, surface: pe.surface })
-      $.ui.toast(res.isCopied ? copied : 'Could not copy')
-      if (close) await update($, viewState, v => ({ ...v, menu: null }))
-    }}>
-      {label}
-    </Button>
-  )
+async function copyText($: EngineInterface, text: string, copied: string, surface: RenderSurface): Promise<void> {
+  const res = await $.ui.copy({ text, surface })
+  $.ui.toast(res.isCopied ? copied : 'Could not copy')
 }
 
+
+// A row's author and hash, the same width for the column header's `Author` and `Commit`.
 function metaOf({ cols }: Ctx, author: string, hash: string): string {
-  if (cols < 70) return ` ${short(hash)}`
-  return `  ${truncate(author, AUTHOR_W).padEnd(AUTHOR_W)}  ${short(hash)}`
+  const hashText = short(hash).padEnd(HASH_W)
+  if (cols < 70) return ` ${hashText}`
+  return `  ${truncate(author, AUTHOR_W).padEnd(AUTHOR_W)}  ${hashText}`
 }
 
 // One row of the pane, exactly one terminal row tall whatever it holds.
-function line({ els: { Box } }: Ctx, children: RenderChildren, gap = 0, justify?: 'space-between') {
+function line({ els: { Box } }: Ctx, children: RenderChildren, gap = 0, justify?: 'space-between', key?: string) {
   return (
-    <Box height={1} overflow="hidden" flexDirection="row" gap={gap} justifyContent={justify}>
+    <Box key={key} height={1} overflow="hidden" flexDirection="row" gap={gap} justifyContent={justify}>
       {children}
     </Box>
   )
 }
 
-const rule = (ctx: Ctx) => line(ctx, <ctx.els.Text dimColor>{'─'.repeat(Math.max(0, ctx.cols))}</ctx.els.Text>)
+const rule = (ctx: Ctx, width = ctx.cols, key?: string) => line(ctx, <ctx.els.Text dimColor>{'─'.repeat(Math.max(0, width))}</ctx.els.Text>, 0, undefined, key)
+
+const localBranch = (refs: Ref[]) => refs.find(r => (r.kind === 'head' && r.name !== 'HEAD') || r.kind === 'branch')?.name
+const isCheckedOut = (refs: Ref[]) => refs.some(r => r.kind === 'head' && r.name !== 'HEAD')
 
 const headName = (graph: Graph) => graph.branch || (graph.head ? short(graph.head) : '—')
 
@@ -753,16 +757,13 @@ function renderHeader($: EngineInterface, ctx: Ctx) {
         <Input key="search" label={`${icons.search} `} placeholder="find commit by hash" submitLabel="find" autoFocus onSubmit={value => searchCommit($, value)} />,
       ),
     )
+  // As wide as a row (EDGE_SAFETY too), `Author` and `Commit` over the rows' meta; over
+  // a graph narrower than its name, `Graph` keeps a space after it.
+  const meta = metaOf(ctx, 'Author', 'Commit')
+  const graphHead = 'Graph'.padEnd(Math.max(graphWidth + 1, 'Graph '.length))
   if (cols >= 70)
     lines.push(
-      line(
-        ctx,
-        <Text dimColor>
-          {'Graph'.padEnd(graphWidth + 1)}
-          {'Description'.padEnd(Math.max(0, cols - graphWidth - 1 - metaOf(ctx, '', '').length))}
-          {`  ${'Author'.padEnd(AUTHOR_W)}  Commit`}
-        </Text>,
-      ),
+      line(ctx, <Text dimColor>{`${graphHead}${'Description'.padEnd(Math.max(0, cols - EDGE_SAFETY - graphHead.length - meta.length))}${meta}`}</Text>),
     )
   lines.push(rule(ctx))
   return { node: <Box flexDirection="column">{lines}</Box>, height: lines.length }
@@ -788,9 +789,10 @@ function renderRow($: EngineInterface, ctx: Ctx, { commit, cells }: GraphRow) {
     )
   const lane = laneColor(cells)
   const meta = metaOf(ctx, commit.author, commit.hash)
-  // Pills get what is left once the subject keeps its minimum; the rest become `+N`.
+  // The first pill may fill the Description column; the others get what is left once the
+  // subject keeps its minimum, the rest as `+N`.
   const fixed = graphWidth + 1 + meta.length + EDGE_SAFETY
-  const { shown, hidden, width } = fitBadges(badgesOf(commit.refs), Math.max(0, cols - fixed - MIN_SUBJECT))
+  const { shown, hidden, width } = fitBadges(badgesOf(commit.refs), Math.max(0, cols - fixed - MIN_SUBJECT), Math.max(0, cols - fixed))
   const more = hidden > 0 ? `+${hidden}` : ''
   const room = Math.max(0, cols - fixed - width)
   const isSelected = view.selected === commit.hash
@@ -827,17 +829,28 @@ function renderRow($: EngineInterface, ctx: Ctx, { commit, cells }: GraphRow) {
   )
 }
 
-// A destructive action: the first press arms it, the second runs it.
-function confirmButton($: EngineInterface, { els: { Button }, view }: Ctx, key: string, armKey: string, label: string, run: () => Promise<void>) {
-  const armed = view.confirm === armKey
-  return (
-    <Button key={key} variant={armed ? 'primary' : undefined} onPress={async () => {
-      if (armed) await run()
-      else await update($, viewState, v => ({ ...v, confirm: armKey }))
-    }}>
-      {armed ? `Confirm: ${label.replace(/…$/, '')}?` : label}
-    </Button>
-  )
+// What a pressable item reads and does; open (its form showing) or armed, it is active.
+type Entry = { label: string; isActive: boolean; onPress: (pe: { surface: RenderSurface }) => Promise<unknown> }
+
+// A destructive action: the first press arms it (`Confirm: …?`), the second runs it.
+function armedEntry($: EngineInterface, { view }: Ctx, armKey: string, label: string, run: () => Promise<unknown>): Entry {
+  const isArmed = view.confirm === armKey
+  return {
+    label: isArmed ? `Confirm: ${label.replace(/…$/, '')}?` : label,
+    isActive: isArmed,
+    onPress: () => (isArmed ? run() : update($, viewState, v => ({ ...v, confirm: armKey }))),
+  }
+}
+
+// An entry as a framed Button, primary while active.
+const entryButton = ({ els: { Button } }: Ctx, key: string, { label, isActive, onPress }: Entry) => (
+  <Button key={key} variant={isActive ? 'primary' : undefined} onPress={onPress}>
+    {label}
+  </Button>
+)
+
+function confirmButton($: EngineInterface, ctx: Ctx, key: string, armKey: string, label: string, run: () => Promise<void>) {
+  return entryButton(ctx, key, armedEntry($, ctx, armKey, label, run))
 }
 
 // The spinner where the surface draws a `Client`, an hourglass elsewhere.
@@ -912,48 +925,89 @@ const flowArmKey = ({ action, topic }: NonNullable<MenuItem['flow']>) => `flow-$
 
 // A git flow item, the same in a branch's menu and in the footer: finish opens its form
 // (whose Finish asks again); update and publish ask for a second press.
-function renderFlowItem($: EngineInterface, ctx: Ctx, key: string, label: string, flow: NonNullable<MenuItem['flow']>) {
+function flowEntry($: EngineInterface, ctx: Ctx, label: string, flow: NonNullable<MenuItem['flow']>): Entry {
   const { action, topic } = flow
-  if (action !== 'finish') return confirmButton($, ctx, key, flowArmKey(flow), label, () => (action === 'update' ? updateTopic($, topic) : publishTopic($, topic)))
-  return (
-    <ctx.els.Button key={key} variant={ctx.view.flow.finishing?.branch === topic.branch ? 'primary' : undefined} onPress={() => toggleFinish($, topic)}>
-      {label}
-    </ctx.els.Button>
-  )
+  if (action === 'finish') return { label, isActive: ctx.view.flow.finishing?.branch === topic.branch, onPress: () => toggleFinish($, topic) }
+  return armedEntry($, ctx, flowArmKey(flow), label, () => (action === 'update' ? updateTopic($, topic) : publishTopic($, topic)))
 }
 
-function renderMenuItem($: EngineInterface, ctx: Ctx, badge: Badge, item: MenuItem) {
-  const { Button } = ctx.els
-  const key = `menu-${item.id}`
-  if (item.flow) return renderFlowItem($, ctx, key, item.label, item.flow)
-  if (item.copy !== undefined) return copyButton($, ctx, key, item.label, item.copy, `Copied "${item.copy}"`, true)
+const renderFlowItem = ($: EngineInterface, ctx: Ctx, key: string, label: string, flow: NonNullable<MenuItem['flow']>) => entryButton(ctx, key, flowEntry($, ctx, label, flow))
+
+// What a menu item reads and does.
+function menuEntry($: EngineInterface, ctx: Ctx, badge: Badge, item: MenuItem): Entry {
+  const { view, graph } = ctx
+  const { flow, copy } = item
+  if (flow) return flowEntry($, ctx, item.label, flow)
+  if (copy !== undefined)
+    return {
+      label: item.label,
+      isActive: false,
+      onPress: async pe => {
+        await copyText($, copy, `Copied "${copy}"`, pe.surface)
+        await update($, viewState, v => ({ ...v, menu: null }))
+      },
+    }
   if (item.pushArgs)
-    return (
-      <Button key={key} variant={ctx.view.push ? 'primary' : undefined} onPress={() =>
-        update($, viewState, v => ({ ...v, push: v.push ? null : defaultPushRemotes(badge, ctx.graph.remotes), isRenaming: false, confirm: null }))
-      }>
-        {item.label}
-      </Button>
-    )
+    return {
+      label: item.label,
+      isActive: view.push !== null,
+      onPress: () => update($, viewState, v => ({ ...v, push: v.push ? null : defaultPushRemotes(badge, graph.remotes), isRenaming: false, isDeleting: false, confirm: null })),
+    }
   if (item.deleteBranch !== undefined)
-    return (
-      <Button key={key} variant={ctx.view.isDeleting ? 'primary' : undefined} onPress={() =>
-        update($, viewState, v => ({ ...v, isDeleting: !v.isDeleting, isForce: false, isRenaming: false, push: null, confirm: null }))
-      }>
-        {item.label}
-      </Button>
-    )
+    return {
+      label: item.label,
+      isActive: view.isDeleting,
+      onPress: () => update($, viewState, v => ({ ...v, isDeleting: !v.isDeleting, isForce: false, isRenaming: false, push: null, confirm: null })),
+    }
   if (item.isRename)
-    return (
-      <Button key={key} onPress={() => update($, viewState, v => ({ ...v, isRenaming: !v.isRenaming, confirm: null }))}>
-        {item.label}
-      </Button>
-    )
+    return {
+      label: item.label,
+      isActive: view.isRenaming,
+      onPress: () => update($, viewState, v => ({ ...v, isRenaming: !v.isRenaming, isDeleting: false, push: null, confirm: null })),
+    }
   const runs = item.runs ?? []
-  return confirmButton($, ctx, key, `menu:${item.id}:${badge.kind}:${badge.label}`, item.label, () =>
+  return armedEntry($, ctx, `menu:${item.id}:${badge.kind}:${badge.label}`, item.label, () =>
     runActions($, runs, `${item.label}: ${badge.label} ✓`, `${item.label}: ${badge.label}…`, item.isNetwork),
   )
 }
+
+// One row of a list of actions (a ref's menu, a commit's actions), flush left: the active
+// one bold and colored, a `◂` after it, so no label moves.
+function entryRow(ctx: Ctx, key: string, rowKey: string, { label, isActive, onPress }: Entry) {
+  const { Button, Text } = ctx.els
+  return line(
+    ctx,
+    <Button key={key} plain onPress={onPress}>
+      <Text color={isActive ? 'warning' : undefined} weight={isActive ? 'bold' : undefined}>
+        {label}
+        {isActive ? ' ◂' : ''}
+      </Text>
+    </Button>,
+    0,
+    undefined,
+    rowKey,
+  )
+}
+
+// An entry of a list: its Button's key (`id` unless given), and rows under it (its form).
+type ListItem = { id: string; key?: string; entry: Entry; after?: RenderChildren[] }
+
+// A list's thin rule, flush left with the labels and as long as the longest one.
+const listRule = (ctx: Ctx, width: number, key?: string) =>
+  line(ctx, <ctx.els.Text dimColor>{'┈'.repeat(Math.max(0, Math.min(width, framedWidth(ctx))))}</ctx.els.Text>, 0, undefined, key)
+
+// Rows `<prefix>-row-<id>` of entries in groups, a rule `<prefix>-rule-<n>` between groups.
+function entryList(ctx: Ctx, prefix: string, groups: ListItem[][]): RenderChildren[] {
+  const shown = groups.filter(g => g.length > 0)
+  const width = Math.max(0, ...shown.flat().map(i => i.entry.label.length))
+  return shown.flatMap((group, n) => [
+    ...(n > 0 ? [listRule(ctx, width, `${prefix}-rule-${n}`)] : []),
+    ...group.flatMap(({ id, key = id, entry, after }) => [entryRow(ctx, key, `${prefix}-row-${id}`, entry), ...(after ?? [])]),
+  ])
+}
+
+// The room inside a framed box under the graph: its border and padding taken off.
+const framedWidth = ({ cols, graphWidth }: Ctx) => cols - graphWidth - 1 - 4
 
 // A framed box exactly `rows.length + 2` rows tall: the border, then one row each.
 function framed({ els: { Box } }: Ctx, color: string, indent: number, rows: RenderChildren[]) {
@@ -974,12 +1028,34 @@ const BUTTON_CHROME = 4
 const buttonWidth = (label: string, isArmed: boolean) => (isArmed ? `Confirm: ${label}?` : label).length + BUTTON_CHROME
 
 // Framed Buttons inside a framed box, on as many rows as its width needs, none cut off.
-function buttonRows({ els: { Box }, cols, graphWidth }: Ctx, key: string, items: BarItem[]) {
-  return wrapRows(items.map(i => i.width), cols - graphWidth - 1 - 4, 1).map((row, n) => (
+function buttonRows(ctx: Ctx, key: string, items: BarItem[]) {
+  const { Box } = ctx.els
+  return wrapRows(items.map(i => i.width), framedWidth(ctx), 1).map((row, n) => (
     <Box key={`${key}-${n}`} height={1} overflow="hidden" flexDirection="row" columnGap={1}>
       {row.map(i => items[i]?.node)}
     </Box>
   ))
+}
+
+// The form a menu item opened: the push's remotes, the delete's force, the new name.
+function menuItemForm($: EngineInterface, ctx: Ctx, badge: Badge, item: MenuItem): RenderChildren[] {
+  const { view, Input } = ctx
+  if (item.pushArgs && view.push) return renderPushChooser($, ctx, badge, item)
+  const branch = item.deleteBranch
+  if (branch !== undefined && view.isDeleting)
+    return [
+      line(
+        ctx,
+        [
+          switchButton(ctx, 'menu-opt-force', 'force (deletes unmerged work)', view.isForce, () => update($, viewState, v => ({ ...v, isForce: !v.isForce }))),
+          confirmButton($, ctx, 'menu-delete-run', `delete-branch:${branch}`, `Delete ${branch}`, () => runAction($, deleteBranchArgs(branch, view.isForce), `Deleted ${branch}`)),
+        ],
+        2,
+      ),
+    ]
+  if (item.isRename && view.isRenaming && Input)
+    return [line(ctx, <Input key="rename" label="New name:" value={badge.label} submitLabel="rename" autoFocus onSubmit={value => renameBranch($, badge.label, value)} />)]
+  return []
 }
 
 function renderMenu($: EngineInterface, ctx: Ctx, { cells }: GraphRow, badge: Badge) {
@@ -988,7 +1064,6 @@ function renderMenu($: EngineInterface, ctx: Ctx, { cells }: GraphRow, badge: Ba
   const { Input } = ctx
   const lane = laneColor(cells)
   const items = menuFor(badge, graph.remotes, ctx.flow?.config ?? null)
-  const push = items.find(i => i.pushArgs)
   const rows: RenderChildren[] = [
     line(
       ctx,
@@ -1003,30 +1078,17 @@ function renderMenu($: EngineInterface, ctx: Ctx, { cells }: GraphRow, badge: Ba
     ),
   ]
   if (view.running) rows.push(renderRunning(ctx))
-  else {
-    // An armed item is measured with its longer `Confirm: …?`.
-    const isArmed = (item: MenuItem) => (item.flow ? view.confirm === flowArmKey(item.flow) : view.confirm?.startsWith(`menu:${item.id}:`) === true)
-    rows.push(...buttonRows(ctx, 'menu-items', items.map(item => ({ node: renderMenuItem($, ctx, badge, item), width: buttonWidth(item.label, isArmed(item)) }))))
-    if (view.push && push) rows.push(...renderPushChooser($, ctx, badge, push))
-    const branch = items.find(i => i.deleteBranch !== undefined)?.deleteBranch
-    if (view.isDeleting && branch !== undefined)
-      rows.push(
-        line(
-          ctx,
-          [
-            switchButton(ctx, 'menu-opt-force', 'force (deletes unmerged work)', view.isForce, () => update($, viewState, v => ({ ...v, isForce: !v.isForce }))),
-            confirmButton($, ctx, 'menu-delete-run', `delete-branch:${branch}`, `Delete ${branch}`, () =>
-              runAction($, deleteBranchArgs(branch, view.isForce), `Deleted ${branch}`),
-            ),
-          ],
-          2,
+  else
+    // A list, its groups split by a rule; an item's form opens right under it.
+    rows.push(
+      ...entryList(
+        ctx,
+        'menu',
+        menuGroups(items).map(group =>
+          group.map((item): ListItem => ({ id: item.id, key: `menu-${item.id}`, entry: menuEntry($, ctx, badge, item), after: menuItemForm($, ctx, badge, item) })),
         ),
-      )
-    if (view.isRenaming && Input)
-      rows.push(
-        line(ctx, <Input key="rename" label="New name:" value={badge.label} submitLabel="rename" autoFocus onSubmit={value => renameBranch($, badge.label, value)} />),
-      )
-  }
+      ),
+    )
   return framed(ctx, BADGE_BG[badge.kind] ?? lane, ctx.graphWidth + 1, rows)
 }
 
@@ -1090,24 +1152,56 @@ function refMenuRows($: EngineInterface, ctx: Ctx, hash: string, badges: Badge[]
   return buttonRows(ctx, 'refmenu-row', items)
 }
 
-function renderDetail($: EngineInterface, ctx: Ctx, { commit, cells }: GraphRow) {
-  const { els, detail, graph, view } = ctx
-  const { Text } = els
-  const { Input } = ctx
+// The open commit's actions, as a list: checkout and cherry-pick, the copy, then the
+// reset (it moves the branch) last.
+function commitActions($: EngineInterface, ctx: Ctx, commit: GraphRow['commit']): RenderChildren[] {
+  const { graph } = ctx
   const branch = localBranch(commit.refs)
+  const head = headName(graph)
+  const isHere = commit.hash === graph.head
+  const item = (id: string, label: string, run: () => Promise<void>): ListItem => ({ id, entry: armedEntry($, ctx, `${id}:${commit.hash}`, label, run) })
+  return entryList(ctx, 'detail', [
+    [
+      ...(isCheckedOut(commit.refs)
+        ? []
+        : [item('checkout', `Checkout ${branch ?? '(detached)'}`, () =>
+            runAction($, (branch && checkoutArgs({ kind: 'branch', label: branch, remotes: [] })) || ['checkout', '--detach', commit.hash], `Checked out ${branch ?? short(commit.hash)}`),
+          )]),
+      ...(isHere ? [] : [item('pick', 'Cherry-pick', () => runAction($, ['cherry-pick', commit.hash], `Cherry-picked ${short(commit.hash)}`))]),
+    ],
+    [{ id: 'copy', entry: { label: 'Copy hash', isActive: false, onPress: pe => copyText($, commit.hash, `Copied hash ${short(commit.hash)}`, pe.surface) } }],
+    // Moves the current branch here and keeps the changes staged; a commit left
+    // behind stays in the graph while a ref (a pushed branch) keeps it, to reset back to.
+    isHere ? [] : [item('reset', `Reset ${head} here (soft)`, () => runAction($, ['reset', '--soft', commit.hash], `Reset ${head} to ${short(commit.hash)}: changes kept staged`))],
+  ])
+}
+
+function renderDetail($: EngineInterface, ctx: Ctx, { commit, cells }: GraphRow) {
+  const { els, detail, view, icons } = ctx
+  const { Text, Button } = els
+  const { Input } = ctx
   const lane = laneColor(cells)
   const badges = badgesOf(commit.refs).filter(b => b.kind !== 'detached')
   const [subject = '', ...rest] = (detail?.body ?? commit.subject).split('\n')
   const body = rest.join('\n').trim().split('\n').filter((l, i, all) => l !== '' || (i > 0 && all[i - 1] !== ''))
+  // The subject line ends with the actions icon; pressed, the list opens right under it.
   const rows: RenderChildren[] = [
     line(
       ctx,
-      <Text wrap="truncate-end">
-        {renderPill(ctx, plainPill(ctx, short(commit.hash), lane, true))}
-        <Text weight="bold">{subject}</Text>
-      </Text>,
+      [
+        <Text wrap="truncate-end">
+          {renderPill(ctx, plainPill(ctx, short(commit.hash), lane, true))}
+          <Text weight="bold">{subject}</Text>
+        </Text>,
+        <Button key="detail-actions-toggle" plain dimColor={!view.isActionsOpen} onPress={() => update($, viewState, v => ({ ...v, isActionsOpen: !v.isActionsOpen, confirm: null }))}>
+          {iconLabel(ctx, icons.actions)}
+        </Button>,
+      ],
+      1,
+      'space-between',
     ),
   ]
+  if (view.isActionsOpen && !view.running) rows.push(...commitActions($, ctx, commit), blank(ctx))
   if (detail === null) rows.push(line(ctx, <Text dimColor>Loading details…</Text>))
   else {
     rows.push(
@@ -1127,31 +1221,8 @@ function renderDetail($: EngineInterface, ctx: Ctx, { commit, cells }: GraphRow)
   }
   rows.push(blank(ctx))
   if (view.running) rows.push(view.menu ? blank(ctx) : renderRunning(ctx))
-  else {
-    const confirmItem = (key: string, armKey: string, label: string, run: () => Promise<void>): BarItem => ({
-      node: confirmButton($, ctx, key, armKey, label, run),
-      width: buttonWidth(label, view.confirm === armKey),
-    })
-    const head = headName(graph)
-    const actions = [
-      { node: copyButton($, ctx, 'copy', 'Copy hash', commit.hash, `Copied hash ${short(commit.hash)}`), width: buttonWidth('Copy hash', false) },
-      !isCheckedOut(commit.refs) &&
-        confirmItem('checkout', `checkout:${commit.hash}`, `Checkout ${branch ?? '(detached)'}`, () =>
-          runAction($, (branch && checkoutArgs({ kind: 'branch', label: branch, remotes: [] })) || ['checkout', '--detach', commit.hash], `Checked out ${branch ?? short(commit.hash)}`),
-        ),
-      commit.hash !== graph.head &&
-        confirmItem('pick', `pick:${commit.hash}`, 'Cherry-pick', () => runAction($, ['cherry-pick', commit.hash], `Cherry-picked ${short(commit.hash)}`)),
-      // Moves the current branch here and keeps the changes staged; a commit left
-      // behind stays in the graph while a ref (a pushed branch) keeps it, to reset back to.
-      commit.hash !== graph.head &&
-        confirmItem('reset', `reset:${commit.hash}`, `Reset ${head} here (soft)`, () =>
-          runAction($, ['reset', '--soft', commit.hash], `Reset ${head} to ${short(commit.hash)}: changes kept staged`),
-        ),
-    ].filter(a => a !== false)
-    rows.push(...buttonRows(ctx, 'detail-actions', actions))
-    if (Input)
-      rows.push(line(ctx, <Input key="new-branch" label="New branch here:" placeholder="branch-name" submitLabel="create" onSubmit={value => createBranch($, commit.hash, value)} />))
-  }
+  else if (Input)
+    rows.push(line(ctx, <Input key="new-branch" label="New branch here:" placeholder="branch-name" submitLabel="create" onSubmit={value => createBranch($, commit.hash, value)} />))
   return framed(ctx, lane, ctx.graphWidth + 1, rows)
 }
 
@@ -1444,7 +1515,7 @@ function finishRows($: EngineInterface, ctx: Ctx, config: FlowConfig) {
   return rows
 }
 
-type BarItem = { node: RenderChildren; width: number; isSeparator?: boolean }
+type BarItem = { node: RenderChildren; width: number }
 
 const barText = (ctx: Ctx, text: string, color?: 'warning'): BarItem => ({
   node: (
@@ -1455,20 +1526,20 @@ const barText = (ctx: Ctx, text: string, color?: 'warning'): BarItem => ({
   width: text.length,
 })
 
-// The footer bar's items: start a work branch of each type and, on one, finish, update
+// The footer bar's groups: start a work branch of each type and, on one, finish, update
 // and publish it; or why git flow cannot be used here. Widths are drawn cells: a framed
 // Button's `[ label ]` and a Nerd Font icon's second cell included.
-function flowBar($: EngineInterface, ctx: Ctx): BarItem[] {
+function flowBar($: EngineInterface, ctx: Ctx): BarItem[][] {
   const { els: { Text, Button }, view, graph, flow, icons } = ctx
-  if (flow === null) return [barText(ctx, 'git flow…')]
-  if (flow.cli === 'none') return [barText(ctx, 'git flow is not installed:', 'warning'), barText(ctx, FLOW_INSTALL)]
-  if (flow.cli === 'other') return [barText(ctx, 'Git Flow actions need git-flow-next:', 'warning'), barText(ctx, FLOW_INSTALL)]
+  if (flow === null) return [[barText(ctx, 'git flow…')]]
+  if (flow.cli === 'none') return [[barText(ctx, 'git flow is not installed:', 'warning'), barText(ctx, FLOW_INSTALL)]]
+  if (flow.cli === 'other') return [[barText(ctx, 'Git Flow actions need git-flow-next:', 'warning'), barText(ctx, FLOW_INSTALL)]]
   const config = flow.config
   // Not set up: a form for the repo's own names, or the standard ones (`git flow init -d`).
   if (!config) {
     const setUp = 'Set up git flow…'
     const defaults = 'Use defaults'
-    return [
+    return [[
       ...(ctx.Input
         ? [{
             node: (
@@ -1484,7 +1555,7 @@ function flowBar($: EngineInterface, ctx: Ctx): BarItem[] {
         width: buttonWidth(defaults, view.confirm === 'flow-init'),
       },
       barText(ctx, FLOW_DEFAULTS),
-    ]
+    ]]
   }
   const starts = config.types.map((t): BarItem => {
     const label = `${icons[t.kind]} ${t.kind}`
@@ -1503,20 +1574,24 @@ function flowBar($: EngineInterface, ctx: Ctx): BarItem[] {
     const label = { 'flow-finish': 'finish', 'flow-update': update, 'flow-publish': 'publish' }[i.id] ?? i.label
     return [{ node: renderFlowItem($, ctx, i.id, label, i.flow), width: buttonWidth(label, view.confirm === flowArmKey(i.flow)) }]
   })
-  const separator: BarItem = { node: <Text dimColor>│</Text>, width: 1, isSeparator: true }
-  return [...starts, ...(actions.length ? [separator, ...actions] : [])]
+  return [starts, actions]
 }
 
 const BAR_GAP = 1
 
-// The git flow footer: a rule, the bar (on as many rows as the width needs; a separator
-// that would open or close a row is left out), then the forms of an action in progress.
+// The git flow footer: a rule, the bar (one row with a separator when it fits, else the
+// start types and the branch's actions each on rows of their own), then the forms of an
+// action in progress.
 function renderFlow($: EngineInterface, ctx: Ctx) {
-  const { Box } = ctx.els
-  const items = flowBar($, ctx)
-  const bar = wrapRows(items.map(i => i.width), ctx.cols, BAR_GAP)
-    .map(row => row.map(i => items[i]).filter((item, at, all) => item && !(item.isSeparator && (at === 0 || at === all.length - 1))))
-    .map(row => line(ctx, row.map(item => item?.node), BAR_GAP))
+  const { Box, Text } = ctx.els
+  const groups = flowBar($, ctx)
+  const bar = wrapGroups(groups.map(g => g.map(i => i.width)), ctx.cols, BAR_GAP).map(row =>
+    line(
+      ctx,
+      row.map(cell => (cell === 'separator' ? <Text dimColor>│</Text> : groups[cell[0]]?.[cell[1]]?.node)),
+      BAR_GAP,
+    ),
+  )
   const rows = [rule(ctx), ...bar, ...flowFormRows($, ctx)]
   return { node: <Box flexDirection="column">{rows}</Box>, height: rows.length }
 }
@@ -1618,15 +1693,21 @@ async function hasNerdFont($: EngineInterface): Promise<boolean> {
   }
 }
 
+// At session start and again on each /gitgraph: a session the state was lost in
+// (`/clear`, `/resume`) gets no new session.start and would draw square pills.
+async function detectFont($: EngineInterface, style: BadgeStyle): Promise<void> {
+  const hasNerd = await hasNerdFont($)
+  await update($, nerdState, () => hasNerd)
+  await update($, roundState, () => (style === 'auto' ? hasNerd : style === 'round'))
+}
+
 export const register: Register = (on, options) => {
   const style: BadgeStyle = options.badges === 'round' || options.badges === 'square' ? options.badges : 'auto'
 
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'gitgraph', description: 'Open Git Graph: the commit graph of this repository' })
     $.clock.every(POLL_MS, () => void poll($))
-    const hasNerd = await hasNerdFont($)
-    await update($, nerdState, () => hasNerd)
-    await update($, roundState, () => (style === 'auto' ? hasNerd : style === 'round'))
+    await detectFont($, style)
     return next(e)
   })
 
@@ -1634,7 +1715,7 @@ export const register: Register = (on, options) => {
     await update($, viewState, v => ({ ...v, isOpen: true }))
     await $.ui.open({ id: PANE, title: TITLE })
     await findRepos($)
-    await Promise.all([load($), loadFlow($)])
+    await Promise.all([load($), loadFlow($), detectFont($, style)])
     const graph = await readGraph($)
     return { text: graph.status === 'no-repo' ? 'Git Graph: not a git repository.' : 'Git Graph opened.' }
   })
