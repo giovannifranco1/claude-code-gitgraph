@@ -11,7 +11,8 @@ export type Commit = {
 }
 
 export type BadgeKind = 'head' | 'detached' | 'branch' | 'remote' | 'tag'
-// `isGone`: a remote branch with no local branch of its name (merged and deleted here).
+// `isGone`: a dead branch: a remote one with no local branch of its name (deleted here), or
+// merged into a base (then its local branch on its commit too, which carries its remote).
 export type Badge = { kind: BadgeKind; label: string; remotes: string[]; isGone?: true }
 
 export type Cell = { ch: string; color: number }
@@ -44,6 +45,8 @@ export type Graph = {
   error?: string
 }
 
+// The "all branches" switch: on, local and remote branches (`--all`); off (`head`, the name kept
+// for the stored view), the local branches alone (`--branches HEAD`).
 export type Scope = 'all' | 'head'
 export type Screen = 'graph' | 'settings' | 'changelog'
 export type View = {

@@ -1,6 +1,10 @@
 import type { FlowBase, FlowCli, FlowConfig, FlowConflict, FlowKind, FlowOptions, FlowTopic, FlowType } from '../types'
 import type { MenuItem } from './menu'
 
+// The base branches a merge goes into: git flow's, else the usual names (as `git flow init` offers).
+const DEFAULT_BASES = ['main', 'master', 'develop', 'dev']
+export const basesOf = (config: FlowConfig | null | undefined) => config?.bases.map(b => b.name) ?? DEFAULT_BASES
+
 export const KINDS: FlowKind[] = ['feature', 'bugfix', 'release', 'hotfix']
 const SEMVER = /^(v?)(\d+)\.(\d+)\.(\d+)$/
 

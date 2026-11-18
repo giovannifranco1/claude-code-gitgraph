@@ -1,11 +1,17 @@
-import type { Badge, BadgeKind, Ref } from '../types'
+import type { Badge, BadgeKind, Commit, Ref } from '../types'
 
 const ORDER: BadgeKind[] = ['head', 'detached', 'branch', 'remote', 'tag']
 
 // One badge per local branch, its remote-tracking refs folded into it as the
 // VS Code Git Graph does (`main` with an `origin` segment); remotes without a local stand alone,
-// gone where no local branch of their name is anywhere (`branches`, when given).
-export function badgesOf(refs: Ref[], branches?: string[]): Badge[] {
+// gone where no local branch of their name is anywhere (`branches`, when given). Without
+// `hasRemotes` (all branches off) a remote only marks its local branch: no pill of its own.
+// A remote in `dead` (merged, see deadRemotes) is gone too: alone, or with its local branch
+// on its commit, which then is one gone pill with it.
+// `origin/feat/x` → `feat/x`: the branch a remote-tracking ref follows.
+export const branchOf = (remoteRef: string) => remoteRef.slice(remoteRef.indexOf('/') + 1)
+
+export function badgesOf(refs: Ref[], branches?: string[], hasRemotes = true, dead?: Set<string>): Badge[] {
   const badges: Badge[] = []
   const locals = new Map<string, Badge>()
   for (const ref of refs) {
@@ -20,16 +26,19 @@ export function badgesOf(refs: Ref[], branches?: string[]): Badge[] {
     if (ref.kind === 'tag') badges.push({ kind: 'tag', label: ref.name, remotes: [] })
     if (ref.kind !== 'remote') continue
     const cut = ref.name.indexOf('/')
-    const local = locals.get(ref.name.slice(cut + 1))
-    if (cut > 0 && local) local.remotes.push(ref.name.slice(0, cut))
-    else if (branches && cut > 0 && !branches.includes(ref.name.slice(cut + 1))) badges.push({ kind: 'remote', label: ref.name, remotes: [], isGone: true })
-    else badges.push({ kind: 'remote', label: ref.name, remotes: [] })
+    const branch = branchOf(ref.name)
+    const local = cut > 0 ? locals.get(branch) : undefined
+    const isGone = dead?.has(ref.name) || (branches !== undefined && cut > 0 && !branches.includes(branch))
+    if (local) {
+      local.remotes.push(ref.name.slice(0, cut))
+      if (isGone) local.isGone = true
+    } else if (hasRemotes) badges.push({ kind: 'remote', label: ref.name, remotes: [], ...(isGone && { isGone: true as const }) })
   }
   return badges.sort((a, b) => ORDER.indexOf(a.kind) - ORDER.indexOf(b.kind))
 }
 
 // The badge's parts: an icon before the name (`lead`: the checked-out branch, a tag, a
-// branch only on a remote), the name, then its remotes.
+// gone branch), the name, then its remotes.
 export function badgeParts(badge: Badge): { lead: boolean; name: string; remotes: string } {
   return { lead: badge.kind === 'head' || badge.kind === 'tag' || badge.isGone === true, name: badge.label, remotes: badge.remotes.join(' ') }
 }
@@ -61,14 +70,20 @@ function shrink(badge: Badge, room: number): Badge | null {
   return cut(badge, room) ?? (badge.remotes.length ? cut({ ...badge, remotes: [] }, room) : null)
 }
 
-// The pills that fit `max` columns, shortened where needed; the rest counted for a `+N` pill.
-// The first may take the whole `column` (the subject then gets less) before it is cut: a
-// branch shows its full name. `width` is what they take, the `+N` pill and every gap included.
+// Branch pills (local or remote) a row draws at most; tags do not count. The rest go in `+N`.
+const MAX_BRANCH_PILLS = 2
+
+// The pills (at most MAX_BRANCH_PILLS branches, and the tags) that fit `max` columns, shortened
+// where needed; the rest counted for a `+N` pill. The first may take the whole `column` (the
+// subject then gets less) before it is cut: a branch shows its full name. `width` is what they
+// take, the `+N` pill and every gap included.
 export function fitBadges(badges: Badge[], max: number, column = max): { shown: Badge[]; hidden: number; width: number } {
   const plus = (n: number) => (n > 0 ? `+${n}`.length + 3 : 0)
   const shown: Badge[] = []
   let used = 0
-  for (const badge of badges) {
+  const isTag = (b: Badge) => b.kind === 'tag'
+  const candidates = [...badges.filter(b => !isTag(b)).slice(0, MAX_BRANCH_PILLS), ...badges.filter(isTag)]
+  for (const badge of candidates) {
     const room = shown.length === 0 ? Math.max(max, column) : max
     const fitted = shrink(badge, room - used - plus(badges.length - shown.length - 1))
     if (!fitted) break
@@ -86,4 +101,27 @@ export function diffBar(adds: number | null, dels: number | null, width: number)
   if (a + d <= width) return { adds: a, dels: d }
   const scaled = Math.min(width - (d > 0 ? 1 : 0), Math.max(a > 0 ? 1 : 0, Math.round((a / (a + d)) * width)))
   return { adds: scaled, dels: width - scaled }
+}
+
+// The remote branches merged into a base (`bases`: main, develop): their commit is in a base's
+// history, below its tip. Not a base itself, nor one on a base's tip (a branch just started).
+// Only the commits loaded count: one merged past them is not known.
+export function deadRemotes(commits: Pick<Commit, 'hash' | 'parents' | 'refs'>[], bases: string[]): Set<string> {
+  const byHash = new Map(commits.map(c => [c.hash, c]))
+  const nameOf = (ref: Ref) => (ref.kind === 'remote' ? branchOf(ref.name) : ref.name)
+  const tips = new Set(commits.filter(c => c.refs.some(r => r.kind !== 'tag' && bases.includes(nameOf(r)))).map(c => c.hash))
+  const merged = new Set<string>()
+  const queue = [...tips]
+  while (queue.length) {
+    const hash = queue.pop()!
+    if (merged.has(hash)) continue
+    merged.add(hash)
+    queue.push(...(byHash.get(hash)?.parents ?? []))
+  }
+  const dead = new Set<string>()
+  for (const c of commits) {
+    if (!merged.has(c.hash) || tips.has(c.hash)) continue
+    for (const ref of c.refs) if (ref.kind === 'remote' && !bases.includes(branchOf(ref.name))) dead.add(ref.name)
+  }
+  return dead
 }

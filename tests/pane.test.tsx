@@ -1,6 +1,8 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine, TestBody } from 'claude-code/testing'
 
+import { shade } from '../hooks/pilldraw'
+
 type On = Parameters<TestBody>[1]
 
 const US = '\x1f'
@@ -17,6 +19,8 @@ type Fake = {
   calls: string[][]
   envs: Record<string, string>[]
   headRefs?: string
+  // The refs on B, feat's commit (merged into main by M).
+  featRefs?: string
   // The commit HEAD is on (M by default), as after a reset.
   head?: string
   remotes?: string[]
@@ -81,7 +85,7 @@ function logOf(fake: Fake): string {
   let out =
     row(M, `${A} ${B}`, fake.headRefs ?? 'HEAD -> main, origin/main', 'Ana', '1700000000', 'Merge feat') +
     row(A, R, '', 'Ana', '1699990000', 'Work on main') +
-    row(B, R, 'feat, tag: v0.1', 'Bia', '1699980000', 'Work on feat')
+    row(B, R, fake.featRefs ?? 'feat, tag: v0.1', 'Bia', '1699980000', 'Work on feat')
   let parent = R
   for (let i = 0; i < fake.extra; i++) {
     const hash = `e${String(i).padStart(7, '0')}`
@@ -248,6 +252,34 @@ test('MG-01 the text of a merge commit (subject, author, hash) is gray, as Git G
   await ui.unmount()
 })
 
+test('RC-01 a remote branch away from its local one has the dark shade of its color; a gone one stays gray', async ($, on) => {
+  await setup($, on, newFake({ headRefs: 'origin/feat, origin/old' }))
+  const ui = await $.ui.mount(pane('terminal'))
+  const bg = async (key: string) => ((await ui.find({ type: 'Client', key }))?.props.props as { segments: { bg: string }[] }).segments[0]?.bg
+  const labels = async (key: string) => ((await ui.find({ type: 'Client', key }))?.props.props as { segments: { text: string }[] }).segments.map(g => g.text).join('')
+  expect(await labels(`pill:${M}:0`)).toContain('origin/feat')
+  // feat's own pill is on B, in B's lane color: the remote one is its dark shade, light text
+  expect(await bg(`pill:${M}:0`)).toBe(shade((await bg(`pill:${B}:0`))!, 0.45))
+  expect(((await ui.find({ type: 'Client', key: `pill:${M}:0` }))?.props.props as { segments: { fg: string }[] }).segments[0]?.fg).toBe('#f0f0f0')
+  expect(await bg(`pill:${M}:0`)).not.toBe('#9d9d9d')
+  expect(await labels(`pill:${M}:1`)).toContain('origin/old')
+  expect(await bg(`pill:${M}:1`)).toBe('#9d9d9d')
+  await ui.unmount()
+})
+
+test('GG-24 a merged branch with its remote on its commit is one gone pill: ghost and name on gray, the remote on its dark shade', async ($, on) => {
+  await setup($, on, newFake({ featRefs: 'feat, origin/feat' }))
+  const ui = await $.ui.mount(pane('terminal'))
+  const props = (await ui.find({ type: 'Client', key: `pill:${B}:0` }))?.props.props as { segments: { text: string; bg: string; icon?: { text: string } }[] }
+  expect(props.segments.map(g => g.text)).toEqual(['  feat', 'origin'])
+  expect(props.segments[0]?.icon?.text).toMatch(/^(◌|\u{f02a0})$/u)
+  expect(props.segments[0]?.bg).toBe('#9d9d9d')
+  // drawn as a checked-out pill: ghost and name on the gray, the remote on its dark shade
+  expect(props.segments[1]?.bg).toBe('#474747')
+  expect(await ui.find({ type: 'Client', key: `pill:${B}:1` })).toBeUndefined()
+  await ui.unmount()
+})
+
 const CHANGELOG = `# Changelog
 
 ## [1.6.0] - 2026-11-18
@@ -331,12 +363,14 @@ test('GG-07 uncommitted changes show as the first row', async ($, on) => {
   await ui.unmount()
 })
 
-test('GG-05 the scope toggle reloads with HEAD only', async ($, on) => {
+test('GG-05 SC-01 the scope toggle reloads with the local branches only', async ($, on) => {
   const fake = newFake()
   await setup($, on, fake)
   const ui = await $.ui.mount(pane('terminal'))
+  expect(logCalls(fake).at(-1)).toContain('--all')
   await ui.press({ key: 'scope' })
   const last = logCalls(fake).at(-1) ?? []
+  expect(last).toContain('--branches')
   expect(last).toContain('HEAD')
   expect(last).not.toContain('--all')
   await ui.unmount()

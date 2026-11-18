@@ -4,13 +4,13 @@ import type { ClientElements, Elements, EngineInterface, ProcessRunResult, Regis
 import type { Badge, BadgeKind, BadgeStyle, Cell, Changelog, Columns, CommitDetail, ConfigScope, FileStat, FlowConfig, FlowConflict, FlowInfo, FlowInitForm, FlowKind, FlowOptions, FlowTopic, FlowView, Graph, GraphRow, Ref, RepoSettings, Repos, Screen, View } from '../types'
 import { parseChangelog, versionOf } from './changelog'
 import { CLOSED, dismissModal, FLOW_CLOSED, hasModal } from './dismiss'
-import { badgeParts, badgesOf, diffBar, fitBadges } from './badges'
+import { badgeParts, badgesOf, branchOf, deadRemotes, diffBar, fitBadges } from './badges'
 import { isBranchNameCandidate } from './detect'
 import { absTime, fitGraph, HASH_W, relTime, short, truncate, truncateMiddle } from './format'
 import { layout } from './lanes'
 import { clampTop, findByHash, isHashQuery, topOf, visibleRange, widestIn, windowAt, wrapRows } from './virtual'
 import { DETAIL_FORMAT, localsOf, LOG_FORMAT, parseDetail, parseLog, parseStatus, parseSync, remotesOf, UNCOMMITTED, withUncommitted } from './log'
-import { defaultTagMessage, finishArgs, finishPushArgs, flowArgs, flowCliOf, nextVersion, parseFlowConfig, resumeArgs, topicFor, topicOf, typeOf } from './flow'
+import { basesOf, defaultTagMessage, finishArgs, finishPushArgs, flowArgs, flowCliOf, nextVersion, parseFlowConfig, resumeArgs, topicFor, topicOf, typeOf } from './flow'
 import { BRANCH_REFS_ARGS, branchNamesOf, DEFAULT_FORM, initArgs, initFormError, initFormFor, staleBaseArgs, trimForm } from './flowinit'
 import { checkoutArgs, defaultPushRemotes, deleteBranchArgs, type MenuItem, menuFor, menuGroups, pushRuns, renameArgs } from './menu'
 import { drawPill, type PillProps, type PillSegment, shade } from './pilldraw'
@@ -27,16 +27,18 @@ const NETWORK_TIMEOUT_MS = 120_000
 const MAX_FILES = 20
 const PALETTE = ['#4fc1ff', '#c586c0', '#ce9178', '#4ec9b0', '#dcdcaa', '#f48771', '#b5cea8', '#d7ba7d']
 const BADGE_FG = '#1e1e1e'
-const BADGE_BG: Partial<Record<BadgeKind, string>> = { remote: '#9d9d9d', tag: '#e2c08d', detached: '#f48771' }
+const BADGE_BG: Partial<Record<BadgeKind, string>> = { tag: '#e2c08d', detached: '#f48771' }
+// A gone branch's pill, the `+N` pill and a remote's name in settings.
+const GRAY_BG = '#9d9d9d'
 const SELECTED_BG = '#264f78'
-const REMOTE_BG = BADGE_BG.remote ?? '#9d9d9d'
 const ADD_COLOR = '#89d185'
 const DEL_COLOR = '#f48771'
 const AUTHOR_W = 12
+// The subject's columns the pills after the first leave it (the first may take them all).
+const MIN_SUBJECT = 10
 const BODY_LINES = 8
 const OVERSCAN = 15
 const BAR_W = 8
-const MIN_SUBJECT = 20
 // A pill's caps (or padding) and its gap, around its name.
 const PILL_PAD = 3
 const EDGE_SAFETY = 1
@@ -106,7 +108,9 @@ const reposState = atom({ plugin: 'gitgraph', key: 'repos' } as const, { list: [
 
 let generation = 0
 // What a render derives from the graph, worked out once per graph version.
-type GraphCache = { version: number; graph: Graph; maxCells: number; indexOf: Map<string, number> }
+// `branchColors`: each local branch's pill color (its tip's lane), which its remotes take too.
+// `dead`: the remotes merged into a base, worked out for the bases named (`deadFor`).
+type GraphCache = { version: number; graph: Graph; maxCells: number; indexOf: Map<string, number>; branchColors: Map<string, string>; dead?: { bases: string; set: Set<string> } }
 let graphCache: GraphCache | null = null
 let signature = ''
 let busy = false
@@ -190,6 +194,7 @@ function cacheOf(version: number, graph: Graph): GraphCache {
     graph,
     maxCells: graph.rows.reduce((n, r) => Math.max(n, r.cells.length), 1),
     indexOf: new Map(graph.rows.map((r, i) => [r.commit.hash, i])),
+    branchColors: new Map(graph.rows.flatMap(r => r.commit.refs.flatMap(ref => (ref.kind === 'head' || ref.kind === 'branch' ? [[ref.name, laneColor(r.cells)] as const] : [])))),
   }
 }
 
@@ -212,6 +217,17 @@ async function setGraph($: EngineInterface, change: (g: Graph) => Graph): Promis
   graphCache = cacheOf(await update($, versionState, n => n + 1), graph)
 }
 
+// The remotes merged into a base (drawn as gone), once per graph version and bases.
+function deadFor(cache: GraphCache, flow: FlowInfo | null): Set<string> {
+  const bases = basesOf(flow?.config)
+  const key = bases.join()
+  if (cache.dead?.bases !== key) cache.dead = { bases: key, set: deadRemotes(cache.graph.rows.map(r => r.commit), bases) }
+  return cache.dead.set
+}
+
+// A commit's badges as the pane draws them: remotes alone only with all branches on, merged ones gone.
+const rowBadges = (refs: Ref[], graph: Graph, view: View, dead: Set<string>) => badgesOf(refs, graph.locals, view.scope === 'all', dead)
+
 async function readCache($: EngineInterface): Promise<GraphCache> {
   const version = await read($, versionState)
   if (graphCache?.version !== version) graphCache = cacheOf(version, await read($, graphState))
@@ -230,7 +246,7 @@ async function load($: EngineInterface, known?: RepoState): Promise<void> {
   busy = true
   try {
     const [log, status, refs] = await Promise.all([
-      git($, ['log', view.scope === 'all' ? '--all' : 'HEAD', '--date-order', `-n${view.limit + 1}`, LOG_FORMAT]),
+      git($, ['log', ...(view.scope === 'all' ? ['--all'] : ['--branches', 'HEAD']), '--date-order', `-n${view.limit + 1}`, LOG_FORMAT]),
       known?.status ?? git($, STATUS_ARGS),
       known?.refs ?? git($, REFS_ARGS),
     ])
@@ -243,7 +259,7 @@ async function load($: EngineInterface, known?: RepoState): Promise<void> {
     const remotes = remotesOf(refs.stdout)
     const commits = parseLog(log.exitCode === 0 ? log.stdout : '', remotes)
     const shown = withUncommitted(commits.slice(0, view.limit), head, dirty)
-    const cells = layout(shown)
+    const cells = layout(shown, PALETTE.length)
     signature = signatureOf(status.stdout, refs.stdout)
     await setGraph($, (): Graph => ({
       status: 'ready',
@@ -626,6 +642,8 @@ type Ctx = {
   // A docked terminal pane: the footer is pinned and the git flow dialog floats over the graph.
   isPinned: boolean
   columns: Columns
+  branchColors: Map<string, string>
+  dead: Set<string>
 }
 
 // The dark shade of a pill's color: its remotes' segment (light text) and its icon.
@@ -635,18 +653,37 @@ const LIGHT_FG = '#f0f0f0'
 // name (two spaces after it: a Nerd Font icon is drawn two cells wide); a tag `[icon][version]`
 // and a branch only on a remote (merged, deleted here) `[ghost][name]`, the name on the dark
 // shade of the pill color. Icons are in that dark shade.
-function pillProps({ isRound, icons }: Ctx, badge: Badge, lane: string): PillProps {
+// A badge's color: a gone one (merged, or deleted here) gray; a remote branch the dark shade of
+// its local branch's color (its own lane's while that one is not loaded), as a local pill's
+// remote segment is; a tag or a detached HEAD its own; a branch its lane's.
+function pillBg({ branchColors }: Ctx, badge: Badge, lane: string): string {
+  if (badge.isGone) return GRAY_BG
+  if (badge.kind === 'remote') return shade(branchColors.get(branchOf(badge.label)) ?? lane, SHADE)
+  return BADGE_BG[badge.kind] ?? lane
+}
+
+// A ref's pill. A tag, or a gone branch alone, is its icon on the color, then the name on its
+// dark shade; any other is its name on the color, then its remotes on the dark shade, the
+// checked-out branch (and a gone one with its remote: the ghost there) with an icon first.
+function pillProps(ctx: Ctx, badge: Badge, lane: string): PillProps {
+  const { isRound, icons } = ctx
   const { name, remotes } = badgeParts(badge)
-  const bg = BADGE_BG[badge.kind] ?? lane
-  const isBold = badge.kind === 'head' || badge.kind === 'detached'
+  const bg = pillBg(ctx, badge, lane)
   const dark = shade(bg, SHADE)
-  const lead = badge.kind === 'tag' ? icons.tag : badge.isGone ? icons.ghost : ''
-  const segments: PillSegment[] = lead
-    ? [{ text: '', bg, fg: BADGE_FG, icon: { text: lead, fg: dark } }, { text: name, bg: dark, fg: LIGHT_FG }]
-    : [
-        badge.kind === 'head' ? { text: `  ${name}`, bg, fg: BADGE_FG, isBold, icon: { text: icons.head, fg: dark } } : { text: name, bg, fg: BADGE_FG, isBold },
-        ...(remotes ? [{ text: remotes, bg: dark, fg: LIGHT_FG }] : []),
-      ]
+  const isBold = badge.kind === 'head' || badge.kind === 'detached'
+  const icon = badge.kind === 'head' ? icons.head : badge.kind === 'tag' ? icons.tag : badge.isGone ? icons.ghost : ''
+  const isPinned = badge.kind === 'head' || (badge.isGone === true && remotes !== '')
+  const fg = badge.kind === 'remote' && !badge.isGone ? LIGHT_FG : BADGE_FG
+  const segments: PillSegment[] =
+    icon && !isPinned
+      ? [
+          { text: '', bg, fg: BADGE_FG, icon: { text: icon, fg: dark } },
+          { text: name, bg: dark, fg: LIGHT_FG },
+        ]
+      : [
+          isPinned ? { text: `  ${name}`, bg, fg, isBold, icon: { text: icon, fg: dark } } : { text: name, bg, fg, isBold },
+          ...(remotes ? [{ text: remotes, bg: dark, fg: LIGHT_FG }] : []),
+        ]
   return { segments, isRound }
 }
 
@@ -825,7 +862,7 @@ function renderRow($: EngineInterface, ctx: Ctx, { commit, cells }: GraphRow) {
   // The first pill may fill the Description column; the others get what is left once the
   // subject keeps its minimum, the rest as `+N`.
   const fixed = graphWidth + 1 + meta.length + EDGE_SAFETY
-  const { shown, hidden, width } = fitBadges(badgesOf(commit.refs, ctx.graph.locals), Math.max(0, cols - fixed - MIN_SUBJECT), Math.max(0, cols - fixed))
+  const { shown, hidden, width } = fitBadges(rowBadges(commit.refs, ctx.graph, ctx.view, ctx.dead), Math.max(0, cols - fixed - MIN_SUBJECT), Math.max(0, cols - fixed))
   const more = hidden > 0 ? `+${hidden}` : ''
   const room = Math.max(0, cols - fixed - width)
   const isSelected = view.selected === commit.hash
@@ -851,7 +888,7 @@ function renderRow($: EngineInterface, ctx: Ctx, { commit, cells }: GraphRow) {
       ))}
       {more && (
         <Box flexShrink={0}>
-          {renderPill(ctx, plainPill(ctx, more, REMOTE_BG))}
+          {renderPill(ctx, plainPill(ctx, more, GRAY_BG))}
         </Box>
       )}
       <Button key={commit.hash} plain dimColor={mergeColor ? true : undefined} onPress={() => select($, commit.hash)}>
@@ -1124,7 +1161,7 @@ const closeMenuButton = ($: EngineInterface, ctx: Ctx) => closeButton(ctx, 'menu
 function renderMenu($: EngineInterface, ctx: Ctx, { cells }: GraphRow, badge: Badge) {
   const lane = laneColor(cells)
   const head = line(ctx, [<ctx.els.Text>{renderPill(ctx, pillProps(ctx, badge, lane))}</ctx.els.Text>, closeMenuButton($, ctx)], 0, 'space-between')
-  return framed(ctx, BADGE_BG[badge.kind] ?? lane, ctx.graphWidth + 1, [head, ...menuBody($, ctx, badge)])
+  return framed(ctx, pillBg(ctx, badge, lane), ctx.graphWidth + 1, [head, ...menuBody($, ctx, badge)])
 }
 
 // The form a menu item opened, as a dialog of its own: push's remotes, delete's force (it
@@ -1167,7 +1204,7 @@ function menuFormDialog($: EngineInterface, ctx: Ctx, badge: Badge): Omit<Dialog
 // A ref's menu as a dialog (on a docked terminal pane), or the form one of its items opened.
 function menuDialog($: EngineInterface, ctx: Ctx, { cells }: GraphRow, badge: Badge): Dialog {
   const lane = laneColor(cells)
-  const color = BADGE_BG[badge.kind] ?? lane
+  const color = pillBg(ctx, badge, lane)
   const form = menuFormDialog($, ctx, badge)
   if (form) return { ...form, color }
   return { title: <ctx.els.Text>{renderPill(ctx, pillProps(ctx, badge, lane))}</ctx.els.Text>, rows: menuBody($, ctx, badge), actions: line(ctx, closeMenuButton($, ctx)), color }
@@ -1268,7 +1305,7 @@ function renderDetail($: EngineInterface, ctx: Ctx, { commit, cells }: GraphRow)
   const { Text, Button } = els
   const { Input } = ctx
   const lane = laneColor(cells)
-  const badges = badgesOf(commit.refs, ctx.graph.locals).filter(b => b.kind !== 'detached')
+  const badges = rowBadges(commit.refs, ctx.graph, ctx.view, ctx.dead).filter(b => b.kind !== 'detached')
   const [subject = '', ...rest] = (detail?.body ?? commit.subject).split('\n')
   const body = rest.join('\n').trim().split('\n').filter((l, i, all) => l !== '' || (i > 0 && all[i - 1] !== ''))
   // The subject line ends with the actions icon; pressed, the list opens right under it.
@@ -1415,7 +1452,7 @@ function renderSettings($: EngineInterface, ctx: Ctx, settings: RepoSettings | n
             {settings.remotes.map(r => (
               <Box flexDirection="column">
                 <Box height={1} overflow="hidden" flexDirection="row">
-                  <Box flexShrink={0}>{renderPill(ctx, plainPill(ctx, r.name, REMOTE_BG, true))}</Box>
+                  <Box flexShrink={0}>{renderPill(ctx, plainPill(ctx, r.name, GRAY_BG, true))}</Box>
                   <Text dimColor>{truncateMiddle(r.fetchUrl, Math.max(10, cols - r.name.length - PILL_PAD))}</Text>
                 </Box>
                 {r.pushUrl && r.pushUrl !== r.fetchUrl && (
@@ -1841,6 +1878,8 @@ async function renderPane($: EngineInterface, els: Ctx['els'], surface: string, 
     flow,
     cols,
     graphWidth: Math.min(graphMax, cache.maxCells),
+    branchColors: cache.branchColors,
+    dead: deadFor(cache, flow),
     now: Math.floor(Date.now() / 1000),
     isRound,
     icons: hasNerd ? ICONS.nerd : ICONS.plain,
@@ -1984,9 +2023,10 @@ export const register: Register = (on, options) => {
     const [kind, hash = '', index = ''] = e.element.split(':')
     if (kind !== 'pill') return next(e)
     const button = (e.data as { button?: string } | null)?.button
-    const graph = await readGraph($)
-    const row = graph.rows.find(r => r.commit.hash === hash)
-    const badge = row && badgesOf(row.commit.refs, graph.locals)[Number(index)]
+    const [cache, view, flow] = await Promise.all([readCache($), read($, viewState), read($, flowState)])
+    const { graph } = cache
+    const row = graph.rows[cache.indexOf.get(hash) ?? -1]
+    const badge = row && rowBadges(row.commit.refs, graph, view, deadFor(cache, flow))[Number(index)]
     const now = await $.clock.now()
     const isDouble = button === 'left' && lastPillClick.key === e.element && now - lastPillClick.at <= DOUBLE_CLICK_MS
     lastPillClick = button === 'left' && !isDouble ? { key: e.element, at: now } : { key: '', at: 0 }

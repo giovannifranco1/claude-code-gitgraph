@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { badgeParts, badgesOf, badgeWidth, diffBar, fitBadges } from '../hooks/badges'
+import { badgeParts, badgesOf, badgeWidth, deadRemotes, diffBar, fitBadges } from '../hooks/badges'
 import { parseRefs } from '../hooks/log'
 import { shade } from '../hooks/pilldraw'
 
@@ -39,7 +39,12 @@ test('GG-08 a diffstat bar splits its width between additions and deletions', as
 test('GG-11 pills past their width budget collapse into a +N count', async () => {
   const b = (label: string) => ({ kind: 'branch' as const, label, remotes: [] })
   const all = [b('main'), b('feature/long-name'), b('x')]
-  expect(fitBadges(all, 100)).toEqual({ shown: all, hidden: 0, width: 7 + 20 + 4 })
+  // at most two branch pills, room or not: the third is the '+1' pill (5 wide)
+  expect(fitBadges(all, 100)).toEqual({ shown: [b('main'), b('feature/long-name')], hidden: 1, width: 7 + 20 + 5 })
+  expect(fitBadges(all.slice(0, 2), 100)).toEqual({ shown: all.slice(0, 2), hidden: 0, width: 7 + 20 })
+  // tags do not count: two branches and a tag show, the third branch is the '+1'
+  const tag = { kind: 'tag' as const, label: 'v1', remotes: [] }
+  expect(fitBadges([...all, tag], 100)).toEqual({ shown: [b('main'), b('feature/long-name'), tag], hidden: 1, width: 7 + 20 + 8 + 5 })
   // ' main ' + gap = 7, ' feature/long-name ' + gap = 20; '+2' pill is 5 wide
   expect(fitBadges(all, 14)).toEqual({ shown: [b('main')], hidden: 2, width: 7 + 5 })
   expect(fitBadges(all, 3)).toEqual({ shown: [], hidden: 3, width: 5 })
@@ -103,4 +108,35 @@ test('GG-24 a remote branch with no local branch of its name anywhere is gone: i
   expect(badgeParts({ kind: 'remote', label: 'origin/feature/gone', remotes: [], isGone: true }).lead).toBe(true)
   expect(badgeParts({ kind: 'remote', label: 'origin/feat', remotes: [] }).lead).toBe(false)
   expect(badgeWidth({ kind: 'remote', label: 'origin/x', remotes: [], isGone: true })).toBe(' g '.length + ' origin/x '.length)
+})
+
+test('SC-01 with all branches off, remote refs keep marking their local branch but have no pill of their own', async () => {
+  const refs = parseRefs('HEAD -> main, origin/main, origin/feat, tag: v1.0', ['origin'])
+  expect(badgesOf(refs, ['main'], false)).toEqual([
+    { kind: 'head', label: 'main', remotes: ['origin'] },
+    { kind: 'tag', label: 'v1.0', remotes: [] },
+  ])
+  expect(badgesOf(refs, ['main']).map(b => b.label)).toContain('origin/feat')
+})
+
+test('GG-24 a remote branch merged into a base is dead, joined to its local branch on its commit; a base, or one on its tip, is not', async () => {
+  const commit = (hash: string, parents: string[], refs: string) => ({ hash, parents, refs: parseRefs(refs, ['origin']), author: '', time: 0, subject: hash })
+  // develop merged feature/a (its remote is behind the merge); feature/b is ahead; feature/new is on develop's tip
+  const rows = [
+    commit('m', ['d', 'a'], 'develop, origin/develop, origin/feature/new'),
+    commit('b', ['d'], 'origin/feature/b'),
+    commit('a', ['d'], 'feature/a, origin/feature/a'),
+    commit('d', [], 'main, origin/main'),
+  ]
+  const dead = deadRemotes(rows, ['main', 'develop'])
+  expect([...dead].sort()).toEqual(['origin/feature/a'])
+  // on its local branch's commit the two are one dead pill, the remote after a separator
+  const pill = badgesOf(rows[2]!.refs, ['feature/a'], true, dead)
+  expect(pill).toEqual([{ kind: 'branch', label: 'feature/a', remotes: ['origin'], isGone: true }])
+  expect(badgeParts(pill[0]!)).toEqual({ lead: true, name: 'feature/a', remotes: 'origin' })
+  // ghost 3, ' feature/a ' 11, ' origin ' 8
+  expect(badgeWidth(pill[0]!)).toBe(3 + 11 + 8)
+  // away from its local branch it stands alone, a ghost
+  const away = badgesOf(parseRefs('origin/feature/a', ['origin']), ['feature/a'], true, dead)
+  expect(away).toEqual([{ kind: 'remote', label: 'origin/feature/a', remotes: [], isGone: true }])
 })
