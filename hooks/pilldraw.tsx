@@ -1,14 +1,13 @@
 import type { ClientElements } from 'claude-code'
 
-export type PillProps = { name: string; remotes: string; bg: string; fg: string; isBold: boolean; isRound: boolean }
+// One stretch of a pill in its own colors: an icon, a name, remotes; `icon` drawn before
+// the text in a color of its own (the checked-out branch's pin).
+export type PillSegment = { text: string; bg: string; fg: string; isBold?: boolean; icon?: { text: string; fg: string } }
+export type PillProps = { segments: PillSegment[]; isRound: boolean }
 
 // Nerd Font powerline caps: the rounded ends of a pill.
 export const CAP_LEFT = ''
 export const CAP_RIGHT = ''
-
-// The remotes' segment after the name: a dark shade of the pill's own color, light text.
-const REMOTE_SEG_SHADE = 0.45
-const REMOTE_SEG_FG = '#f0f0f0'
 
 // `#rrggbb` with each channel scaled by `factor`; any other color as given.
 export function shade(color: string, factor: number): string {
@@ -19,36 +18,28 @@ export function shade(color: string, factor: number): string {
   return `#${ch(16)}${ch(8)}${ch(0)}`
 }
 
-// A ref pill and its trailing gap, drawn the same by the hooks module and by ./pill.tsx.
-// Round: the name's right pad goes where a remote segment follows, the cap closing it.
-export function drawPill(Text: ClientElements['Text'], p: PillProps) {
-  const hasRemotes = p.remotes !== ''
-  const segBg = shade(p.bg, REMOTE_SEG_SHADE)
-  const body = (
-    <Text backgroundColor={p.bg} color={p.fg} weight={p.isBold ? 'bold' : undefined}>
-      {p.isRound ? '' : ' '}
-      {p.name}
-      {!p.isRound || hasRemotes ? ' ' : ''}
+// A ref pill and its trailing gap, drawn the same by the hooks module and by ./pill.tsx:
+// its segments side by side, a cell each side of each text; round, the caps take the
+// outer two, in the first and the last segment's colors.
+export function drawPill(Text: ClientElements['Text'], { segments, isRound }: PillProps) {
+  const last = segments.length - 1
+  const body = segments.map((g, i) => (
+    <Text backgroundColor={g.bg} color={g.fg} weight={g.isBold ? 'bold' : undefined}>
+      {isRound && i === 0 ? '' : ' '}
+      {g.icon && <Text color={g.icon.fg}>{g.icon.text}</Text>}
+      {g.text}
+      {isRound && i === last ? '' : ' '}
     </Text>
-  )
-  const segment = hasRemotes && (
-    <Text backgroundColor={segBg} color={REMOTE_SEG_FG}>
-      {' '}
-      {p.remotes}
-      {p.isRound ? '' : ' '}
-    </Text>
-  )
-  return p.isRound ? (
+  ))
+  return isRound ? (
     <Text>
-      <Text color={p.bg}>{CAP_LEFT}</Text>
+      <Text color={segments[0]?.bg}>{CAP_LEFT}</Text>
       {body}
-      {segment}
-      <Text color={hasRemotes ? segBg : p.bg}>{CAP_RIGHT}</Text>{' '}
+      <Text color={segments[last]?.bg}>{CAP_RIGHT}</Text>{' '}
     </Text>
   ) : (
     <Text>
-      {body}
-      {segment}{' '}
+      {body}{' '}
     </Text>
   )
 }

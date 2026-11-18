@@ -61,16 +61,29 @@ export function wrapRows(widths: number[], cols: number, gap: number): number[][
   return rows
 }
 
-// A bar of groups (widths of each group's items) on rows of `cols`: all on one row with a
-// separator between groups when they fit, else each group on rows of its own, wrapped
-// inside itself; a group is never split across rows it shares with another. Each cell
-// is `[group, item]`, or 'separator'.
-export type BarCell = [number, number] | 'separator'
-
-export function wrapGroups(groups: number[][], cols: number, gap: number): BarCell[][] {
-  const shown = groups.map((widths, g) => ({ widths, g })).filter(({ widths }) => widths.length > 0)
-  const cells = shown.flatMap(({ widths, g }, n): BarCell[] => [...(n > 0 ? ['separator' as const] : []), ...widths.map((_, i): BarCell => [g, i])])
-  const width = (cell: BarCell) => (cell === 'separator' ? 1 : (groups[cell[0]]?.[cell[1]] ?? 0))
-  if (wrapRows(cells.map(width), cols, gap).length === 1) return [cells]
-  return shown.flatMap(({ widths, g }) => wrapRows(widths, cols, gap).map(row => row.map((i): BarCell => [g, i])))
+// The graph cells the rows `from` (inclusive) to `to` (exclusive) need, at least 1: the
+// graph column follows the rows in the window, not a wide stretch far off in the history.
+export function widestIn(rows: { cells: { length: number } }[], from: number, to: number): number {
+  return rows.slice(from, to).reduce((n, r) => Math.max(n, r.cells.length), 1)
 }
+
+// The rows the window [top, top + rows) shows over rows of `heights`: `from` to `to`
+// (exclusive), and `shift`, the rows of the first one above the window.
+export function windowAt(heights: number[], top: number, rows: number): { from: number; to: number; shift: number } {
+  let at = 0
+  let from = heights.length
+  let shift = 0
+  for (let i = 0; i < heights.length; i++) {
+    const h = heights[i] ?? 0
+    if (from === heights.length && at + h > top) {
+      from = i
+      shift = top - at
+    }
+    at += h
+    if (at >= top + rows) return { from: Math.min(from, i), to: i + 1, shift }
+  }
+  return from === heights.length ? { from: 0, to: heights.length, shift: 0 } : { from, to: heights.length, shift }
+}
+
+// A window's first row, kept inside a graph `total` rows tall shown `rows` at a time.
+export const clampTop = (top: number, total: number, rows: number) => Math.max(0, Math.min(top, total - rows))

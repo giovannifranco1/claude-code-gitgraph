@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { findByHash, isHashQuery, topOf, visibleRange, wrapGroups, wrapRows } from '../hooks/virtual'
+import { clampTop, findByHash, isHashQuery, topOf, visibleRange, widestIn, windowAt, wrapRows } from '../hooks/virtual'
 
 const ones = (n: number) => Array.from({ length: n }, () => 1)
 
@@ -37,20 +37,26 @@ test('GF-01 bar items wrap onto the next row when the pane is too narrow', async
   expect(wrapRows([], 20, 2)).toEqual([])
 })
 
-test('GF-01 the bar keeps its groups whole: on one row with a separator, else each group on rows of its own', async () => {
-  // types 4 × 9, actions [ finish ] [ rebase ] [ publish ]: 10, 10, 11
-  const groups = [[9, 9, 9, 9], [10, 10, 11]]
-  expect(wrapGroups(groups, 80, 1)).toEqual([[[0, 0], [0, 1], [0, 2], [0, 3], 'separator', [1, 0], [1, 1], [1, 2]]])
-  expect(wrapGroups(groups, 60, 1)).toEqual([
-    [[0, 0], [0, 1], [0, 2], [0, 3]],
-    [[1, 0], [1, 1], [1, 2]],
-  ])
-  // a group wider than the row still wraps inside itself
-  expect(wrapGroups(groups, 25, 1)).toEqual([
-    [[0, 0], [0, 1]],
-    [[0, 2], [0, 3]],
-    [[1, 0], [1, 1]],
-    [[1, 2]],
-  ])
-  expect(wrapGroups([[9, 9], []], 80, 1)).toEqual([[[0, 0], [0, 1]]])
+test('GG-20 the graph column is as wide as the rows in the window need, not the widest loaded', async () => {
+  const rows = [3, 3, 9, 9, 3, 2].map(n => ({ cells: Array.from({ length: n }) }))
+  expect(widestIn(rows, 0, 2)).toBe(3)
+  expect(widestIn(rows, 1, 4)).toBe(9)
+  expect(widestIn(rows, 4, 6)).toBe(3)
+  expect(widestIn([], 0, 0)).toBe(1)
+})
+
+test('GG-21 the rows a window over the graph shows, and how far its first row is scrolled into', async () => {
+  const heights = [1, 1, 5, 1, 1]
+  expect(windowAt(heights, 0, 3)).toEqual({ from: 0, to: 3, shift: 0 })
+  // a tall row (an open commit) cut at the top: two of its rows above the window
+  expect(windowAt(heights, 4, 3)).toEqual({ from: 2, to: 3, shift: 2 })
+  expect(windowAt(heights, 6, 3)).toEqual({ from: 2, to: 5, shift: 4 })
+  expect(windowAt([], 0, 3)).toEqual({ from: 0, to: 0, shift: 0 })
+})
+
+test('GG-21 a scroll keeps the window inside the graph', async () => {
+  expect(clampTop(-3, 20, 5)).toBe(0)
+  expect(clampTop(7, 20, 5)).toBe(7)
+  expect(clampTop(30, 20, 5)).toBe(15)
+  expect(clampTop(4, 3, 5)).toBe(0)
 })

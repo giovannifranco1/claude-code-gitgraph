@@ -12,7 +12,7 @@ export type MenuItem = {
   // A push: its argv with REMOTE where each chosen remote goes (see pushRuns).
   pushArgs?: string[]
   // A git flow action on a work branch (./flow.ts), run with the flow's environment.
-  flow?: { action: 'finish' | 'update' | 'publish'; topic: FlowTopic }
+  flow?: { action: 'finish' | 'update'; topic: FlowTopic }
   // A local branch's delete, which asks whether to force it.
   deleteBranch?: string
 }

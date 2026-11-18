@@ -42,8 +42,11 @@ export function parseLog(stdout: string, remotes?: string[]): Commit[] {
 }
 
 // `git status --porcelain=v2 --branch`: headers start with `#`, every other line is a change.
+// A `# branch.<name> <value>` header of `git status --porcelain=v2 --branch`; '' when absent.
+const statusHeader = (stdout: string, name: string) => stdout.match(new RegExp(`^# branch\\.${name} (.+)$`, 'm'))?.[1] ?? ''
+
 export function parseStatus(stdout: string): { head: string; branch: string; dirty: number; conflicts: number } {
-  const header = (name: string) => stdout.match(new RegExp(`^# branch\\.${name} (.+)$`, 'm'))?.[1] ?? ''
+  const header = (name: string) => statusHeader(stdout, name)
   const head = header('oid')
   const branch = header('head')
   return {
@@ -52,6 +55,20 @@ export function parseStatus(stdout: string): { head: string; branch: string; dir
     dirty: stdout.split('\n').filter(l => l !== '' && !l.startsWith('#')).length,
     conflicts: stdout.split('\n').filter(l => l.startsWith('u ')).length,
   }
+}
+
+// The checked-out branch's upstream remote and the commits it is ahead of and behind it, from
+// `git status --porcelain=v2 --branch`; null where it has no upstream (not published).
+export function parseSync(stdout: string): { remote: string; ahead: number; behind: number } | null {
+  const upstream = statusHeader(stdout, 'upstream')
+  if (!upstream) return null
+  const ab = /^\+(\d+) -(\d+)$/.exec(statusHeader(stdout, 'ab'))
+  return { remote: upstream.split('/')[0] ?? '', ahead: Number(ab?.[1] ?? 0), behind: Number(ab?.[2] ?? 0) }
+}
+
+// Local branch names, read from `git for-each-ref` lines (`<oid> refs/heads/<branch>`).
+export function localsOf(forEachRef: string): string[] {
+  return [...forEachRef.matchAll(/ refs\/heads\/(.+)$/gm)].map(m => m[1] ?? '')
 }
 
 // Remote names, read from `git for-each-ref` lines (`<oid> refs/remotes/<remote>/<branch>`).

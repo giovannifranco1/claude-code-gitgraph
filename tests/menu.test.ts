@@ -87,8 +87,8 @@ test('GG-14 a double click checks out a local branch, tracks a remote one, and l
 
 test('GF-07 a git flow work branch menu leads with its flow actions; other refs do not get them', async () => {
   const config: FlowConfig = { types: [{ kind: 'feature', prefix: 'feature/', parent: 'develop', startpoint: 'develop', isTagged: false, strategy: 'rebase' }], bases: [], remote: 'origin', tagPrefix: '' }
-  expect(ids(menuFor({ kind: 'branch', label: 'feature/login', remotes: [] }, [], config))).toEqual(['flow-finish', 'flow-update', 'flow-publish', 'checkout', 'rename', 'merge', 'rebase', 'delete', 'copy'])
-  expect(ids(menuFor({ kind: 'head', label: 'feature/login', remotes: [] }, [], config)).slice(0, 3)).toEqual(['flow-finish', 'flow-update', 'flow-publish'])
+  expect(ids(menuFor({ kind: 'branch', label: 'feature/login', remotes: [] }, [], config))).toEqual(['flow-finish', 'flow-update', 'checkout', 'rename', 'merge', 'rebase', 'delete', 'copy'])
+  expect(ids(menuFor({ kind: 'head', label: 'feature/login', remotes: [] }, [], config)).slice(0, 2)).toEqual(['flow-finish', 'flow-update'])
   expect(ids(menuFor({ kind: 'remote', label: 'origin/feature/login', remotes: [] }, ['origin'], config))).not.toContain('flow-finish')
   expect(ids(menuFor({ kind: 'branch', label: 'feature/login', remotes: [] }, []))).not.toContain('flow-finish')
 })
@@ -103,5 +103,5 @@ test('GG-12 the menu is a list in groups: git flow, branch actions, rename and c
   expect(groups(menuFor({ kind: 'branch', label: 'feat', remotes: ['origin'] }, ['origin']))).toEqual([['checkout', 'push', 'merge', 'rebase'], ['rename', 'copy'], ['delete']])
   expect(groups(menuFor({ kind: 'head', label: 'main', remotes: [] }, ['up']))).toEqual([['push'], ['rename', 'copy']])
   expect(groups(menuFor({ kind: 'remote', label: 'origin/feat', remotes: [] }, ['origin']))).toEqual([['checkout', 'fetch', 'merge'], ['copy'], ['delete']])
-  expect(groups([{ id: 'flow-finish' }, { id: 'flow-publish' }, { id: 'checkout' }, { id: 'copy' }])).toEqual([['flow-finish', 'flow-publish'], ['checkout'], ['copy']])
+  expect(groups([{ id: 'flow-finish' }, { id: 'flow-update' }, { id: 'checkout' }, { id: 'copy' }])).toEqual([['flow-finish', 'flow-update'], ['checkout'], ['copy']])
 })
