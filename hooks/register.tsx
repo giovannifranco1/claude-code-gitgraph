@@ -1,7 +1,8 @@
 import { atom, read, update } from 'claude-code'
 import type { ClientElements, Elements, EngineInterface, ProcessRunResult, Register, RenderChildren } from 'claude-code'
 
-import type { Badge, BadgeKind, BadgeStyle, Cell, CommitDetail, ConfigScope, FileStat, FlowConfig, FlowConflict, FlowInfo, FlowInitForm, FlowKind, FlowOptions, FlowTopic, FlowView, Graph, GraphRow, Ref, RepoSettings, Repos, View } from '../types'
+import type { Badge, BadgeKind, BadgeStyle, Cell, Changelog, CommitDetail, ConfigScope, FileStat, FlowConfig, FlowConflict, FlowInfo, FlowInitForm, FlowKind, FlowOptions, FlowTopic, FlowView, Graph, GraphRow, Ref, RepoSettings, Repos, Screen, View } from '../types'
+import { parseChangelog, versionOf } from './changelog'
 import { badgeParts, badgesOf, diffBar, fitBadges } from './badges'
 import { isBranchNameCandidate } from './detect'
 import { absTime, fitGraph, relTime, short, truncate, truncateMiddle } from './format'
@@ -51,12 +52,13 @@ const ICONS = {
     refresh: '\u{f0450}',
     settings: '\uf013',
     search: '\uf002',
+    changelog: '\uf0ca',
     feature: '\uf0eb',
     bugfix: '\uf188',
     release: '\uf02b',
     hotfix: '\uf06d',
   },
-  plain: { on: '◉', off: '○', fetch: '☁', refresh: '↻', settings: '⚙', search: '⌕', feature: '✦', bugfix: '✱', release: '◆', hotfix: '▲' },
+  plain: { on: '◉', off: '○', fetch: '☁', refresh: '↻', settings: '⚙', search: '⌕', changelog: '☰', feature: '✦', bugfix: '✱', release: '◆', hotfix: '▲' },
 }
 // No git the pane runs opens an editor (merge, rebase or tag messages) or asks for a password.
 const GIT_ENV = { GIT_TERMINAL_PROMPT: '0', GIT_EDITOR: 'true', GIT_MERGE_AUTOEDIT: 'no' }
@@ -70,7 +72,7 @@ const NERD_FONT_CHECK = 'ls ~/Library/Fonts /Library/Fonts ~/.local/share/fonts 
 
 const DEFAULT_FLOW: FlowView = { starting: null, finishing: null, opts: { isNoFf: true, isPush: true, isKeep: true }, tagMessage: null, conflict: null, init: null }
 const EMPTY_GRAPH: Graph = { status: 'idle', rows: [], head: '', branch: '', dirty: 0, conflicts: 0, remotes: [], hasMore: false }
-const DEFAULT_VIEW: View = { scope: 'all', limit: PAGE, selected: null, confirm: null, menu: null, isRenaming: false, isDeleting: false, isForce: false, push: null, running: null, isSettings: false, configScope: 'local', editingRemote: null, isAddingRemote: false, remoteDraft: '', scrollTo: null, isSearching: false, refresh: 'idle', isOpen: false, flow: DEFAULT_FLOW }
+const DEFAULT_VIEW: View = { scope: 'all', limit: PAGE, selected: null, confirm: null, menu: null, isRenaming: false, isDeleting: false, isForce: false, push: null, running: null, screen: 'graph', configScope: 'local', editingRemote: null, isAddingRemote: false, remoteDraft: '', scrollTo: null, isSearching: false, refresh: 'idle', isOpen: false, flow: DEFAULT_FLOW }
 
 const graphState = atom({ plugin: 'gitgraph', key: 'graph' } as const, EMPTY_GRAPH)
 // Bumped with every graph write: renders read this small number and keep the graph
@@ -86,6 +88,8 @@ const settingsState = atom({ plugin: 'gitgraph', key: 'settings' } as const, nul
 // Loaded when the pane opens and after git flow actions, not with every graph load.
 const flowState = atom({ plugin: 'gitgraph', key: 'flow' } as const, null as FlowInfo | null)
 // Searched when the pane opens and on refresh; every git the pane runs runs in `active`.
+// The mod's CHANGELOG.md and installed version, for its screen; null until read.
+const changelogState = atom({ plugin: 'gitgraph', key: 'changelog' } as const, null as Changelog | null)
 const reposState = atom({ plugin: 'gitgraph', key: 'repos' } as const, { list: [], active: '.', isPicking: false, branches: {} } as Repos, { shape: 'repos-2' })
 
 // Everything transient a git action, a selection or a new menu closes.
@@ -162,7 +166,7 @@ async function showRepo($: EngineInterface): Promise<void> {
     update($, viewState, (v): View => ({ ...v, ...CLOSED, flow: { ...v.flow, ...FLOW_CLOSED, conflict: null }, selected: null, limit: PAGE, scrollTo: null })),
     update($, detailState, () => null),
   ])
-  await Promise.all([load($), loadFlow($), view.isSettings ? loadSettings($) : undefined])
+  await Promise.all([load($), loadFlow($), view.screen === 'settings' ? loadSettings($) : undefined])
   try {
     await $.ui.scroll({ to: 'start', in: PANE })
   } catch {
@@ -278,7 +282,7 @@ async function refreshAll($: EngineInterface): Promise<void> {
   try {
     if (await findRepos($)) return await showRepo($)
     const view = await read($, viewState)
-    await Promise.all([load($), view.selected ? loadDetail($, view.selected) : undefined, view.isSettings ? loadSettings($) : undefined, (await read($, flowState)) ? loadFlow($) : undefined])
+    await Promise.all([load($), view.selected ? loadDetail($, view.selected) : undefined, view.screen === 'settings' ? loadSettings($) : undefined, (await read($, flowState)) ? loadFlow($) : undefined])
   } finally {
     await update($, viewState, (v): View => ({ ...v, refresh: 'done' }))
     $.clock.after(REFRESHED_MS, () => void update($, viewState, (v): View => (v.refresh === 'done' ? { ...v, refresh: 'idle' } : v)))
@@ -344,7 +348,7 @@ async function withRunning($: EngineInterface, label: string, done: string, work
     await update($, viewState, v => ({ ...v, ...CLOSED, running: null }))
   }
   $.ui.toast(failures.length === 0 ? done : failures.join(' · '))
-  await Promise.all([load($), (await read($, viewState)).isSettings ? loadSettings($) : undefined])
+  await Promise.all([load($), (await read($, viewState)).screen === 'settings' ? loadSettings($) : undefined])
   return failures
 }
 
@@ -473,6 +477,25 @@ async function runInit($: EngineInterface): Promise<void> {
   const stale = config ? staleBaseArgs(config, form) : []
   const done = `Git flow ${config ? 'reconfigured' : 'set up'}: ${form.main}, ${form.develop} ✓`
   await runFlow($, [...stale.map(args => ({ args })), { args: initArgs(form, !!config) }], done, config ? 'Reconfiguring git flow…' : 'Setting up git flow…')
+}
+
+// The mod's files do not change while it is loaded: read once per load (a reload or an
+// update loads the module again; the state, which outlives it, is rewritten on the next open).
+let changelogRead: Promise<Changelog> | null = null
+
+async function readChangelog($: EngineInterface): Promise<Changelog> {
+  const readText = (path: string) => $.fs.read(`${$.plugin.root}/${path}`).then(text => (typeof text === 'string' ? text : ''), () => '')
+  const [md, manifest] = await Promise.all([readText('CHANGELOG.md'), readText('.claude-plugin/plugin.json')])
+  return { versions: parseChangelog(md), installed: versionOf(manifest) }
+}
+
+// Swaps the graph for the changelog, read on the first open since the mod loaded.
+async function openChangelog($: EngineInterface): Promise<void> {
+  const isFirst = !changelogRead
+  changelogRead ??= readChangelog($)
+  await Promise.all([update($, viewState, (v): View => ({ ...v, ...CLOSED, screen: 'changelog' })), isFirst && update($, changelogState, () => null)])
+  const changelog = await changelogRead
+  await update($, changelogState, () => changelog)
 }
 
 async function loadSettings($: EngineInterface): Promise<void> {
@@ -690,10 +713,13 @@ function renderHeader($: EngineInterface, ctx: Ctx) {
             </Button>
           )}
           <Button key="settings" plain dimColor onPress={async () => {
-            await update($, viewState, v => ({ ...v, ...CLOSED, isSettings: true, selected: null }))
+            await update($, viewState, (v): View => ({ ...v, ...CLOSED, screen: 'settings', selected: null }))
             await loadSettings($)
           }}>
             {iconLabel(ctx, icons.settings)}
+          </Button>
+          <Button key="changelog" plain dimColor onPress={() => openChangelog($)}>
+            {iconLabel(ctx, icons.changelog)}
           </Button>
           <Button key="fetch" plain dimColor onPress={() => runActions($, [['fetch', '--all']], 'Fetched all remotes ✓', 'Fetching all remotes…', true)}>
             {iconLabel(ctx, icons.fetch)}
@@ -1129,6 +1155,57 @@ function renderDetail($: EngineInterface, ctx: Ctx, { commit, cells }: GraphRow)
   return framed(ctx, lane, ctx.graphWidth + 1, rows)
 }
 
+// A screen's title, its way back to the graph, and a rule.
+function screenHeader($: EngineInterface, ctx: Ctx, screen: Exclude<Screen, 'graph'>, title: string) {
+  const { Box, Text, Button } = ctx.els
+  return [
+    <Box flexDirection="row" justifyContent="space-between">
+      <Text weight="bold">{title}</Text>
+      <Button key={`${screen}-back`} plain dimColor onPress={() => update($, viewState, (v): View => ({ ...v, screen: 'graph' }))}>
+        ← graph
+      </Button>
+    </Box>,
+    rule(ctx),
+  ]
+}
+
+// The changelog screen: a box per version, newest first, the installed one marked.
+function renderChangelog($: EngineInterface, ctx: Ctx, changelog: Changelog | null) {
+  const { Box, Text } = ctx.els
+  const body =
+    !changelog ? (
+      <Text dimColor>Loading…</Text>
+    ) : changelog.versions.length === 0 ? (
+      <Text dimColor>Could not read the mod's CHANGELOG.md</Text>
+    ) : (
+      changelog.versions.map(v => {
+        const isInstalled = v.version === changelog.installed
+        const title = [`v${v.version}`, v.date, isInstalled && 'your version'].filter(Boolean).join(' · ')
+        return (
+          <Box key={`changelog-${v.version}`} flexDirection="column" borderStyle="round" borderColor={isInstalled ? 'success' : undefined} borderDimColor={!isInstalled} paddingX={1}>
+            <Text weight="bold" color={isInstalled ? 'success' : undefined}>
+              {title}
+            </Text>
+            {v.groups.map(g => (
+              <Box flexDirection="column" marginTop={1}>
+                <Text weight="bold">{g.title}</Text>
+                {g.items.map(item => (
+                  <Text>{`• ${item}`}</Text>
+                ))}
+              </Box>
+            ))}
+          </Box>
+        )
+      })
+    )
+  return (
+    <Box flexDirection="column">
+      {screenHeader($, ctx, 'changelog', `${ctx.icons.changelog} Changelog`)}
+      {body}
+    </Box>
+  )
+}
+
 function renderSettings($: EngineInterface, ctx: Ctx, settings: RepoSettings | null) {
   const { els, view, cols } = ctx
   const { Box, Text, Button } = els
@@ -1142,13 +1219,7 @@ function renderSettings($: EngineInterface, ctx: Ctx, settings: RepoSettings | n
     `local: ${settings?.local[key] || '—'} · global: ${settings?.global[key] || '—'}`
   return (
     <Box flexDirection="column">
-      <Box flexDirection="row" justifyContent="space-between">
-        <Text weight="bold">{ctx.icons.settings} Repository settings</Text>
-        <Button key="settings-back" plain dimColor onPress={() => update($, viewState, v => ({ ...v, isSettings: false }))}>
-          ← graph
-        </Button>
-      </Box>
-      {rule(ctx)}
+      {screenHeader($, ctx, 'settings', `${ctx.icons.settings} Repository settings`)}
       {settings === null ? (
         <Text dimColor>Loading…</Text>
       ) : (
@@ -1482,7 +1553,8 @@ async function renderPane($: EngineInterface, els: Ctx['els'], surface: string, 
     Input: 'Input' in els ? (els.Input as Elements['terminal']['Input']) : undefined,
     Client: (surface === 'terminal' || surface === 'desktop') && 'Client' in els ? (els.Client as Elements['terminal']['Client']) : undefined,
   }
-  if (view.isSettings) return renderSettings($, ctx, await read($, settingsState))
+  if (view.screen === 'changelog') return renderChangelog($, ctx, await read($, changelogState))
+  if (view.screen === 'settings') return renderSettings($, ctx, await read($, settingsState))
   const header = renderHeader($, ctx)
 
   // Only the rows in the window are drawn; spacers of the same height stand for the rest,

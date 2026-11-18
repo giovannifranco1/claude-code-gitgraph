@@ -41,6 +41,7 @@ export type Graph = {
 }
 
 export type Scope = 'all' | 'head'
+export type Screen = 'graph' | 'settings' | 'changelog'
 export type View = {
   scope: Scope
   limit: number
@@ -56,7 +57,8 @@ export type View = {
   // What a running git action is doing, shown with a spinner; null when idle.
   running: string | null
   // The settings screen in place of the graph, and what its forms are on.
-  isSettings: boolean
+  // What the pane shows: the graph, or a screen in its place.
+  screen: Screen
   configScope: ConfigScope
   editingRemote: string | null
   isAddingRemote: boolean
@@ -98,6 +100,12 @@ export type FlowView = {
   init: FlowInitForm | null
 }
 
+// The mod's CHANGELOG.md, read when its screen opens, and the version installed.
+export type ChangelogGroup = { title: string; items: string[] }
+export type ChangelogVersion = { version: string; date: string | null; groups: ChangelogGroup[] }
+// No versions: the file could not be read.
+export type Changelog = { versions: ChangelogVersion[]; installed: string | null }
+
 export type BadgeStyle = 'auto' | 'round' | 'square'
 
 export type ConfigScope = 'local' | 'global'
@@ -110,6 +118,6 @@ export type Repos = { list: string[]; active: string; isPicking: boolean; branch
 
 declare module 'claude-code' {
   interface PluginState {
-    gitgraph: { graph: Graph; view: Shaped<View>; detail: CommitDetail | null; isRound: boolean; settings: RepoSettings | null; hasNerdFont: boolean; graphVersion: number; flow: FlowInfo | null; repos: Shaped<Repos> }
+    gitgraph: { graph: Graph; view: Shaped<View>; detail: CommitDetail | null; isRound: boolean; settings: RepoSettings | null; hasNerdFont: boolean; graphVersion: number; flow: FlowInfo | null; repos: Shaped<Repos>; changelog: Changelog | null }
   }
 }
