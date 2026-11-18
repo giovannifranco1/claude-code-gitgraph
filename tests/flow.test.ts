@@ -94,13 +94,13 @@ test('GF-05 finish follows the switches, and a tagged type always carries its ta
   const release = { kind: 'release', name: '1.2.0', branch: 'release/1.2.0' } as const
   expect(finishArgs(feature, config(), ON, null)).toEqual(['flow', 'feature', 'finish', 'login', '--no-ff', '--keep'])
   expect(finishArgs(feature, config(), { ...ON, isNoFf: false, isKeep: false }, null)).toEqual(['flow', 'feature', 'finish', 'login', '--ff', '--no-keep'])
-  expect(finishArgs(release, config(), ON, null)).toEqual(['flow', 'release', 'finish', '1.2.0', '--no-ff', '--keep', '-m', 'Release 1.2.0'])
+  expect(finishArgs(release, config(), ON, null)).toEqual(['flow', 'release', 'finish', '1.2.0', '--no-ff', '--keep', '-m', '1.2.0'])
   expect(finishArgs(release, config(), ON, '  Big one  ')).toEqual(['flow', 'release', 'finish', '1.2.0', '--no-ff', '--keep', '-m', 'Big one'])
-  expect(finishArgs(release, config(), ON, '   ')).toContain('Release 1.2.0')
+  expect(finishArgs(release, config(), ON, '   ').at(-1)).toBe('1.2.0')
 })
 
-test('GF-05 the tag message names the type and the version', async () => {
-  expect(defaultTagMessage({ kind: 'hotfix', name: '1.0.2', branch: 'hotfix/1.0.2' })).toBe('Hotfix 1.0.2')
+test('GF-05 the tag message is the version alone, as the tag is named', async () => {
+  expect(defaultTagMessage({ kind: 'hotfix', name: '1.0.2', branch: 'hotfix/1.0.2' })).toBe('1.0.2')
 })
 
 test('GF-05 the push after finish sends the parent and the bases that follow it, with the tags', async () => {
@@ -109,9 +109,8 @@ test('GF-05 the push after finish sends the parent and the bases that follow it,
   expect(finishPushArgs({ kind: 'hotfix', name: '1.0.2', branch: 'hotfix/1.0.2' }, config())).toEqual(['push', '--follow-tags', 'origin', 'main', 'develop'])
 })
 
-test('GF-04 update and publish name the branch; the label follows the strategy', async () => {
+test('GF-04 update names the branch; the label follows the strategy', async () => {
   expect(flowArgs('update', { kind: 'feature', name: 'x', branch: 'feature/x' })).toEqual(['flow', 'feature', 'update', 'x'])
-  expect(flowArgs('publish', { kind: 'bugfix', name: 'y', branch: 'bugfix/y' })).toEqual(['flow', 'bugfix', 'publish', 'y'])
   const [feature, bugfix] = config().types
   expect(updateLabel(feature!)).toBe('Rebase on develop')
   expect(updateLabel(bugfix!)).toBe('Merge develop in')
@@ -125,12 +124,11 @@ test('GF-06 a stopped finish continues or aborts through git flow; a stopped upd
   expect(resumeArgs({ op: 'merge', topic }, '--abort')).toEqual(['merge', '--abort'])
 })
 
-test('GF-07 a work branch menu leads with finish, update and publish of that branch', async () => {
+test('GF-07 a work branch menu leads with finish and update of that branch; no publish (Push branch… does it)', async () => {
   const items = flowMenuFor('feature/login', config())
   expect(items.map(i => [i.id, i.label])).toEqual([
     ['flow-finish', 'Finish feature'],
     ['flow-update', 'Rebase on develop'],
-    ['flow-publish', 'Publish'],
   ])
   expect(items.every(i => i.flow?.topic.name === 'login')).toBe(true)
   expect(flowMenuFor('develop', config())).toEqual([])

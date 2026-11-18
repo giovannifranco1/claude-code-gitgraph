@@ -3,8 +3,9 @@ import type { Badge, BadgeKind, Ref } from '../types'
 const ORDER: BadgeKind[] = ['head', 'detached', 'branch', 'remote', 'tag']
 
 // One badge per local branch, its remote-tracking refs folded into it as the
-// VS Code Git Graph does (`main` with an `origin` segment); remotes without a local stand alone.
-export function badgesOf(refs: Ref[]): Badge[] {
+// VS Code Git Graph does (`main` with an `origin` segment); remotes without a local stand alone,
+// gone where no local branch of their name is anywhere (`branches`, when given).
+export function badgesOf(refs: Ref[], branches?: string[]): Badge[] {
   const badges: Badge[] = []
   const locals = new Map<string, Badge>()
   for (const ref of refs) {
@@ -21,21 +22,24 @@ export function badgesOf(refs: Ref[]): Badge[] {
     const cut = ref.name.indexOf('/')
     const local = locals.get(ref.name.slice(cut + 1))
     if (cut > 0 && local) local.remotes.push(ref.name.slice(0, cut))
+    else if (branches && cut > 0 && !branches.includes(ref.name.slice(cut + 1))) badges.push({ kind: 'remote', label: ref.name, remotes: [], isGone: true })
     else badges.push({ kind: 'remote', label: ref.name, remotes: [] })
   }
   return badges.sort((a, b) => ORDER.indexOf(a.kind) - ORDER.indexOf(b.kind))
 }
 
-// The badge's text: its name, and its remotes for the dark segment drawn after it.
-export function badgeParts(badge: Badge): { name: string; remotes: string } {
-  const icon = badge.kind === 'head' ? '● ' : badge.kind === 'tag' ? '◆ ' : ''
-  return { name: ` ${icon}${badge.label}`, remotes: badge.remotes.join(' ') }
+// The badge's parts: an icon before the name (`lead`: the checked-out branch, a tag, a
+// branch only on a remote), the name, then its remotes.
+export function badgeParts(badge: Badge): { lead: boolean; name: string; remotes: string } {
+  return { lead: badge.kind === 'head' || badge.kind === 'tag' || badge.isGone === true, name: badge.label, remotes: badge.remotes.join(' ') }
 }
 
-// ` name ` and, with remotes, ` origin ` after it (round caps take the pads' cells).
+// Each segment is its text with a cell each side (round caps take the outer two); an icon
+// takes 3 more: a tag's or a remote-only branch's ` ◆ ` segment, or the check and two spaces
+// before a checked-out name.
 export function badgeWidth(badge: Badge): number {
-  const { name, remotes } = badgeParts(badge)
-  return name.length + 1 + (remotes ? remotes.length + 2 : 0)
+  const { lead, name, remotes } = badgeParts(badge)
+  return (lead ? 3 : 0) + name.length + 2 + (remotes ? remotes.length + 2 : 0)
 }
 
 // Six letters and an ellipsis: shorter than that a pill no longer names its ref.

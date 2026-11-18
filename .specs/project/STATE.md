@@ -23,11 +23,19 @@
 - 2026-10-22: ações de Git Flow (GF-01..GF-08) no rodapé fixo do painel + menu de branch, via CLI do git-flow-next (sem AVH); finish com `--no-ff`, push, `--keep` e mensagem de tag ligados por padrão.
 - 2026-10-22: todo git do mod roda com `GIT_EDITOR=true`, `GIT_MERGE_AUTOEDIT=no` e `GIT_TERMINAL_PROMPT=0` (nunca editor nem prompt); o timeout longo é só para comandos de rede.
 - 2026-11-18: hotfix 1.6.1: Nerd Font verificada a cada `/gitgraph`; remote como segmento da pílula num tom escuro da cor dela (`shade`) (no lugar do `⇄`), nome cortado antes do remote, primeira pílula pode usar a coluna Description inteira; ações do commit atrás de um ícone ⋯ nos detalhes (View `isActionsOpen`, atom `view-9`); listas alinhadas à esquerda com separador `┈`; Git Flow usa `preferredRemote` (origin, senão o primeiro) e recebe `-c gitflow.origin=`; menu de ref em lista com grupos (`menuGroups`); cabeçalho com a largura da linha; barra do Git Flow quebra por grupo (`wrapGroups`).
+- 2026-11-18: feature `pane-modals-scroll` (1.7.0): modais flutuantes no terminal docked (git flow, menu de ref, ações do commit atrás do ⋯); rodapé `⑂ Git Flow · <branch> · from <base> · ↑↓ <remote>` sob uma linha, abrindo a modal Git Flow (uma linha por tipo; publish só no menu da branch); scroll próprio (`ui.scroll` sem `next`) para o rodapé não tremer; largura do grafo pela janela; pílulas por segmentos (check na branch atual, ícone da tag, fantasma em branch só no remote); colunas author/hash opcionais em Settings, salvas no `$.store`; mensagem padrão da tag = versão.
+
+- 2026-11-18: release 1.7.0: feature `pane-modals-scroll` (modais, scroll próprio, pílulas por segmentos, colunas opcionais, Git Flow em modal sem publish, fetch em modal, clique no badge abre o menu); README atualizado (as imagens em `media/` ainda mostram a UI da 1.6).
 
 ## Blockers
 - (resolvido) Hot-reload de mods foi ativado depois na sessão de criação.
 
 ## Lições
+- 2026-11-18: o estado do scroll próprio (`ownScroll`) vale só para o grafo: telas que retornam cedo no render (changelog, settings, mensagens) precisam zerá-lo, senão o hook `ui.scroll` segura a rolagem delas (o changelog parou de rolar na release/1.7.0).
+- 2026-11-18: dá para ver o painel de verdade sem prints: `tmux new-session -d -x 170 -y 45 "claude --plugin-dir ."`, `send-keys /gitgraph`, `capture-pane -p`; o mod recarrega a cada edição. Um texto provisório no rodapé mostra valores do render (foi assim que achamos o `bodyRows` uma linha menor que a área).
+- 2026-11-18: o painel docked rolado pela engine move o conteúdo antes do mod redesenhar: tudo `position="absolute"` "fixo" na janela treme. A saída é o mod rolar as próprias linhas (`ui.scroll` sem `next`).
+- 2026-11-18: no kit, `$.store` é evento: o teste responde `store.get`/`store.set` com um `Map` (`fake.store`).
+- 2026-11-18: no kit, o `text` de uma `Box` junta os filhos sem os espaços do layout (`gap`): compare com `*`, não com espaços.
 - 2026-11-18: os caps Nerd Font (`\ue0b6`/`\ue0b4`, área de uso privado) somem quando o arquivo é reescrito a partir de texto copiado do terminal: editar em volta das constantes `CAP_*`, nunca reescrevê-las, e conferir com `xxd`.
 - 2026-11-18: `session.start` dispara uma vez por processo e **não** depois de `/clear`/`/resume`; o `$.state` daquela sessão volta ao inicial. Tudo que o render precisa e é detectado no start (Nerd Font) tem de ser refeito ao abrir o painel.
 - 2026-11-18: a engine só aceita passar `$` a funções declaradas no topo do arquivo (não a uma `const` dentro do `register`): o módulo nem carrega e todos os testes do pane quebram.
@@ -59,6 +67,7 @@
 - /simplify 2026-10-22 (git flow, pulado): Continue/Abort também para merge/rebase do menu (detectar pelo status); memoizar o rodapé entre passos de scroll; `run` genérico no `MenuItem`.
 - /simplify 2026-11-18 (pulado): nomes de remote via `git config --get-regexp` em vez do `git remote` extra no `loadFlow`; checar a fonte só quando o estado foi perdido; `openForm` único para push/delete/rename; campo `group` no `MenuItem` em vez de `GROUP_OF` por id.
 - Bloco escuro entre pílulas vizinhas no modo quadrado (print de 2026-11-18): não reproduzido; reavaliar.
+- /simplify 2026-11-18 (feature pane-modals-scroll, pulado): um campo discriminado `dialog` na View no lugar de `FLOW_CLOSED` + a precedência em `flowDialog`/`pinnedDialog`; `ownScroll` e `scrollTop` num atom só; somas de prefixo das alturas (rolar com muitas páginas carregadas); pular fonte/colunas no `/gitgraph` quando o estado não se perdeu; `renderDialog` reaproveitando `framed` (falta largura).
 - Ver ROADMAP M2.
 
 ## Preferences
