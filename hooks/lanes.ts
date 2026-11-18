@@ -24,19 +24,29 @@ function free(lanes: (string | null)[], from: number): number {
 // One row of glyphs per commit, two characters per lane: the lane's glyph, then
 // a horizontal or a space. Lanes hold the hash they expect next; each lane cell
 // is drawn from the directions it connects to, so crossings need no special case.
-export function layout(commits: Commit[]): Cell[][] {
+// Colors are indexes into a palette of `size`: a new lane takes the next one in turn that
+// no open lane holds, so a branch never shares the color of the one it forks from.
+export function layout(commits: Commit[], size = 8): Cell[][] {
   const lanes: (string | null)[] = []
   const colors: number[] = []
   let nextColor = 0
   const colorOf = (i: number) => colors[i] ?? 0
+  // Called before the new lane is set: the open ones are those still holding a hash.
+  const pick = () => {
+    const open = new Set(lanes.flatMap((hash, i) => (hash != null ? [colorOf(i)] : [])))
+    let color = nextColor % size
+    for (let n = 0; n < size && open.has(color); n++) color = (color + 1) % size
+    nextColor = color + 1
+    return color
+  }
 
   return commits.map(commit => {
     const before = [...lanes]
     let col = lanes.indexOf(commit.hash)
     if (col < 0) {
       col = free(lanes, 0)
+      colors[col] = pick()
       lanes[col] = commit.hash
-      colors[col] = nextColor++
     }
 
     // Lanes joined to the commit's dot by a horizontal: converging children, extra parents.
@@ -52,8 +62,8 @@ export function layout(commits: Commit[]): Cell[][] {
       let lane = lanes.indexOf(parent)
       if (lane < 0 || lane === col) {
         lane = free(lanes, col + 1)
+        colors[lane] = pick()
         lanes[lane] = parent
-        colors[lane] = nextColor++
       }
       links.push(lane)
     }

@@ -44,3 +44,18 @@ test('GG-03 each lane keeps its color and a freed column gets a new one', async 
 test('GG-07 the uncommitted pseudo-commit is a hollow dot', async () => {
   expect(draw(layout([c(UNCOMMITTED, 'h'), c('h')]))).toEqual(['○', '●'])
 })
+
+test('LC-01 a new lane never takes the color of a lane still open, even past the palette', async () => {
+  // main (lane 0) stays open while eight short branches open and close one after another
+  const commits: Commit[] = [c('m0', 'm1')]
+  for (let i = 1; i <= 9; i++) commits.push(c(`b${i}`, `m${i}`), c(`m${i}`, `m${i + 1}`))
+  commits.push(c('m10'))
+  const rows = layout(commits, 8)
+  const dot = (row: Cell[] | undefined) => (row ?? []).find(x => x.ch === '●')?.color
+  const main = dot(rows[0])
+  for (let i = 1; i <= 9; i++) {
+    const branch = dot(rows[2 * i - 1])
+    expect(branch).not.toBe(main)
+    expect(branch).toBeLessThan(8)
+  }
+})

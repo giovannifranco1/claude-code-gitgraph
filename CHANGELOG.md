@@ -2,6 +2,19 @@
 
 Mudanças do Git Graph (`gitgraph`) por versão, no formato [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e com versões em [SemVer](https://semver.org/lang/pt-BR/).
 
+## [1.7.1] - 2026-11-18
+
+### Corrigido
+
+- `Esc` fecha a modal aberta (aviso do fetch, Git Flow, menu da branch e os forms dele, ações do commit) e as telas de Settings e Changelog, voltando ao grafo; o painel continua aberto. Sem modal aberta, `Esc` só devolve o teclado ao prompt, como antes. Com uma modal aberta, o `×` do painel também fecha a modal primeiro.
+- Header sem texto além da branch: saem a contagem de commits e o `● N changes` (que aparecia cortado, `● 4 ch…`); as mudanças continuam na linha **Uncommitted changes** do grafo.
+- **all branches** desligado mostra todas as branches locais (`--branches`), não só a branch atual; as branches remotas (`origin/*`) e os commits que só existem no remote somem, e o `· origin` continua no badge da branch local publicada. Ligado, continua local + remoto (`--all`).
+- No máximo dois badges de branch (local ou remota) por commit na coluna Description, mais as tags, que não contam no limite; as demais branches entram no `+N`. Os badges depois do primeiro têm mais espaço antes de serem cortados: a descrição do commit reserva 10 colunas, não mais 20.
+- Badge de branch remota (`origin/x` num commit diferente do da local) no tom escuro da cor da branch local, com texto claro (o mesmo tom do segmento `origin` do badge local), não mais em cinza; só a branch morta continua cinza, com o fantasminha.
+- Branch remota mergeada numa base (`main`/`develop`, as do git flow) aparece morta (fantasminha e cinza), mesmo que a branch local ainda exista. No mesmo commit da local, as duas viram um badge só, desenhado como o badge da branch atual: fantasminha e nome no cinza, e o remoto no tom escuro do cinza (`👻 feature/a` + `origin`, sem separador). Não contam as próprias bases nem uma branch recém-criada, ainda no topo da base.
+- Cores das lanes: uma branch nova nunca pega a cor de uma lane ainda aberta (ex.: um hotfix saindo da `main` azul não é azul), mesmo depois de a paleta dar a volta.
+- Commits de merge com o texto em cinza (descrição, autor e hash, em `#808080`), como o Git Graph do VS Code; o grafo e os badges mantêm as cores.
+
 ## [1.7.0] - 2026-11-18
 
 ### Adicionado
