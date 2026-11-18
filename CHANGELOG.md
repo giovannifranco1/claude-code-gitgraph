@@ -2,7 +2,7 @@
 
 Mudanças do Git Graph (`gitgraph`) por versão, no formato [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e com versões em [SemVer](https://semver.org/lang/pt-BR/).
 
-## [Unreleased]
+## [1.7.0] - 2026-11-18
 
 ### Adicionado
 
@@ -17,7 +17,7 @@ Mudanças do Git Graph (`gitgraph`) por versão, no formato [Keep a Changelog](h
 - Sai o **Publish** do Git Flow (rodapé e menu da branch): **Push branch…** já publica a branch.
 - Listas (menu de branch, ações do commit) sem o separador `┈`: os grupos ficam separados por uma linha em branco.
 - Um clique (esquerdo) num badge abre o menu da branch, e outro clique fecha; o texto do commit abre os detalhes. O duplo clique no badge continua fazendo checkout (e fecha o menu que o primeiro clique abriu); o clique direito continua abrindo o menu.
-- Pílulas por segmentos: a branch em checkout tem um check antes do nome, no tom escuro da cor dela (no lugar da bolinha preta); a tag tem o ícone de etiqueta num segmento na cor dela e a versão no tom escuro.
+- Badges por segmentos: o da branch em checkout tem um check antes do nome, no tom escuro da cor dele (no lugar da bolinha preta); o da tag tem o ícone de etiqueta num segmento na cor dele e a versão no tom escuro.
 - A coluna do grafo tem a largura das linhas na tela, não a do trecho mais largo do histórico: onde há poucas branches, a Description começa logo depois do grafo.
 - Mensagem padrão da tag no finish é só a versão (`0.1.4`), não `Hotfix 0.1.4`.
 
@@ -31,9 +31,9 @@ Mudanças do Git Graph (`gitgraph`) por versão, no formato [Keep a Changelog](h
 
 ### Corrigido
 
-- As pílulas voltam a ser redondas (e os ícones Nerd Font a aparecer) depois de `/clear` ou `/resume`: a fonte é verificada de novo a cada `/gitgraph`.
-- O remote de uma branch é um segmento colado à pílula, num tom escuro da cor dela e texto claro (` develop ` ` origin `), no lugar do `⇄ origin`. Sem espaço, o nome da branch encurta antes e o remote só sai por último: antes ele sumia em nomes longos (`feature/…`, `hotfix/…`) e o push parecia não atualizar a branch.
-- A primeira pílula usa a coluna Description inteira antes de cortar o nome com `…`.
+- Os badges voltam a ser redondos (e os ícones Nerd Font a aparecer) depois de `/clear` ou `/resume`: a fonte é verificada de novo a cada `/gitgraph`.
+- O remote de uma branch é um segmento colado ao badge, num tom escuro da cor dele e texto claro (` develop ` ` origin `), no lugar do `⇄ origin`. Sem espaço, o nome da branch encurta antes e o remote só sai por último: antes ele sumia em nomes longos (`feature/…`, `hotfix/…`) e o push parecia não atualizar a branch.
+- O primeiro badge usa a coluna Description inteira antes de cortar o nome com `…`.
 - Git Flow num repo sem `origin` (ex.: remote `github`): finish, publish e o push depois do finish usam o remote do repo.
 - Menu de branch em lista, um item por linha e grupos separados por linha; o formulário (push, delete, rename) abre logo abaixo do item.
 - Cabeçalho `Author`/`Commit` alinhado com as colunas (antes deslocado e com `Commit` cortado).
@@ -73,7 +73,7 @@ Mudanças do Git Graph (`gitgraph`) por versão, no formato [Keep a Changelog](h
 
 ### Corrigido
 
-- Um clique simples na pílula abre os detalhes na hora; um duplo clique faz checkout e desfaz a seleção do primeiro clique.
+- Um clique simples no badge abre os detalhes na hora; um duplo clique faz checkout e desfaz a seleção do primeiro clique.
 - As ações dos detalhes quebram em linhas em vez de sair cortadas.
 
 ## [1.3.1] - 2026-10-27
@@ -81,7 +81,7 @@ Mudanças do Git Graph (`gitgraph`) por versão, no formato [Keep a Changelog](h
 ### Corrigido
 
 - A barra do Git Flow cabe na largura do painel.
-- Duplo clique numa pílula faz checkout sem abrir os detalhes.
+- Duplo clique num badge faz checkout sem abrir os detalhes.
 
 ## [1.3.0] - 2026-10-27
 
@@ -130,6 +130,6 @@ Mudanças do Git Graph (`gitgraph`) por versão, no formato [Keep a Changelog](h
 
 ### Adicionado
 
-- Painel Git Graph (`/gitgraph`): grafo de commits com lanes, pílulas de branch/tag/remote, detalhes do commit com arquivos, auto-refresh e scroll virtualizado.
+- Painel Git Graph (`/gitgraph`): grafo de commits com lanes, badges de branch/tag/remote, detalhes do commit com arquivos, auto-refresh e scroll virtualizado.
 - Ações: checkout, criar branch, cherry-pick e copiar hash; menu de ref (botão direito ou duplo clique) com checkout, rename, push por remote, merge, rebase e delete.
 - Configurações do repositório (usuário local/global, remotes), busca por hash e refresh com feedback.
