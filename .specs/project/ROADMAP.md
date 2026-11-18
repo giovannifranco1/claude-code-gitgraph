@@ -17,7 +17,12 @@
 - [x] FI-01..02 `2026-11-18-flow-init-custom` — init do git flow com nomes próprios (form detectando master/dev/feat/…) e Reconfigure nas Settings
 - [x] CL-01..02 `2026-11-18-changelog` — CHANGELOG.md (PT-BR) e tela ☰ Changelog com a versão instalada marcada
 
-## M5 — Ideias futuras
+## M5 — Modais e acabamento do painel (2026-11-18) — lançado como 1.7.0
+- [x] FD-01..07 `2026-11-18-flow-dialog` — Git Flow em modais (start, finish, rebase), rodapé `⑂ Git Flow · <branch> · from <base> · ↑↓ <remote>`, publish removido (Push branch publica)
+- [x] MD-01..06 — menu de ref e ações do commit em modal (push, delete e rename com modal própria), clique no badge abre o menu, listas sem separador
+- [x] GG-20..25 — largura do grafo pela janela, scroll próprio no terminal docked (rodapé sem tremer), pílulas por segmentos (check, tag, fantasma), colunas author/hash opcionais, fetch em modal
+
+## M6 — Ideias futuras
 - Diff de arquivo no painel (preview)
 - Busca/filtro por mensagem/autor
 - Push/pull/fetch, stash, tags

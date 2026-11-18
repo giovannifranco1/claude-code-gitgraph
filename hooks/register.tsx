@@ -1828,6 +1828,9 @@ async function renderPane($: EngineInterface, els: Ctx['els'], surface: string, 
     read($, columnsState),
   ])
   const { graph, indexOf } = cache
+  // Only the graph scrolls its own rows: any other screen (changelog, settings, a message)
+  // lets the engine scroll, until the graph draws its window again below.
+  ownScroll = null
   if (graph.status === 'no-repo') return <Text dimColor>Not a git repository.</Text>
   if (graph.status === 'error') return <Text color="error">Could not read git: {graph.error ?? ''}</Text>
 
