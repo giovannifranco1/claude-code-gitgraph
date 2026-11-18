@@ -40,6 +40,8 @@ type Fake = {
   heads?: Record<string, string | null>
   // The upstream of each repo's branch, by repo path; none when absent.
   upstreams?: Record<string, string>
+  // `for-each-ref --format=%(refname)`: the branch names the git flow init form reads.
+  branchRefs?: string
 }
 
 const FLOW_CONFIG = [
@@ -100,6 +102,7 @@ function answer(fake: Fake, raw: readonly string[], cwd = '.') {
     }
     case 'for-each-ref':
       if (rest[0]?.startsWith('--format=%(upstream')) return ok(`${fake.upstreams?.[cwd] ?? ''}\0\n`)
+      if (rest[0] === '--format=%(refname)') return ok(fake.branchRefs ?? 'refs/heads/main\nrefs/heads/feat\n')
       return ok(`${M} refs/heads/main\n${B} refs/heads/feat\n${(fake.remotes ?? ['origin']).map(r => `${M} refs/remotes/${r}/main\n`).join('')}rev${fake.rev} refs/heads/moving\n`)
     case 'log':
       return ok(logOf(fake))
@@ -747,6 +750,57 @@ test('GF-02 Start git flow sets it up with the standard names (git flow init -d)
   expect(flowCalls(fake)).toEqual([])
   await ui.press({ key: 'flow-init' })
   expect(flowCalls(fake)).toEqual([['git', 'flow', 'init', '-d']])
+  await ui.unmount()
+})
+
+test('FI-01 Set up git flow opens a form prefilled from the branches, and inits with its names', async ($, on) => {
+  const fake = newFake({ flowConfig: '', branchRefs: 'refs/heads/master\nrefs/heads/dev\nrefs/remotes/origin/feat/login\n' })
+  await setup($, on, fake)
+  const ui = await $.ui.mount(pane('terminal'))
+  expect((await ui.find({ type: 'Button', key: 'flow-init' }))?.text).toBe('Use defaults')
+  await ui.press({ key: 'flow-init-open' })
+  for (const [key, value] of [['main', 'master'], ['develop', 'dev'], ['feature', 'feat/'], ['bugfix', 'bugfix/'], ['tag', '']] as const)
+    expect((await ui.find({ key: `flow-init-${key}` }))?.props.value).toBe(value)
+  await ui.input({ key: 'flow-init-bugfix', text: 'fix/', kind: 'change' })
+  await ui.press({ key: 'flow-init-run' })
+  expect(flowCalls(fake)).toEqual([])
+  await ui.press({ key: 'flow-init-run' })
+  expect(flowCalls(fake)).toEqual([['git', 'flow', 'init', '-d', '--main', 'master', '--develop', 'dev', '--feature', 'feat/', '--bugfix', 'fix/', '--release', 'release/', '--hotfix', 'hotfix/']])
+  expect(await ui.find({ key: 'flow-init-main' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('FI-01 an invalid field runs nothing and says which one', async ($, on) => {
+  const fake = newFake({ flowConfig: '' })
+  const toasts: string[] = []
+  await setup($, on, fake, [], toasts)
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: 'flow-init-open' })
+  await ui.input({ key: 'flow-init-feature', text: 'my feat/', kind: 'change' })
+  await ui.press({ key: 'flow-init-run' })
+  await ui.press({ key: 'flow-init-run' })
+  expect(flowCalls(fake)).toEqual([])
+  expect(toasts).toContain('Invalid feature prefix: "my feat/"')
+  await ui.press({ key: 'flow-init-cancel' })
+  expect(await ui.find({ key: 'flow-init-main' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('FI-02 settings reconfigure git flow: old bases lose their section, then init -f', async ($, on) => {
+  const fake = newFake()
+  await setup($, on, fake)
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: 'settings' })
+  expect(await ui.find({ type: 'Text', text: /^main · develop · feature\/ release\/ hotfix\/$/ })).toBeDefined()
+  await ui.press({ key: 'flow-reconfigure' })
+  expect((await ui.find({ key: 'flow-init-develop' }))?.props.value).toBe('develop')
+  await ui.input({ key: 'flow-init-develop', text: 'dev', kind: 'change' })
+  await ui.press({ key: 'flow-init-run' })
+  await ui.press({ key: 'flow-init-run' })
+  const remove = callOf(fake, ['config', '--local', '--remove-section', 'gitflow.branch.develop'])
+  const init = callOf(fake, ['flow', 'init', '-d', '-f', '--main', 'main', '--develop', 'dev', '--feature', 'feature/', '--bugfix', 'bugfix/', '--release', 'release/', '--hotfix', 'hotfix/'])
+  expect(remove).toBeGreaterThan(-1)
+  expect(init).toBeGreaterThan(remove)
   await ui.unmount()
 })
 

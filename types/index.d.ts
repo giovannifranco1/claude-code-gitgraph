@@ -75,7 +75,9 @@ export type View = {
 export type FlowKind = 'feature' | 'bugfix' | 'release' | 'hotfix'
 export type FlowType = { kind: FlowKind; prefix: string; parent: string; startpoint: string; isTagged: boolean; strategy: 'rebase' | 'merge' }
 export type FlowBase = { name: string; parent: string; isAutoUpdate: boolean }
-export type FlowConfig = { types: FlowType[]; bases: FlowBase[]; remote: string }
+export type FlowConfig = { types: FlowType[]; bases: FlowBase[]; remote: string; tagPrefix: string }
+// The names `git flow init` sets up, as the init form edits them.
+export type FlowInitForm = { main: string; develop: string; feature: string; bugfix: string; release: string; hotfix: string; tag: string }
 // A work branch: its type, its name without the prefix, and the full branch name.
 export type FlowTopic = { kind: FlowKind; name: string; branch: string }
 export type FlowCli = 'next' | 'other' | 'none'
@@ -92,6 +94,8 @@ export type FlowView = {
   opts: FlowOptions
   tagMessage: string | null
   conflict: FlowConflict | null
+  // The init form: under the footer bar where git flow is not set up, in settings to reconfigure.
+  init: FlowInitForm | null
 }
 
 export type BadgeStyle = 'auto' | 'round' | 'square'

@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { ClientElements, Elements, EngineInterface, ProcessRunResult, Register, RenderChildren } from 'claude-code'
 
-import type { Badge, BadgeKind, BadgeStyle, Cell, CommitDetail, ConfigScope, FileStat, FlowConfig, FlowConflict, FlowInfo, FlowKind, FlowOptions, FlowTopic, FlowView, Graph, GraphRow, Ref, RepoSettings, Repos, View } from '../types'
+import type { Badge, BadgeKind, BadgeStyle, Cell, CommitDetail, ConfigScope, FileStat, FlowConfig, FlowConflict, FlowInfo, FlowInitForm, FlowKind, FlowOptions, FlowTopic, FlowView, Graph, GraphRow, Ref, RepoSettings, Repos, View } from '../types'
 import { badgeParts, badgesOf, diffBar, fitBadges } from './badges'
 import { isBranchNameCandidate } from './detect'
 import { absTime, fitGraph, relTime, short, truncate, truncateMiddle } from './format'
@@ -9,6 +9,7 @@ import { layout } from './lanes'
 import { findByHash, isHashQuery, topOf, visibleRange, wrapRows } from './virtual'
 import { DETAIL_FORMAT, LOG_FORMAT, parseDetail, parseLog, parseStatus, remotesOf, UNCOMMITTED, withUncommitted } from './log'
 import { defaultTagMessage, finishArgs, finishPushArgs, flowArgs, flowCliOf, flowMenuFor, nextVersion, parseFlowConfig, resumeArgs, topicFor, typeOf } from './flow'
+import { BRANCH_REFS_ARGS, branchNamesOf, DEFAULT_FORM, initArgs, initFormError, initFormFor, staleBaseArgs, trimForm } from './flowinit'
 import { checkoutArgs, defaultPushRemotes, deleteBranchArgs, type MenuItem, menuFor, pushRuns, renameArgs } from './menu'
 import { drawPill, type PillProps } from './pilldraw'
 import { BRANCH_ARGS, FIND_ARGS, UPSTREAM_ARGS, parseBranch, parseUpstream, parseRepos, pickActive, branchColumn, repoLabel } from './repos'
@@ -67,7 +68,7 @@ const FLOW_DEFAULTS = 'main · develop · feature/ bugfix/ release/ hotfix/'
 const NO_HOOKS = 'nohooks'
 const NERD_FONT_CHECK = 'ls ~/Library/Fonts /Library/Fonts ~/.local/share/fonts ~/.fonts /usr/share/fonts 2>/dev/null | grep -qi nerd'
 
-const DEFAULT_FLOW: FlowView = { starting: null, finishing: null, opts: { isNoFf: true, isPush: true, isKeep: true }, tagMessage: null, conflict: null }
+const DEFAULT_FLOW: FlowView = { starting: null, finishing: null, opts: { isNoFf: true, isPush: true, isKeep: true }, tagMessage: null, conflict: null, init: null }
 const EMPTY_GRAPH: Graph = { status: 'idle', rows: [], head: '', branch: '', dirty: 0, conflicts: 0, remotes: [], hasMore: false }
 const DEFAULT_VIEW: View = { scope: 'all', limit: PAGE, selected: null, confirm: null, menu: null, isRenaming: false, isDeleting: false, isForce: false, push: null, running: null, isSettings: false, configScope: 'local', editingRemote: null, isAddingRemote: false, remoteDraft: '', scrollTo: null, isSearching: false, refresh: 'idle', isOpen: false, flow: DEFAULT_FLOW }
 
@@ -77,7 +78,7 @@ const graphState = atom({ plugin: 'gitgraph', key: 'graph' } as const, EMPTY_GRA
 const versionState = atom({ plugin: 'gitgraph', key: 'graphVersion' } as const, 0)
 // Tagged with the shape of View: a view an older version kept (without fields added
 // since) reads as absent after an update, instead of breaking the render.
-const viewState = atom({ plugin: 'gitgraph', key: 'view' } as const, DEFAULT_VIEW, { shape: 'view-7' })
+const viewState = atom({ plugin: 'gitgraph', key: 'view' } as const, DEFAULT_VIEW, { shape: 'view-8' })
 const detailState = atom({ plugin: 'gitgraph', key: 'detail' } as const, null as CommitDetail | null)
 const roundState = atom({ plugin: 'gitgraph', key: 'isRound' } as const, false)
 const nerdState = atom({ plugin: 'gitgraph', key: 'hasNerdFont' } as const, false)
@@ -100,7 +101,7 @@ const CLOSED = {
 } satisfies Partial<View>
 
 // The git flow forms under the footer bar, closed when a git flow action ends.
-const FLOW_CLOSED = { starting: null, finishing: null, tagMessage: null } satisfies Partial<FlowView>
+const FLOW_CLOSED = { starting: null, finishing: null, tagMessage: null, init: null } satisfies Partial<FlowView>
 
 let generation = 0
 // What a render derives from the graph, worked out once per graph version.
@@ -442,6 +443,36 @@ async function toggleFinish($: EngineInterface, topic: FlowTopic): Promise<void>
     ...CLOSED,
     flow: { ...v.flow, ...FLOW_CLOSED, finishing: v.flow.finishing?.branch === topic.branch ? null : topic },
   }))
+}
+
+// Opens the init form: from the current config where git flow is set up (reconfigure), else
+// from what the repo's branches suggest.
+async function openInit($: EngineInterface): Promise<void> {
+  const config = await readFlowConfig($)
+  const form = config ? initFormFor([], config) : initFormFor(branchNamesOf((await git($, BRANCH_REFS_ARGS)).stdout), null)
+  await update($, viewState, (v): View => ({ ...v, ...CLOSED, flow: { ...v.flow, ...FLOW_CLOSED, init: form } }))
+}
+
+const closeInit = ($: EngineInterface) => setFlow($, f => ({ ...f, init: null }))
+
+const setInitField = ($: EngineInterface, key: keyof FlowInitForm, value: string) =>
+  setFlow($, f => (f.init ? { ...f, init: { ...f.init, [key]: value } } : f))
+
+// Sets git flow up with the form's names. Where it is set up already, this reconfigures it
+// (`-f`), first dropping the sections of bases the new names leave behind.
+async function runInit($: EngineInterface): Promise<void> {
+  const [view, config] = await Promise.all([read($, viewState), readFlowConfig($)])
+  if (!view.flow.init) return
+  const form = trimForm(view.flow.init)
+  const error = initFormError(form)
+  if (error) {
+    $.ui.toast(error)
+    return
+  }
+  if (!(await branchName($, form.main)) || !(await branchName($, form.develop))) return
+  const stale = config ? staleBaseArgs(config, form) : []
+  const done = `Git flow ${config ? 'reconfigured' : 'set up'}: ${form.main}, ${form.develop} ✓`
+  await runFlow($, [...stale.map(args => ({ args })), { args: initArgs(form, !!config) }], done, config ? 'Reconfiguring git flow…' : 'Setting up git flow…')
 }
 
 async function loadSettings($: EngineInterface): Promise<void> {
@@ -1196,6 +1227,21 @@ function renderSettings($: EngineInterface, ctx: Ctx, settings: RepoSettings | n
               </Box>
             )}
           </Box>
+          {ctx.flow?.config && (
+            <Box flexDirection="column">
+              <Text weight="bold">Git Flow</Text>
+              <Text dimColor wrap="truncate-end">{flowSummary(ctx.flow.config)}</Text>
+              {view.running ? null : view.flow.init ? (
+                <Box flexDirection="column">{initRows($, ctx)}</Box>
+              ) : (
+                ctx.Input && (
+                  <Button key="flow-reconfigure" plain onPress={() => openInit($)}>
+                    Reconfigure…
+                  </Button>
+                )
+              )}
+            </Box>
+          )}
         </Box>
       )}
     </Box>
@@ -1209,7 +1255,7 @@ function flowFormRows($: EngineInterface, ctx: Ctx): RenderChildren[] {
   // An action started from a branch menu or a commit's details shows its spinner there; the
   // footer shows only the others', under a key of its own (a key drawn twice voids the pane).
   if (view.running) return view.menu || view.selected ? [] : [renderRunning(ctx, 'flow-spinner')]
-  if (!config) return []
+  if (!config) return initRows($, ctx)
   if (view.flow.conflict) return conflictRows($, ctx, view.flow.conflict)
   return [...startRows($, ctx, config), ...finishRows($, ctx, config)]
 }
@@ -1230,6 +1276,44 @@ function conflictRows($: EngineInterface, ctx: Ctx, conflict: FlowConflict) {
     ),
   ]
 }
+
+const INIT_FIELDS: [keyof FlowInitForm, string][] = [
+  ['main', 'Main branch:'],
+  ['develop', 'Develop branch:'],
+  ['feature', 'Feature prefix:'],
+  ['bugfix', 'Bugfix prefix:'],
+  ['release', 'Release prefix:'],
+  ['hotfix', 'Hotfix prefix:'],
+  ['tag', 'Tag prefix:'],
+]
+
+// The init form: a field per name, then the run (asks for a second press) and cancel.
+function initRows($: EngineInterface, ctx: Ctx): RenderChildren[] {
+  const { els: { Button }, view, flow, Input } = ctx
+  const init = view.flow.init
+  if (!init || !Input) return []
+  const set = (key: keyof FlowInitForm) => (value: string) => setInitField($, key, value)
+  const label = flow?.config ? 'Reconfigure' : 'Initialize'
+  return [
+    ...INIT_FIELDS.map(([key, text]) =>
+      line(ctx, <Input key={`flow-init-${key}`} label={text} value={init[key]} placeholder={DEFAULT_FORM[key] || 'none'} submitLabel="set" onInput={set(key)} onSubmit={set(key)} />),
+    ),
+    line(
+      ctx,
+      [
+        confirmButton($, ctx, 'flow-init-run', 'flow-init-run', label, () => runInit($)),
+        <Button key="flow-init-cancel" plain dimColor onPress={() => closeInit($)}>
+          cancel
+        </Button>,
+      ],
+      2,
+    ),
+  ]
+}
+
+// The names a git flow config uses, in one line: `main · develop · feature/ bugfix/ …`.
+const flowSummary = (config: FlowConfig) =>
+  [config.bases.map(b => b.name).join(' · '), config.types.map(t => t.prefix).join(' ')].filter(Boolean).join(' · ')
 
 // The name field of the type whose start was pressed.
 function startRows($: EngineInterface, ctx: Ctx, config: FlowConfig) {
@@ -1309,13 +1393,24 @@ function flowBar($: EngineInterface, ctx: Ctx): BarItem[] {
   if (flow.cli === 'none') return [barText(ctx, 'git flow is not installed:', 'warning'), barText(ctx, FLOW_INSTALL)]
   if (flow.cli === 'other') return [barText(ctx, 'Git Flow actions need git-flow-next:', 'warning'), barText(ctx, FLOW_INSTALL)]
   const config = flow.config
-  // Not set up: one button sets it up with the standard names (`git flow init -d`).
+  // Not set up: a form for the repo's own names, or the standard ones (`git flow init -d`).
   if (!config) {
-    const init = 'Start git flow'
+    const setUp = 'Set up git flow…'
+    const defaults = 'Use defaults'
     return [
+      ...(ctx.Input
+        ? [{
+            node: (
+              <Button key="flow-init-open" variant={view.flow.init ? 'primary' : undefined} onPress={() => (view.flow.init ? closeInit($) : openInit($))}>
+                {setUp}
+              </Button>
+            ),
+            width: buttonWidth(setUp, false),
+          }]
+        : []),
       {
-        node: confirmButton($, ctx, 'flow-init', 'flow-init', init, () => runFlow($, [{ args: ['flow', 'init', '-d'] }], 'Git flow started: main, develop ✓', 'Starting git flow…')),
-        width: buttonWidth(init, view.confirm === 'flow-init'),
+        node: confirmButton($, ctx, 'flow-init', 'flow-init', defaults, () => runFlow($, [{ args: ['flow', 'init', '-d'] }], 'Git flow started: main, develop ✓', 'Starting git flow…')),
+        width: buttonWidth(defaults, view.confirm === 'flow-init'),
       },
       barText(ctx, FLOW_DEFAULTS),
     ]

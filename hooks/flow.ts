@@ -1,7 +1,7 @@
 import type { FlowBase, FlowCli, FlowConfig, FlowConflict, FlowKind, FlowOptions, FlowTopic, FlowType } from '../types'
 import type { MenuItem } from './menu'
 
-const KINDS: FlowKind[] = ['feature', 'bugfix', 'release', 'hotfix']
+export const KINDS: FlowKind[] = ['feature', 'bugfix', 'release', 'hotfix']
 const SEMVER = /^(v?)(\d+)\.(\d+)\.(\d+)$/
 
 const title = (kind: FlowKind) => kind[0]?.toUpperCase() + kind.slice(1)
@@ -34,7 +34,7 @@ export function parseFlowConfig(stdout: string): FlowConfig | null {
     const bases = [...branches]
       .filter(b => get(b, 'type') === 'base')
       .map((name): FlowBase => ({ name, parent: get(name, 'parent'), isAutoUpdate: get(name, 'autoupdate') === 'true' }))
-    return { types, bases, remote }
+    return { types, bases, remote, tagPrefix: get('release', 'tagprefix') || get('hotfix', 'tagprefix') }
   }
   return avhConfig(values, remote)
 }
@@ -53,7 +53,7 @@ function avhConfig(values: Map<string, string>, remote: string): FlowConfig | nu
     return prefix ? [{ kind, prefix, ...shapes[kind] }] : []
   })
   if (!types.length) return null
-  return { types, bases: [{ name: main, parent: '', isAutoUpdate: false }, { name: develop, parent: main, isAutoUpdate: true }], remote }
+  return { types, bases: [{ name: main, parent: '', isAutoUpdate: false }, { name: develop, parent: main, isAutoUpdate: true }], remote, tagPrefix: values.get('gitflow.prefix.versiontag') ?? '' }
 }
 
 export const typeOf = (config: FlowConfig, kind: FlowKind) => config.types.find(t => t.kind === kind)

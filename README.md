@@ -71,8 +71,8 @@ Then open the pane with:
   - **Start** a feature, bugfix, release or hotfix from the base your git flow config gives it; a release or hotfix name comes filled in with the next version after your highest tag
   - On a work branch: **finish** (switches for `no-ff`, push afterwards and keep branch, all on by default; release and hotfix tags get an editable message), **rebase** (or merge, as your config says) and **publish**. Publish and finish ask for a second press
   - A finish or update that stops on a conflict offers **Continue** and **Abort**
-  - Right-click any work branch's pill for the same actions; repositories without git flow get a **Start git flow** button that sets it up with the standard names (`main`, `develop`, `feature/`, `bugfix/`, `release/`, `hotfix/`)
-- **Repository settings:** user name and email for this repository or globally, and the remotes: add, edit the URL, fetch, delete
+  - Right-click any work branch's pill for the same actions; repositories without git flow get **Set up git flow…**, a form for your own names (`master`, `dev`, `feat/`, `fix/`…, prefilled from the branches the repo already has, plus an optional tag prefix), and **Use defaults** for the standard ones (`main`, `develop`, `feature/`, `bugfix/`, `release/`, `hotfix/`)
+- **Repository settings:** user name and email for this repository or globally, the remotes (add, edit the URL, fetch, delete) and, where git flow is set up, its names with **Reconfigure…** to change them
 
   <img src="media/settings.png" alt="The settings screen: user name and email per scope, and the remotes with their URLs" width="800">
 
