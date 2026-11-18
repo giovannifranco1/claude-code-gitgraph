@@ -2,6 +2,14 @@
 
 Mudanças do Git Graph (`gitgraph`) por versão, no formato [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e com versões em [SemVer](https://semver.org/lang/pt-BR/).
 
+## [1.7.1] - 2026-11-18
+
+### Corrigido
+
+- `Esc` fecha a modal aberta (aviso do fetch, Git Flow, menu da branch e os forms dele, ações do commit) e as telas de Settings e Changelog, voltando ao grafo; o painel continua aberto. Sem modal aberta, `Esc` só devolve o teclado ao prompt, como antes. Com uma modal aberta, o `×` do painel também fecha a modal primeiro.
+- Header sem texto além da branch: saem a contagem de commits e o `● N changes` (que aparecia cortado, `● 4 ch…`); as mudanças continuam na linha **Uncommitted changes** do grafo.
+- Commits de merge com o texto em cinza (descrição, autor e hash, em `#808080`), como o Git Graph do VS Code; o grafo e os badges mantêm as cores.
+
 ## [1.7.0] - 2026-11-18
 
 ### Adicionado

@@ -26,6 +26,7 @@
 - 2026-11-18: feature `pane-modals-scroll` (1.7.0): modais flutuantes no terminal docked (git flow, menu de ref, ações do commit atrás do ⋯); rodapé `⑂ Git Flow · <branch> · from <base> · ↑↓ <remote>` sob uma linha, abrindo a modal Git Flow (uma linha por tipo; publish só no menu da branch); scroll próprio (`ui.scroll` sem `next`) para o rodapé não tremer; largura do grafo pela janela; pílulas por segmentos (check na branch atual, ícone da tag, fantasma em branch só no remote); colunas author/hash opcionais em Settings, salvas no `$.store`; mensagem padrão da tag = versão.
 
 - 2026-11-18: release 1.7.0: feature `pane-modals-scroll` (modais, scroll próprio, pílulas por segmentos, colunas opcionais, Git Flow em modal sem publish, fetch em modal, clique no badge abre o menu); README atualizado (as imagens em `media/` ainda mostram a UI da 1.6).
+- 2026-11-18: hotfix 1.7.1: `Esc` fecha a modal (não o painel): `setView` reabre o painel com `closeOnEscape` enquanto há modal, e o `ui.close` de origem `person` vira `dismissModal` (sem `next`). Lição: o hook `state.set` do próprio plugin não dispara para writes de handlers de Button, então o sync fica no helper de escrita. Header só com a branch; texto de merge em cinza.
 
 ## Blockers
 - (resolvido) Hot-reload de mods foi ativado depois na sessão de criação.
