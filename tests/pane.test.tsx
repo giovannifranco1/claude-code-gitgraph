@@ -150,6 +150,10 @@ function answer(fake: Fake, raw: readonly string[], cwd = '.') {
       }
       return ok()
     }
+    case 'rev-list':
+      return ok('0\t2\n')
+    case 'diff':
+      return rest[0] === '--numstat' ? ok('4\t2\tsrc/feat.ts\n') : ok('')
     case 'stash':
       if (rest[0] === 'list') return ok(fake.stashes ?? '')
       if (rest[0] === 'show') return ok('2\t1\tsrc/stashed.ts\n')
@@ -557,6 +561,58 @@ test('DF-01 a stash file diffs against its base, then as a file new in the stash
   expect(callOf(fake, ['diff', '--no-color', '--no-ext-diff', 'stash@{0}^1', 'stash@{0}', '--', 'src/stashed.ts'])).toBeGreaterThan(-1)
   expect(callOf(fake, ['show', '--format=', '--no-color', '--no-ext-diff', 'stash@{0}^3', '--', 'src/stashed.ts'])).toBeGreaterThan(-1)
   expect(await ui.find({ type: 'Text', text: /\+new line/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('CP-01 a commit compares with HEAD on a screen of its own: counts, files, a file diff, back', async ($, on) => {
+  const fake = newFake()
+  await setup($, on, fake)
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: B })
+  await ui.press({ key: 'detail-actions-toggle' })
+  await ui.press({ key: 'compare-head' })
+  expect(callOf(fake, ['rev-list', '--left-right', '--count', `${B}...HEAD`])).toBeGreaterThan(-1)
+  expect(callOf(fake, ['diff', '--numstat', '--no-color', '--no-ext-diff', B, 'HEAD'])).toBeGreaterThan(-1)
+  expect(await ui.find({ type: 'Text', text: /Compare ccccccc ↔ main/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /main: 2 ahead, 0 behind ccccccc/ })).toBeDefined()
+  await ui.press({ key: 'file:src/feat.ts' })
+  expect(callOf(fake, ['diff', '--no-color', '--no-ext-diff', B, 'HEAD', '--', 'src/feat.ts'])).toBeGreaterThan(-1)
+  // back from the file goes to the comparison, then to the graph
+  await ui.press({ key: 'diff-back' })
+  expect(await ui.find({ type: 'Text', text: /2 ahead/ })).toBeDefined()
+  await ui.press({ key: 'compare-back' })
+  expect(await ui.find({ type: 'Text', text: /2 ahead/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Button', key: M })).toBeDefined()
+  await ui.unmount()
+})
+
+test('CP-01 a commit marked for compare compares with another one', async ($, on) => {
+  const toasts: string[] = []
+  const fake = newFake()
+  await setup($, on, fake, [], toasts)
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: B })
+  await ui.press({ key: 'detail-actions-toggle' })
+  // nothing marked yet: no compare with it
+  expect(await ui.find({ type: 'Button', key: 'compare-marked' })).toBeUndefined()
+  await ui.press({ key: 'compare-mark' })
+  expect(toasts).toContain('Marked ccccccc for compare')
+  await ui.press({ key: A })
+  await ui.press({ key: 'detail-actions-toggle' })
+  expect((await ui.find({ type: 'Button', key: 'compare-marked' }))?.text).toContain('Compare with ccccccc')
+  await ui.press({ key: 'compare-marked' })
+  expect(callOf(fake, ['rev-list', '--left-right', '--count', `${B}...${A}`])).toBeGreaterThan(-1)
+  await ui.unmount()
+})
+
+test('CP-01 a branch menu compares the current branch with that branch', async ($, on) => {
+  const fake = newFake()
+  await setup($, on, fake)
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.pointer({ type: 'down', x: 1, y: 0, button: 'right', in: `pill:${B}:0` })
+  await ui.press({ key: 'menu-compare' })
+  expect(callOf(fake, ['rev-list', '--left-right', '--count', 'HEAD...feat'])).toBeGreaterThan(-1)
+  expect(await ui.find({ type: 'Text', text: /Compare main ↔ feat/ })).toBeDefined()
   await ui.unmount()
 })
 

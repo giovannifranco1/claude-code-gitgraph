@@ -60,6 +60,7 @@ Then open the pane with:
   <img src="media/details.png" alt="A commit opened in the pane: hash badge, author, date, full message, changed files with +/- bars and the commit actions" width="800">
 
 - **Click a changed file** in a commit's or a stash's details for its diff, on a screen of its own: hunks, added and removed lines in color, without git's headers (a merge against its first parent; a stash against the commit it was made on). **← graph** or Escape goes back with the commit still open
+- **Compare two points:** **Compare with HEAD** or **Mark for compare** in a commit's actions (then **Compare with abc1234** in another's), or **Compare with current branch** in a branch's menu. The comparison says how far apart they are (`feat: 3 ahead, 1 behind main`) and lists the files that differ; click one for its diff between the two
 - **Stashes in the graph:** each stash is a row with a `◇` off the commit it was made on, its name (`stash@{0}`) in a badge. Click it for its files (new ones too) and **Apply stash**, **Pop stash** or **Drop stash…** (pressed twice)
 - **Click a badge** for its ref's menu, a list in groups (a right click works too; where clicks do not reach the pane, open a commit and use its **Branch actions** buttons):
   - **Local branch:** checkout, push branch, merge into the current branch, rebase the current branch on it, rename, copy name, delete branch (with an optional `force`, off by default)
