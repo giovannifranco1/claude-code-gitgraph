@@ -12,7 +12,7 @@ import { clampTop, findCommit, isHashQuery, topOf, visibleRange, widestIn, windo
 import { DETAIL_FORMAT, localsOf, LOG_FORMAT, mergedArgs, parseMerged, parseTracks, REFS_ARGS, TRACK_ARGS, parseDetail, parseLog, parseStatus, parseSync, remotesOf, UNCOMMITTED, withUncommitted } from './log'
 import { basesOf, defaultTagMessage, finishArgs, mainOf, finishPushArgs, flowArgs, flowCliOf, nextVersion, parseFlowConfig, resumeArgs, topicFor, topicOf, typeOf } from './flow'
 import { BRANCH_REFS_ARGS, branchNamesOf, DEFAULT_FORM, initArgs, initFormError, initFormFor, staleBaseArgs, trimForm } from './flowinit'
-import { checkoutArgs, defaultPushRemotes, deleteBranchArgs, type MenuItem, menuFor, menuGroups, pushRuns, renameArgs } from './menu'
+import { checkoutArgs, defaultPushRemotes, deleteBranchArgs, type MenuItem, menuFor, menuGroups, pushRuns, renameArgs, stashArgs } from './menu'
 import { drawPill, type PillProps, type PillSegment, shade } from './pilldraw'
 import { BRANCH_ARGS, FIND_ARGS, UPSTREAM_ARGS, parseBranch, parseUpstream, parseRepos, pickActive, branchColumn, repoLabel } from './repos'
 import { addRemotePlan, isRemoteUrl, parseRemotes, userConfigArgs } from './settings'
@@ -310,7 +310,13 @@ async function select($: EngineInterface, hash: string): Promise<void> {
   const selected = (await read($, viewState)).selected === hash ? null : hash
   await setView($, v => ({ ...v, ...CLOSED, selected }))
   await update($, detailState, () => null)
-  if (selected) await loadDetail($, selected)
+  // The uncommitted changes are no commit to show: their panel is the stash.
+  if (selected && selected !== UNCOMMITTED) await loadDetail($, selected)
+}
+
+async function stashChanges($: EngineInterface, message: string): Promise<void> {
+  await setView($, v => ({ ...v, selected: null }))
+  await runAction($, stashArgs(message), 'Stashed the changes')
 }
 
 async function loadDetail($: EngineInterface, hash: string): Promise<void> {
@@ -863,17 +869,19 @@ function renderRow($: EngineInterface, ctx: Ctx, { commit, cells }: GraphRow) {
   const fitted = fitGraph(cells, graphWidth)
   const graphText = groupCells(fitted).map(g => <Text color={PALETTE[g.color % PALETTE.length]}>{g.text}</Text>)
   const pad = ' '.repeat(graphWidth - fitted.length + 1)
+  // The uncommitted changes: pressed, they open their stash under the row.
   if (commit.hash === UNCOMMITTED)
-    return line(
-      ctx,
+    return line(ctx, [
       <Text>
         {graphText}
         {pad}
+      </Text>,
+      <Button key="uncommitted" plain onPress={() => select($, UNCOMMITTED)}>
         <Text italic color="warning">
           {commit.subject}
         </Text>
-      </Text>,
-    )
+      </Button>,
+    ])
   const lane = laneColor(cells)
   const meta = metaOf(ctx, commit.author, commit.hash)
   // The first pill may fill the Description column; the others get what is left once the
@@ -1322,6 +1330,7 @@ function renderDetail($: EngineInterface, ctx: Ctx, { commit, cells }: GraphRow)
   const { Text, Button } = els
   const { Input } = ctx
   const lane = laneColor(cells)
+  if (commit.hash === UNCOMMITTED) return renderStash($, ctx, commit.subject, lane)
   const badges = rowBadges(commit.refs, ctx.graph, ctx.view, ctx.dead).filter(b => b.kind !== 'detached')
   const [subject = '', ...rest] = (detail?.body ?? commit.subject).split('\n')
   const body = rest.join('\n').trim().split('\n').filter((l, i, all) => l !== '' || (i > 0 && all[i - 1] !== ''))
@@ -1364,6 +1373,16 @@ function renderDetail($: EngineInterface, ctx: Ctx, { commit, cells }: GraphRow)
   if (view.running) rows.push(view.menu ? blank(ctx) : renderRunning(ctx))
   else if (Input)
     rows.push(line(ctx, <Input key="new-branch" label="New branch here" placeholder="branch-name" submitLabel="create" onSubmit={value => createBranch($, commit.hash, value)} />))
+  return framed(ctx, lane, ctx.graphWidth + 1, rows)
+}
+
+// The uncommitted changes' panel: stash them all, with an optional message.
+function renderStash($: EngineInterface, ctx: Ctx, title: string, lane: string) {
+  const { els: { Text }, Input, view } = ctx
+  const rows: RenderChildren[] = [line(ctx, <Text weight="bold">{title}</Text>), blank(ctx)]
+  if (view.running) rows.push(renderRunning(ctx))
+  else if (Input)
+    rows.push(line(ctx, <Input key="stash-message" label="Stash message" placeholder="optional" submitLabel="stash" autoFocus onSubmit={value => stashChanges($, value)} />))
   return framed(ctx, lane, ctx.graphWidth + 1, rows)
 }
 

@@ -8,6 +8,7 @@ Mudanças do Git Graph (`gitgraph`) por versão, no formato [Keep a Changelog](h
 
 - Busca por hash **e** por texto: o mesmo campo acha o commit pelo começo do hash, pela mensagem ou pelo autor (sem diferenciar maiúsculas). Com vários resultados, o campo fica aberto com o termo e o toast diz `Match 2/5`; buscar de novo vai para o próximo, em loop. Sem resultado entre os commits carregados, sugere **Load more**.
 - ↑/↓ no badge de cada branch local publicada: quantos commits ela está à frente e atrás do remoto dela (`feat` + `origin ↑2 ↓1`; com o remoto em outro commit, só `↑2`). A conta vem de um `git for-each-ref` rodado junto com o load, não no poll de 5 s (contar é caro), e é refeita a cada push, pull ou commit, que já recarregam o painel.
+- Stash pelo grafo: clicar na linha **Uncommitted changes (N)** abre um painel com **Stash message** (opcional) e **stash**, que roda `git stash push --include-untracked` (arquivos novos, ainda fora do git, entram também); sem mensagem, o git dá o nome.
 
 ### Alterado
 

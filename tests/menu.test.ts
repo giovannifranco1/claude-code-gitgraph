@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import type { FlowConfig } from '../types'
-import { checkoutArgs, deleteBranchArgs, defaultPushRemotes, menuFor, menuGroups, pushRuns, renameArgs, splitRemote } from '../hooks/menu'
+import { checkoutArgs, deleteBranchArgs, defaultPushRemotes, menuFor, menuGroups, pushRuns, renameArgs, splitRemote, stashArgs } from '../hooks/menu'
 
 const ids = (items: { id: string }[]) => items.map(i => i.id)
 
@@ -104,4 +104,9 @@ test('GG-12 the menu is a list in groups: git flow, branch actions, rename and c
   expect(groups(menuFor({ kind: 'head', label: 'main', remotes: [] }, ['up']))).toEqual([['push'], ['rename', 'copy']])
   expect(groups(menuFor({ kind: 'remote', label: 'origin/feat', remotes: [] }, ['origin']))).toEqual([['checkout', 'fetch', 'merge'], ['copy'], ['delete']])
   expect(groups([{ id: 'flow-finish' }, { id: 'flow-update' }, { id: 'checkout' }, { id: 'copy' }])).toEqual([['flow-finish', 'flow-update'], ['checkout'], ['copy']])
+})
+
+test('ST-01 a stash takes untracked files too, and the message only when there is one', async () => {
+  expect(stashArgs(' wip ')).toEqual(['stash', 'push', '--include-untracked', '-m', 'wip'])
+  expect(stashArgs('  ')).toEqual(['stash', 'push', '--include-untracked'])
 })

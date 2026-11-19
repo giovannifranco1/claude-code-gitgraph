@@ -417,6 +417,26 @@ test('GG-07 uncommitted changes show as the first row', async ($, on) => {
   await ui.unmount()
 })
 
+test('ST-01 the uncommitted changes row opens a stash, with an optional message, untracked files too', async ($, on) => {
+  const toasts: string[] = []
+  const fake = newFake()
+  await setup($, on, fake, [], toasts)
+  const ui = await $.ui.mount(pane('terminal'))
+  expect(await ui.find({ type: 'Input', key: 'stash-message' })).toBeUndefined()
+  await ui.press({ key: 'uncommitted' })
+  // no `git show` for a commit that is not one
+  expect(fake.calls.some(c => c[1] === 'show' && c.includes('*'))).toBe(false)
+  expect(await ui.find({ type: 'Input', key: 'stash-message' })).toBeDefined()
+  await ui.input({ key: 'stash-message', text: 'wip: header' })
+  expect(callOf(fake, ['stash', 'push', '--include-untracked', '-m', 'wip: header'])).toBeGreaterThan(-1)
+  expect(toasts).toContain('Stashed the changes')
+  // again, no message: git names the stash itself
+  await ui.press({ key: 'uncommitted' })
+  await ui.input({ key: 'stash-message', text: '' })
+  expect(callOf(fake, ['stash', 'push', '--include-untracked'])).toBeGreaterThan(-1)
+  await ui.unmount()
+})
+
 test('GG-05 SC-01 the scope toggle reloads with the local branches only', async ($, on) => {
   const fake = newFake()
   await setup($, on, fake)

@@ -55,6 +55,7 @@ Then open the pane with:
   <img src="media/graph.png" alt="The Git Graph pane docked beside the chat: colored lanes, branch and tag badges, authors, short hashes and the Git Flow bar at the bottom" width="800">
 
 - **Click a commit's text** to open its details: author, date, full message and every changed file with a diffstat bar. The ⋯ icon on its first row opens its actions: copy its hash, check it out, cherry-pick it or **reset the current branch to it (soft)**; below, create a branch on it. A soft reset moves the branch there and its changes stay staged: the branch moves there and its changes stay staged. As in the VS Code extension, a commit left behind stays in the graph while a ref keeps it (the branch you pushed, `origin/…`), so you can reset back to it
+- **Click the Uncommitted changes row** to stash them: an optional message and **stash** run `git stash push --include-untracked`, so new files go too
 
   <img src="media/details.png" alt="A commit opened in the pane: hash badge, author, date, full message, changed files with +/- bars and the commit actions" width="800">
 
