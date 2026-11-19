@@ -157,6 +157,8 @@ function answer(fake: Fake, raw: readonly string[], cwd = '.') {
     case 'tag':
       return ok('1.0.0\n1.0.1\n')
     case 'show':
+      // a file's diff (no commit header)
+      if (rest[0] === '--format=') return ok('diff --git a/x b/x\nindex 1..2 100644\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-old line\n+new line\n')
       return ok([B, 'Bia', 'bia@x.io', '1699980000', 'Work on feat\n\nDetails here\n'].join(US) + RS + '\n\n3\t1\tsrc/feat.ts\n')
     case 'fetch':
       return fake.failFetch ? fail('fatal: unable to access remote') : ok()
@@ -524,6 +526,37 @@ test('SH-02 a stash row opens its files and actions: apply, pop, and drop presse
   await ui.press({ key: 'stash-drop' })
   expect(callOf(fake, ['stash', 'drop', 'stash@{0}'])).toBeGreaterThan(-1)
   expect(toasts).toContain('Dropped stash@{0}')
+  await ui.unmount()
+})
+
+test('DF-01 a commit file opens its diff on a screen of its own; back keeps the commit open', async ($, on) => {
+  const fake = newFake()
+  await setup($, on, fake)
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: B })
+  await ui.press({ key: 'file:src/feat.ts' })
+  expect(callOf(fake, ['show', '--format=', '--diff-merges=first-parent', '--no-color', '--no-ext-diff', B, '--', 'src/feat.ts'])).toBeGreaterThan(-1)
+  expect(await ui.find({ type: 'Text', text: /\+new line/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /-old line/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /index 1\.\.2/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /src\/feat\.ts/ })).toBeDefined()
+  await ui.press({ key: 'diff-back' })
+  expect(await ui.find({ type: 'Text', text: /\+new line/ })).toBeUndefined()
+  // the commit is still open, its files listed
+  expect(await ui.find({ type: 'Button', key: 'file:src/feat.ts' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('DF-01 a stash file diffs against its base, then as a file new in the stash', async ($, on) => {
+  const fake = newFake({ stashes: STASHES })
+  await setup($, on, fake)
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: STASH })
+  await ui.press({ key: 'file:src/stashed.ts' })
+  // the fake's `git diff` prints nothing: the file is new in the stash
+  expect(callOf(fake, ['diff', '--no-color', '--no-ext-diff', 'stash@{0}^1', 'stash@{0}', '--', 'src/stashed.ts'])).toBeGreaterThan(-1)
+  expect(callOf(fake, ['show', '--format=', '--no-color', '--no-ext-diff', 'stash@{0}^3', '--', 'src/stashed.ts'])).toBeGreaterThan(-1)
+  expect(await ui.find({ type: 'Text', text: /\+new line/ })).toBeDefined()
   await ui.unmount()
 })
 
