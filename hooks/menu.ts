@@ -15,6 +15,8 @@ export type MenuItem = {
   flow?: { action: 'finish' | 'update'; topic: FlowTopic }
   // A local branch's delete, which asks whether to force it.
   deleteBranch?: string
+  // A branch to compare the current branch with.
+  compare?: string
 }
 
 export const REMOTE = '<remote>'
@@ -95,6 +97,7 @@ export function menuFor(badge: Badge, remotes: string[], flow: FlowConfig | null
           : [
               act('merge', 'Merge into current branch', ['merge', name]),
               act('rebase', 'Rebase current branch on this', ['rebase', name]),
+              { id: 'compare', label: 'Compare with current branch', compare: name },
               { id: 'delete', label: 'Delete branch…', deleteBranch: name },
             ]),
         copy,
@@ -106,6 +109,7 @@ export function menuFor(badge: Badge, remotes: string[], flow: FlowConfig | null
         act('checkout', 'Checkout (new local branch)', checkoutArgs(badge) ?? []),
         ...(remote ? [act('fetch', 'Fetch', ['fetch', remote, branch], true)] : []),
         act('merge', 'Merge into current branch', ['merge', name]),
+        { id: 'compare', label: 'Compare with current branch', compare: name },
         ...(remote ? [act('delete', `Delete on ${remote}`, ['push', remote, '--delete', branch], true)] : []),
         copy,
       ]

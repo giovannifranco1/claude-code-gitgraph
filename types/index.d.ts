@@ -66,10 +66,17 @@ export type Graph = {
 // The "all branches" switch: on, local and remote branches (`--all`); off (`head`, the name kept
 // for the stored view), the local branches alone (`--branches HEAD`).
 export type Scope = 'all' | 'head'
-export type Screen = 'graph' | 'settings' | 'changelog' | 'diff'
+export type Screen = 'graph' | 'settings' | 'changelog' | 'diff' | 'compare'
 
-// Where a file's diff comes from: a commit (against its first parent) or a stash (against its base).
-export type DiffSource = { kind: 'commit'; hash: string } | { kind: 'stash'; name: string }
+// Two points of the graph compared: git refs or hashes, and how the screen names them.
+export type Compare = { from: string; to: string; fromLabel: string; toLabel: string }
+// A comparison's answers: commits only in `to` (ahead) and only in `from` (behind), the files
+// from one to the other; `key` the comparison they are of.
+export type Comparison = { key: string; ahead: number; behind: number; files: FileStat[] }
+
+// Where a file's diff comes from: a commit (against its first parent), a stash (against its
+// base), or a comparison (from one point to the other, `label` naming both).
+export type DiffSource = { kind: 'commit'; hash: string } | { kind: 'stash'; name: string } | { kind: 'range'; from: string; to: string; label: string }
 // A line of a diff as the diff screen draws it.
 export type DiffLine = { kind: 'hunk' | 'add' | 'del' | 'ctx' | 'note'; text: string }
 // A file's diff: its first lines, `hidden` the rest; `key` the file it is of (`diffKey`).
@@ -107,8 +114,11 @@ export type View = {
   isSuggesting: boolean
   // The form the uncommitted changes' actions opened, in a dialog of its own; null: the actions.
   uncommittedForm: 'commit' | 'stash' | 'reset' | null
-  // The file whose diff the diff screen shows, and where it is from.
-  diff: { source: DiffSource; path: string } | null
+  // The file whose diff the diff screen shows, where it is from, and the screen it goes back to.
+  diff: { source: DiffSource; path: string; back: Screen } | null
+  // What the compare screen compares, and the commit marked to compare another with.
+  compare: Compare | null
+  compareMark: string | null
   // The commit's step (pick the files, then the message) and the files picked, by path.
   commitStep: 'files' | 'message'
   commitFiles: string[]
@@ -175,6 +185,6 @@ export type Columns = { isAuthor: boolean; isHash: boolean }
 
 declare module 'claude-code' {
   interface PluginState {
-    gitgraph: { graph: Graph; view: Shaped<View>; detail: CommitDetail | null; isRound: boolean; settings: RepoSettings | null; hasNerdFont: boolean; graphVersion: number; scrollTop: number; columns: Columns; flow: FlowInfo | null; repos: Shaped<Repos>; changelog: Changelog | null; diff: Diff | null }
+    gitgraph: { graph: Graph; view: Shaped<View>; detail: CommitDetail | null; isRound: boolean; settings: RepoSettings | null; hasNerdFont: boolean; graphVersion: number; scrollTop: number; columns: Columns; flow: FlowInfo | null; repos: Shaped<Repos>; changelog: Changelog | null; diff: Diff | null; compare: Comparison | null }
   }
 }

@@ -29,8 +29,11 @@ export function dismissModal(view: View): View | null {
   if (isOpen(view.flow, FLOW_CLOSED)) return { ...view, flow: { ...view.flow, ...FLOW_CLOSED } }
   if (isOpen(view, CLOSED)) return { ...view, ...CLOSED }
   if (isPseudoRow(view.selected)) return { ...view, selected: null }
-  return { ...view, screen: 'graph' }
+  return { ...view, screen: backOf(view) }
 }
+
+// Where a screen goes back to: a file diff to where it was opened from, any other to the graph.
+export const backOf = (view: View): View['screen'] => (view.screen === 'diff' ? (view.diff?.back ?? 'graph') : 'graph')
 
 // Whether a modal (or the settings or changelog screen) is open: what Escape would close.
 export const hasModal = (view: View) =>

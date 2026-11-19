@@ -1,5 +1,6 @@
 // A file's diff for the diff screen: what git is asked, and its output as lines to draw.
 import type { DiffLine, DiffSource } from '../types'
+import { rangeKey } from './compare'
 import { short } from './format'
 
 // Plain text whatever the user's config: no colors, no external diff tool.
@@ -13,6 +14,7 @@ export const MAX_DIFF_LINES = 1500
 // or, for a file new in the stash (kept in its untracked commit), that file whole.
 export function diffRuns(source: DiffSource, path: string): string[][] {
   if (source.kind === 'commit') return [['show', '--format=', '--diff-merges=first-parent', ...PLAIN, source.hash, '--', path]]
+  if (source.kind === 'range') return [['diff', ...PLAIN, source.from, source.to, '--', path]]
   return [
     ['diff', ...PLAIN, `${source.name}^1`, source.name, '--', path],
     ['show', '--format=', ...PLAIN, `${source.name}^3`, '--', path],
@@ -20,10 +22,13 @@ export function diffRuns(source: DiffSource, path: string): string[][] {
 }
 
 // Where the diff is from, as the screen names it.
-export const sourceLabel = (source: DiffSource) => (source.kind === 'commit' ? short(source.hash) : source.name)
+export const sourceLabel = (source: DiffSource) => (source.kind === 'commit' ? short(source.hash) : source.kind === 'stash' ? source.name : source.label)
 
 // Which file a diff is of: what tells the screen's lines from a run for another file.
-export const diffKey = (source: DiffSource, path: string) => `${source.kind === 'commit' ? source.hash : source.name}\0${path}`
+export const diffKey = (source: DiffSource, path: string) => {
+  const from = source.kind === 'commit' ? source.hash : source.kind === 'stash' ? source.name : rangeKey(source.from, source.to)
+  return `${from}\0${path}`
+}
 
 // The hunks of a diff, git's headers (`diff --git`, `index`, `---`, `+++`, modes) left out; the
 // first MAX_DIFF_LINES of them, the rest only counted in `hidden`.

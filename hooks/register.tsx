@@ -1,16 +1,17 @@
 import { atom, read, update } from 'claude-code'
 import type { ClientElements, Elements, EngineInterface, ProcessRunResult, Register, RenderChildren, RenderSurface } from 'claude-code'
 
-import type { Badge, BadgeKind, BadgeStyle, Cell, Change, Changelog, Columns, CommitDetail, ConfigScope, Diff, DiffLine, DiffSource, FileStat, FlowConfig, FlowConflict, FlowInfo, FlowInitForm, FlowKind, FlowOptions, FlowTopic, FlowView, Graph, GraphRow, Ref, RepoSettings, Repos, Screen, View } from '../types'
+import type { Badge, BadgeKind, BadgeStyle, Cell, Change, Changelog, Columns, Compare, Comparison, CommitDetail, ConfigScope, Diff, DiffLine, DiffSource, FileStat, FlowConfig, FlowConflict, FlowInfo, FlowInitForm, FlowKind, FlowOptions, FlowTopic, FlowView, Graph, GraphRow, Ref, RepoSettings, Repos, Screen, View } from '../types'
 import { parseChangelog, versionOf } from './changelog'
 import { diffKey, diffRuns, parseDiff, sourceLabel } from './diff'
-import { CLOSED, dismissModal, FLOW_CLOSED, hasModal } from './dismiss'
+import { compareRuns, parseCount, rangeKey } from './compare'
+import { backOf, CLOSED, dismissModal, FLOW_CLOSED, hasModal } from './dismiss'
 import { badgeParts, badgesOf, branchOf, diffBar, fitBadges, plainPillWidth, syncText, withSync } from './badges'
 import { isBranchNameCandidate } from './detect'
 import { absTime, fitGraph, HASH_W, relTime, short, truncate, truncateMiddle } from './format'
 import { layout, NODES } from './lanes'
 import { clampTop, findCommit, isHashQuery, topOf, visibleRange, widestIn, windowAt, wrapRows } from './virtual'
-import { detailArgs, detailOf, isPseudoRow, isStashRow, localsOf, LOG_FORMAT, mergedArgs, parseChanges, parseMerged, parseStashes, parseTracks, REFS_ARGS, STASH_ARGS, TRACK_ARGS, parseLog, parseStatus, parseSync, remotesOf, UNCOMMITTED, withStashes, withUncommitted } from './log'
+import { detailArgs, detailOf, isPseudoRow, isStashRow, localsOf, LOG_FORMAT, mergedArgs, parseChanges, parseMerged, parseNumstat, parseStashes, parseTracks, REFS_ARGS, STASH_ARGS, TRACK_ARGS, parseLog, parseStatus, parseSync, remotesOf, UNCOMMITTED, withStashes, withUncommitted } from './log'
 import { basesOf, defaultTagMessage, finishArgs, mainOf, finishPushArgs, flowArgs, flowCliOf, nextVersion, parseFlowConfig, resumeArgs, topicFor, topicOf, typeOf } from './flow'
 import { BRANCH_REFS_ARGS, branchNamesOf, DEFAULT_FORM, initArgs, initFormError, initFormFor, staleBaseArgs, trimForm } from './flowinit'
 import { cleanMessage, COMMIT_SYSTEM, commitPrompt, commitRuns, contextArgs, newFiles } from './commit'
@@ -87,7 +88,7 @@ const NERD_FONT_CHECK = 'ls ~/Library/Fonts /Library/Fonts ~/.local/share/fonts 
 
 const DEFAULT_FLOW: FlowView = { starting: null, finishing: null, opts: { isNoFf: true, isPush: true, isKeep: true }, tagMessage: null, conflict: null, init: null, confirming: null, isMenuOpen: false }
 const EMPTY_GRAPH: Graph = { status: 'idle', rows: [], head: '', branch: '', conflicts: 0, remotes: [], hasMore: false }
-const DEFAULT_VIEW: View = { scope: 'all', limit: PAGE, selected: null, confirm: null, menu: null, isRenaming: false, isDeleting: false, isForce: false, push: null, running: null, screen: 'graph', configScope: 'local', editingRemote: null, isAddingRemote: false, remoteDraft: '', scrollTo: null, isSearching: false, search: '', commitDraft: '', isSuggesting: false, uncommittedForm: null, diff: null, commitStep: 'files', commitFiles: [], refresh: 'idle', isOpen: false, flow: DEFAULT_FLOW, isActionsOpen: false, notice: null }
+const DEFAULT_VIEW: View = { scope: 'all', limit: PAGE, selected: null, confirm: null, menu: null, isRenaming: false, isDeleting: false, isForce: false, push: null, running: null, screen: 'graph', configScope: 'local', editingRemote: null, isAddingRemote: false, remoteDraft: '', scrollTo: null, isSearching: false, search: '', commitDraft: '', isSuggesting: false, uncommittedForm: null, diff: null, compare: null, compareMark: null, commitStep: 'files', commitFiles: [], refresh: 'idle', isOpen: false, flow: DEFAULT_FLOW, isActionsOpen: false, notice: null }
 
 const graphState = atom({ plugin: 'gitgraph', key: 'graph' } as const, EMPTY_GRAPH)
 // Bumped with every graph write: renders read this small number and keep the graph
@@ -107,6 +108,8 @@ const scrollTopState = atom({ plugin: 'gitgraph', key: 'scrollTop' } as const, 0
 const settingsState = atom({ plugin: 'gitgraph', key: 'settings' } as const, null as RepoSettings | null)
 // The diff screen's lines, null until a run is done; while they are another file's, it waits.
 const diffState = atom({ plugin: 'gitgraph', key: 'diff' } as const, null as Diff | null)
+// The compare screen's answers, null until git is done; while they are another comparison's, it waits.
+const compareState = atom({ plugin: 'gitgraph', key: 'compare' } as const, null as Comparison | null)
 // Loaded when the pane opens and after git flow actions, not with every graph load.
 const flowState = atom({ plugin: 'gitgraph', key: 'flow' } as const, null as FlowInfo | null)
 // Searched when the pane opens and on refresh; every git the pane runs runs in `active`.
@@ -175,7 +178,7 @@ async function togglePicker($: EngineInterface): Promise<void> {
 // Shows another repo: what was open belonged to the last one.
 async function showRepo($: EngineInterface): Promise<void> {
   const [view] = await Promise.all([
-    setView($, (v): View => ({ ...v, ...CLOSED, flow: { ...v.flow, ...FLOW_CLOSED, conflict: null }, selected: null, limit: PAGE, scrollTo: null })),
+    setView($, (v): View => ({ ...v, ...CLOSED, flow: { ...v.flow, ...FLOW_CLOSED, conflict: null }, selected: null, compareMark: null, limit: PAGE, scrollTo: null })),
     update($, detailState, () => null),
   ])
   await Promise.all([load($), loadFlow($), view.screen === 'settings' ? loadSettings($) : undefined])
@@ -649,7 +652,8 @@ async function readChangelog($: EngineInterface): Promise<Changelog> {
 
 // Swaps the graph for a file's diff: its runs at once, the first in order that printed wins.
 async function openDiff($: EngineInterface, source: DiffSource, path: string): Promise<void> {
-  await setView($, (v): View => ({ ...v, ...CLOSED, screen: 'diff', diff: { source, path } }))
+  // A comparison's file goes back to the comparison, any other to the graph.
+  await setView($, (v): View => ({ ...v, ...CLOSED, screen: 'diff', diff: { source, path, back: source.kind === 'range' ? 'compare' : 'graph' } }))
   const outs = await Promise.all(diffRuns(source, path).map(args => git($, args)))
   const stdout = outs.find(o => o.exitCode === 0 && o.stdout.trim())?.stdout ?? ''
   // Another file opened meanwhile: its own run fills the screen.
@@ -657,6 +661,20 @@ async function openDiff($: EngineInterface, source: DiffSource, path: string): P
   const open = (await read($, viewState)).diff
   if (!open || diffKey(open.source, open.path) !== key) return
   await update($, diffState, () => ({ key, ...parseDiff(stdout) }))
+}
+
+const compareKey = ({ from, to }: Compare) => rangeKey(from, to)
+
+// Swaps the graph for a comparison of two points: their counts and files, read at once.
+async function openCompare($: EngineInterface, compare: Compare): Promise<void> {
+  await setView($, (v): View => ({ ...v, ...CLOSED, screen: 'compare', compare }))
+  const runs = compareRuns(compare.from, compare.to)
+  const [count, files] = await Promise.all([git($, runs.count), git($, runs.files)])
+  // Another comparison opened meanwhile: its own run fills the screen.
+  const key = compareKey(compare)
+  const open = (await read($, viewState)).compare
+  if (!open || compareKey(open) !== key) return
+  await update($, compareState, () => ({ key, ...parseCount(count.stdout), files: files.exitCode === 0 ? parseNumstat(files.stdout) : [] }))
 }
 
 // Swaps the graph for the changelog, read on the first open since the mod loaded.
@@ -1169,6 +1187,10 @@ function menuEntry($: EngineInterface, ctx: Ctx, badge: Badge, item: MenuItem): 
       isActive: view.isDeleting,
       onPress: () => setView($, v => ({ ...v, isDeleting: !v.isDeleting, isForce: false, isRenaming: false, push: null, confirm: null })),
     }
+  if (item.compare !== undefined) {
+    const to = item.compare
+    return { label: item.label, isActive: false, onPress: () => openCompare($, { from: 'HEAD', to, fromLabel: headName(graph), toLabel: to }) }
+  }
   if (item.isRename)
     return {
       label: item.label,
@@ -1426,6 +1448,9 @@ function commitActions($: EngineInterface, ctx: Ctx, commit: GraphRow['commit'])
   const head = headName(graph)
   const isHere = commit.hash === graph.head
   const item = (id: string, label: string, run: () => Promise<void>): ListItem => ({ id, entry: armedEntry($, ctx, `${id}:${commit.hash}`, label, run) })
+  // An action that changes nothing runs on the first press.
+  const plain = (id: string, label: string, run: Entry['onPress']): ListItem => ({ id, entry: { label, isActive: false, onPress: run } })
+  const marked = ctx.view.compareMark
   return entryList(ctx, 'detail', [
     [
       ...(isCheckedOut(commit.refs)
@@ -1435,7 +1460,24 @@ function commitActions($: EngineInterface, ctx: Ctx, commit: GraphRow['commit'])
           )]),
       ...(isHere ? [] : [item('pick', 'Cherry-pick', () => runAction($, ['cherry-pick', commit.hash], `Cherry-picked ${short(commit.hash)}`))]),
     ],
-    [{ id: 'copy', entry: { label: 'Copy hash', isActive: false, onPress: pe => copyText($, commit.hash, `Copied hash ${short(commit.hash)}`, pe.surface) } }],
+    [plain('copy', 'Copy hash', pe => copyText($, commit.hash, `Copied hash ${short(commit.hash)}`, pe.surface))],
+    // Compare with HEAD, mark this one, or compare the one marked with this one.
+    [
+      ...(isHere ? [] : [plain('compare-head', 'Compare with HEAD', () => openCompare($, { from: commit.hash, to: 'HEAD', fromLabel: short(commit.hash), toLabel: head }))]),
+      plain('compare-mark', 'Mark for compare', async () => {
+        await setView($, v => ({ ...v, compareMark: commit.hash, isActionsOpen: false }))
+        $.ui.toast(`Marked ${short(commit.hash)} for compare`)
+      }),
+      ...(marked && marked !== commit.hash
+        ? [
+            // The mark is used up.
+            plain('compare-marked', `Compare with ${short(marked)}`, async () => {
+              await setView($, v => ({ ...v, compareMark: null }))
+              await openCompare($, { from: marked, to: commit.hash, fromLabel: short(marked), toLabel: short(commit.hash) })
+            }),
+          ]
+        : []),
+    ],
     // Moves the current branch here and keeps the changes staged; a commit left
     // behind stays in the graph while a ref (a pushed branch) keeps it, to reset back to.
     isHere ? [] : [item('reset', `Reset ${head} here (soft)`, () => runAction($, ['reset', '--soft', commit.hash], `Reset ${head} to ${short(commit.hash)}: changes kept staged`))],
@@ -1688,15 +1730,40 @@ function uncommittedDialog($: EngineInterface, ctx: Ctx, { commit, cells }: Grap
 // A screen's title, its way back to the graph, and a rule.
 function screenHeader($: EngineInterface, ctx: Ctx, screen: Exclude<Screen, 'graph'>, title: string) {
   const { Box, Text, Button } = ctx.els
+  // The same way back as Escape's.
+  const back = backOf(ctx.view)
   return [
     <Box flexDirection="row" justifyContent="space-between">
       <Text weight="bold">{title}</Text>
-      <Button key={`${screen}-back`} plain dimColor onPress={() => setView($, (v): View => ({ ...v, screen: 'graph' }))}>
-        ← graph
+      <Button key={`${screen}-back`} plain dimColor onPress={() => setView($, (v): View => ({ ...v, screen: back }))}>
+        {`← ${back}`}
       </Button>
     </Box>,
     rule(ctx),
   ]
+}
+
+// The compare screen: what is compared, how far apart, and the files from one to the other
+// (each opens its diff between the two).
+function renderCompare($: EngineInterface, ctx: Ctx, compare: Compare | null, stored: Comparison | null) {
+  const { Box, Text } = ctx.els
+  const result = compare && stored?.key === compareKey(compare) ? stored : null
+  const label = compare ? `${compare.fromLabel} ↔ ${compare.toLabel}` : ''
+  const body = !compare
+    ? []
+    : !result
+    ? [line(ctx, <Text color={MUTED}>Comparing…</Text>)]
+    : [
+        line(ctx, <Text>{`${compare.toLabel}: ${result.ahead} ahead, ${result.behind} behind ${compare.fromLabel}`}</Text>),
+        blank(ctx),
+        ...(result.files.length ? renderFiles($, ctx, result.files, { kind: 'range', from: compare.from, to: compare.to, label }) : [line(ctx, <Text color={MUTED}>No differences: both have the same content</Text>)]),
+      ]
+  return (
+    <Box flexDirection="column">
+      {screenHeader($, ctx, 'compare', `Compare ${label}`.trim())}
+      {body}
+    </Box>
+  )
 }
 
 // The diff screen: the file and where it is from, then its lines, each one row cut to the width.
@@ -2260,6 +2327,7 @@ async function renderPane($: EngineInterface, els: Ctx['els'], surface: string, 
   }
   if (view.screen === 'changelog') return renderChangelog($, base, await read($, changelogState))
   if (view.screen === 'diff') return renderDiff($, base, view.diff, await read($, diffState))
+  if (view.screen === 'compare') return renderCompare($, base, view.compare, await read($, compareState))
   if (view.screen === 'settings') return renderSettings($, base, await read($, settingsState))
   // The graph column is as wide as the rows in the window need: laid out once to find the
   // window, then again at that width (a wide stretch far off no longer widens it all).
