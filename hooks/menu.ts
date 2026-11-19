@@ -31,6 +31,11 @@ export const renameArgs = (from: string, to: string) => ['branch', '-m', from, t
 // when given, else git names it after the commit it sits on.
 export const stashArgs = (message: string) => ['stash', 'push', '--include-untracked', ...(message.trim() ? ['-m', message.trim()] : [])]
 
+// Resets the uncommitted changes: mixed unstages them (the files stay as they are), hard discards
+// those of tracked files. Untracked files stay either way: no `git clean`.
+export type ResetMode = 'mixed' | 'hard'
+export const resetArgs = (mode: ResetMode) => ['reset', ...(mode === 'hard' ? ['--hard'] : [])]
+
 // `-D` deletes a branch whose work is merged nowhere; `-d` refuses to.
 export const deleteBranchArgs = (name: string, isForce: boolean) => ['branch', isForce ? '-D' : '-d', name]
 

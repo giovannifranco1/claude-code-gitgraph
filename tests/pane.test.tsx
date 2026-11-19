@@ -450,6 +450,34 @@ test('ST-01 the uncommitted changes row opens a stash, with an optional message,
   await ui.unmount()
 })
 
+test('RS-01 the uncommitted changes reset, mixed or hard, once the mode is picked', async ($, on) => {
+  const toasts: string[] = []
+  const fake = newFake()
+  await setup($, on, fake, [], toasts)
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: 'uncommitted' })
+  await ui.press({ key: 'uncommitted-reset' })
+  // opening the form runs nothing: picking the mode is the confirmation
+  expect(fake.calls.some(c => c[1] === 'reset')).toBe(false)
+  expect(await ui.find({ type: 'Button', key: 'reset-mixed' })).toBeDefined()
+  await ui.press({ key: 'reset-hard' })
+  expect(callOf(fake, ['reset', '--hard'])).toBeGreaterThan(-1)
+  expect(toasts).toContain('Discarded the changes')
+  // again, mixed: only unstaged
+  await ui.press({ key: 'uncommitted' })
+  await ui.press({ key: 'uncommitted-reset' })
+  await ui.press({ key: 'reset-mixed' })
+  expect(callOf(fake, ['reset'])).toBeGreaterThan(-1)
+  expect(toasts).toContain('Unstaged the changes')
+  // cancel goes back to the actions
+  await ui.press({ key: 'uncommitted' })
+  await ui.press({ key: 'uncommitted-reset' })
+  await ui.press({ key: 'reset-cancel' })
+  expect(await ui.find({ type: 'Button', key: 'reset-hard' })).toBeUndefined()
+  expect(await ui.find({ type: 'Button', key: 'uncommitted-reset' })).toBeDefined()
+  await ui.unmount()
+})
+
 test('CM-01 the uncommitted changes commit with the message Claude suggests from the diff, shown whole, not edited', async ($, on) => {
   const toasts: string[] = []
   const asked: { model: string; prompt: string }[] = []

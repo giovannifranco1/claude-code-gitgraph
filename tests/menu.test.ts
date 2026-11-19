@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import type { FlowConfig } from '../types'
-import { checkoutArgs, deleteBranchArgs, defaultPushRemotes, menuFor, menuGroups, pushRuns, renameArgs, splitRemote, stashArgs } from '../hooks/menu'
+import { checkoutArgs, deleteBranchArgs, defaultPushRemotes, menuFor, menuGroups, pushRuns, renameArgs, resetArgs, splitRemote, stashArgs } from '../hooks/menu'
 
 const ids = (items: { id: string }[]) => items.map(i => i.id)
 
@@ -109,4 +109,9 @@ test('GG-12 the menu is a list in groups: git flow, branch actions, rename and c
 test('ST-01 a stash takes untracked files too, and the message only when there is one', async () => {
   expect(stashArgs(' wip ')).toEqual(['stash', 'push', '--include-untracked', '-m', 'wip'])
   expect(stashArgs('  ')).toEqual(['stash', 'push', '--include-untracked'])
+})
+
+test('RS-01 a mixed reset unstages the changes, a hard one discards them; neither cleans untracked files', async () => {
+  expect(resetArgs('mixed')).toEqual(['reset'])
+  expect(resetArgs('hard')).toEqual(['reset', '--hard'])
 })
