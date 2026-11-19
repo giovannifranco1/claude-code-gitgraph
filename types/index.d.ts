@@ -66,7 +66,14 @@ export type Graph = {
 // The "all branches" switch: on, local and remote branches (`--all`); off (`head`, the name kept
 // for the stored view), the local branches alone (`--branches HEAD`).
 export type Scope = 'all' | 'head'
-export type Screen = 'graph' | 'settings' | 'changelog'
+export type Screen = 'graph' | 'settings' | 'changelog' | 'diff'
+
+// Where a file's diff comes from: a commit (against its first parent) or a stash (against its base).
+export type DiffSource = { kind: 'commit'; hash: string } | { kind: 'stash'; name: string }
+// A line of a diff as the diff screen draws it.
+export type DiffLine = { kind: 'hunk' | 'add' | 'del' | 'ctx' | 'note'; text: string }
+// A file's diff: its first lines, `hidden` the rest; `key` the file it is of (`diffKey`).
+export type Diff = { key: string; lines: DiffLine[]; hidden: number }
 export type View = {
   scope: Scope
   limit: number
@@ -100,6 +107,8 @@ export type View = {
   isSuggesting: boolean
   // The form the uncommitted changes' actions opened, in a dialog of its own; null: the actions.
   uncommittedForm: 'commit' | 'stash' | 'reset' | null
+  // The file whose diff the diff screen shows, and where it is from.
+  diff: { source: DiffSource; path: string } | null
   // The commit's step (pick the files, then the message) and the files picked, by path.
   commitStep: 'files' | 'message'
   commitFiles: string[]
@@ -166,6 +175,6 @@ export type Columns = { isAuthor: boolean; isHash: boolean }
 
 declare module 'claude-code' {
   interface PluginState {
-    gitgraph: { graph: Graph; view: Shaped<View>; detail: CommitDetail | null; isRound: boolean; settings: RepoSettings | null; hasNerdFont: boolean; graphVersion: number; scrollTop: number; columns: Columns; flow: FlowInfo | null; repos: Shaped<Repos>; changelog: Changelog | null }
+    gitgraph: { graph: Graph; view: Shaped<View>; detail: CommitDetail | null; isRound: boolean; settings: RepoSettings | null; hasNerdFont: boolean; graphVersion: number; scrollTop: number; columns: Columns; flow: FlowInfo | null; repos: Shaped<Repos>; changelog: Changelog | null; diff: Diff | null }
   }
 }

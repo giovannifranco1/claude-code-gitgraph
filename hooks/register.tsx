@@ -1,8 +1,9 @@
 import { atom, read, update } from 'claude-code'
 import type { ClientElements, Elements, EngineInterface, ProcessRunResult, Register, RenderChildren, RenderSurface } from 'claude-code'
 
-import type { Badge, BadgeKind, BadgeStyle, Cell, Change, Changelog, Columns, CommitDetail, ConfigScope, FileStat, FlowConfig, FlowConflict, FlowInfo, FlowInitForm, FlowKind, FlowOptions, FlowTopic, FlowView, Graph, GraphRow, Ref, RepoSettings, Repos, Screen, View } from '../types'
+import type { Badge, BadgeKind, BadgeStyle, Cell, Change, Changelog, Columns, CommitDetail, ConfigScope, Diff, DiffLine, DiffSource, FileStat, FlowConfig, FlowConflict, FlowInfo, FlowInitForm, FlowKind, FlowOptions, FlowTopic, FlowView, Graph, GraphRow, Ref, RepoSettings, Repos, Screen, View } from '../types'
 import { parseChangelog, versionOf } from './changelog'
+import { diffKey, diffRuns, parseDiff, sourceLabel } from './diff'
 import { CLOSED, dismissModal, FLOW_CLOSED, hasModal } from './dismiss'
 import { badgeParts, badgesOf, branchOf, diffBar, fitBadges, plainPillWidth, syncText, withSync } from './badges'
 import { isBranchNameCandidate } from './detect'
@@ -37,6 +38,8 @@ const GRAY_BG = '#9d9d9d'
 const SELECTED_BG = '#264f78'
 const ADD_COLOR = '#89d185'
 const DEL_COLOR = '#f48771'
+const HUNK_COLOR = '#4fc1ff'
+const DIFF_COLORS: Record<DiffLine['kind'], string | undefined> = { hunk: HUNK_COLOR, add: ADD_COLOR, del: DEL_COLOR, ctx: undefined, note: MUTED }
 const AUTHOR_W = 12
 // The subject's columns the pills after the first leave it (the first may take them all).
 const MIN_SUBJECT = 10
@@ -84,7 +87,7 @@ const NERD_FONT_CHECK = 'ls ~/Library/Fonts /Library/Fonts ~/.local/share/fonts 
 
 const DEFAULT_FLOW: FlowView = { starting: null, finishing: null, opts: { isNoFf: true, isPush: true, isKeep: true }, tagMessage: null, conflict: null, init: null, confirming: null, isMenuOpen: false }
 const EMPTY_GRAPH: Graph = { status: 'idle', rows: [], head: '', branch: '', conflicts: 0, remotes: [], hasMore: false }
-const DEFAULT_VIEW: View = { scope: 'all', limit: PAGE, selected: null, confirm: null, menu: null, isRenaming: false, isDeleting: false, isForce: false, push: null, running: null, screen: 'graph', configScope: 'local', editingRemote: null, isAddingRemote: false, remoteDraft: '', scrollTo: null, isSearching: false, search: '', commitDraft: '', isSuggesting: false, uncommittedForm: null, commitStep: 'files', commitFiles: [], refresh: 'idle', isOpen: false, flow: DEFAULT_FLOW, isActionsOpen: false, notice: null }
+const DEFAULT_VIEW: View = { scope: 'all', limit: PAGE, selected: null, confirm: null, menu: null, isRenaming: false, isDeleting: false, isForce: false, push: null, running: null, screen: 'graph', configScope: 'local', editingRemote: null, isAddingRemote: false, remoteDraft: '', scrollTo: null, isSearching: false, search: '', commitDraft: '', isSuggesting: false, uncommittedForm: null, diff: null, commitStep: 'files', commitFiles: [], refresh: 'idle', isOpen: false, flow: DEFAULT_FLOW, isActionsOpen: false, notice: null }
 
 const graphState = atom({ plugin: 'gitgraph', key: 'graph' } as const, EMPTY_GRAPH)
 // Bumped with every graph write: renders read this small number and keep the graph
@@ -102,6 +105,8 @@ const columnsState = atom({ plugin: 'gitgraph', key: 'columns' } as const, DEFAU
 // The first graph row a docked terminal pane shows: the mod scrolls its rows itself there.
 const scrollTopState = atom({ plugin: 'gitgraph', key: 'scrollTop' } as const, 0)
 const settingsState = atom({ plugin: 'gitgraph', key: 'settings' } as const, null as RepoSettings | null)
+// The diff screen's lines, null until a run is done; while they are another file's, it waits.
+const diffState = atom({ plugin: 'gitgraph', key: 'diff' } as const, null as Diff | null)
 // Loaded when the pane opens and after git flow actions, not with every graph load.
 const flowState = atom({ plugin: 'gitgraph', key: 'flow' } as const, null as FlowInfo | null)
 // Searched when the pane opens and on refresh; every git the pane runs runs in `active`.
@@ -640,6 +645,18 @@ async function readChangelog($: EngineInterface): Promise<Changelog> {
   const readText = (path: string) => $.fs.read(`${$.plugin.root}/${path}`).then(text => (typeof text === 'string' ? text : ''), () => '')
   const [md, manifest] = await Promise.all([readText('CHANGELOG.md'), readText('.claude-plugin/plugin.json')])
   return { versions: parseChangelog(md), installed: versionOf(manifest) }
+}
+
+// Swaps the graph for a file's diff: its runs at once, the first in order that printed wins.
+async function openDiff($: EngineInterface, source: DiffSource, path: string): Promise<void> {
+  await setView($, (v): View => ({ ...v, ...CLOSED, screen: 'diff', diff: { source, path } }))
+  const outs = await Promise.all(diffRuns(source, path).map(args => git($, args)))
+  const stdout = outs.find(o => o.exitCode === 0 && o.stdout.trim())?.stdout ?? ''
+  // Another file opened meanwhile: its own run fills the screen.
+  const key = diffKey(source, path)
+  const open = (await read($, viewState)).diff
+  if (!open || diffKey(open.source, open.path) !== key) return
+  await update($, diffState, () => ({ key, ...parseDiff(stdout) }))
 }
 
 // Swaps the graph for the changelog, read on the first open since the mod loaded.
@@ -1331,8 +1348,9 @@ function actionsDialog($: EngineInterface, ctx: Ctx, { commit, cells }: GraphRow
   return { title: `Commit ${short(commit.hash)}`, rows: commitActions($, ctx, commit), actions: line(ctx, close), color: laneColor(cells) }
 }
 
-function renderFiles(ctx: Ctx, files: FileStat[]) {
-  const { els: { Text }, cols } = ctx
+// The files with their counts and bars; each opens its diff when `source` is given.
+function renderFiles($: EngineInterface, ctx: Ctx, files: FileStat[], source?: DiffSource) {
+  const { els: { Text, Button }, cols } = ctx
   const adds = files.reduce((n, f) => n + (f.adds ?? 0), 0)
   const dels = files.reduce((n, f) => n + (f.dels ?? 0), 0)
   const pathRoom = Math.max(10, cols - ctx.graphWidth - 5 - 12 - BAR_W - 2)
@@ -1347,8 +1365,7 @@ function renderFiles(ctx: Ctx, files: FileStat[]) {
     ),
     ...files.slice(0, MAX_FILES).map(f => {
       const bar = diffBar(f.adds, f.dels, BAR_W)
-      return line(
-        ctx,
+      const text = (
         <Text>
           {truncate(f.path, pathRoom).padEnd(pathRoom)}
           {f.adds === null ? (
@@ -1361,7 +1378,17 @@ function renderFiles(ctx: Ctx, files: FileStat[]) {
           )}{' '}
           <Text color={ADD_COLOR}>{'+'.repeat(bar.adds)}</Text>
           <Text color={DEL_COLOR}>{'−'.repeat(bar.dels)}</Text>
-        </Text>,
+        </Text>
+      )
+      return line(
+        ctx,
+        source ? (
+          <Button key={`file:${f.path}`} plain onPress={() => openDiff($, source, f.path)}>
+            {text}
+          </Button>
+        ) : (
+          text
+        ),
       )
     }),
     ...(files.length > MAX_FILES ? [line(ctx, <Text color={MUTED}>… and {files.length - MAX_FILES} more files</Text>)] : []),
@@ -1455,7 +1482,7 @@ function renderDetail($: EngineInterface, ctx: Ctx, { commit, cells }: GraphRow)
       rows.push(blank(ctx), ...body.slice(0, BODY_LINES).map(l => line(ctx, <Text wrap="truncate-end">{l}</Text>)))
       if (body.length > BODY_LINES) rows.push(line(ctx, <Text color={MUTED}>…</Text>))
     }
-    rows.push(blank(ctx), ...renderFiles(ctx, detail.files))
+    rows.push(blank(ctx), ...renderFiles($, ctx, detail.files, { kind: 'commit', hash: commit.hash }))
   }
   rows.push(blank(ctx))
   if (view.running) rows.push(view.menu ? blank(ctx) : renderRunning(ctx))
@@ -1629,7 +1656,7 @@ function stashBody($: EngineInterface, ctx: Ctx, name: string): RenderChildren[]
           item('drop', armedEntry($, ctx, `stash-drop:${name}`, 'Drop stash…', run('drop'))),
         ],
       ])
-  const files = ctx.detail === null ? [line(ctx, <ctx.els.Text color={MUTED}>Loading files…</ctx.els.Text>)] : renderFiles(ctx, ctx.detail.files)
+  const files = ctx.detail === null ? [line(ctx, <ctx.els.Text color={MUTED}>Loading files…</ctx.els.Text>)] : renderFiles($, ctx, ctx.detail.files, { kind: 'stash', name })
   return [...actions, blank(ctx), ...files]
 }
 
@@ -1670,6 +1697,25 @@ function screenHeader($: EngineInterface, ctx: Ctx, screen: Exclude<Screen, 'gra
     </Box>,
     rule(ctx),
   ]
+}
+
+// The diff screen: the file and where it is from, then its lines, each one row cut to the width.
+function renderDiff($: EngineInterface, ctx: Ctx, file: View['diff'], stored: Diff | null) {
+  const { Box, Text } = ctx.els
+  const diff = file && stored?.key === diffKey(file.source, file.path) ? stored : null
+  const body = !diff
+    ? [line(ctx, <Text color={MUTED}>Loading diff…</Text>)]
+    : [
+        ...diff.lines.map(l => line(ctx, <Text color={DIFF_COLORS[l.kind]} wrap="truncate-end">{l.text}</Text>)),
+        ...(diff.hidden ? [line(ctx, <Text color={MUTED}>{`… and ${diff.hidden} more lines`}</Text>)] : []),
+      ]
+  return (
+    <Box flexDirection="column">
+      {screenHeader($, ctx, 'diff', `± ${file?.path ?? ''}`)}
+      {file ? line(ctx, <Text color={MUTED}>{`from ${sourceLabel(file.source)}`}</Text>) : null}
+      {body}
+    </Box>
+  )
 }
 
 // The changelog screen: a box per version, newest first, the installed one marked.
@@ -2213,6 +2259,7 @@ async function renderPane($: EngineInterface, els: Ctx['els'], surface: string, 
     columns,
   }
   if (view.screen === 'changelog') return renderChangelog($, base, await read($, changelogState))
+  if (view.screen === 'diff') return renderDiff($, base, view.diff, await read($, diffState))
   if (view.screen === 'settings') return renderSettings($, base, await read($, settingsState))
   // The graph column is as wide as the rows in the window need: laid out once to find the
   // window, then again at that width (a wide stretch far off no longer widens it all).
