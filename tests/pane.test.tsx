@@ -312,6 +312,17 @@ test('DM-01 secondary text is a set gray, never dimColor (faint, which many term
   await ui.unmount()
 })
 
+test('GG-24 the checked-out branch, merged, keeps its check: gray, the check where the ghost would be', async ($, on) => {
+  // feat checked out, merged into main (by M), its remote with it
+  await setup($, on, newFake({ featRefs: 'HEAD -> feat, origin/feat', branch: 'feat', merged: `${B} refs/remotes/origin/feat\n` }))
+  const ui = await $.ui.mount(pane('terminal'))
+  const props = (await ui.find({ type: 'Client', key: `pill:${B}:0` }))?.props.props as { segments: { text: string; bg: string; icon?: { text: string } }[] }
+  expect(props.segments.map(g => g.text)).toEqual(['  feat', 'origin'])
+  expect(props.segments[0]?.icon?.text).toMatch(/^(✔|\u{f058})$/u)
+  expect(props.segments[0]?.bg).toBe('#9d9d9d')
+  await ui.unmount()
+})
+
 const CHANGELOG = `# Changelog
 
 ## [1.6.0] - 2026-11-18
