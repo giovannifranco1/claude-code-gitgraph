@@ -5,6 +5,10 @@ import type { MenuItem } from './menu'
 const DEFAULT_BASES = ['main', 'master', 'develop', 'dev']
 export const basesOf = (config: FlowConfig | null | undefined) => config?.bases.map(b => b.name) ?? DEFAULT_BASES
 
+// The main branch: git flow's base with no parent, else `master` where there is no `main`.
+export const mainOf = (config: FlowConfig | null | undefined, branches: string[]) =>
+  config?.bases.find(b => !b.parent)?.name ?? (branches.includes('master') && !branches.includes('main') ? 'master' : 'main')
+
 export const KINDS: FlowKind[] = ['feature', 'bugfix', 'release', 'hotfix']
 const SEMVER = /^(v?)(\d+)\.(\d+)\.(\d+)$/
 

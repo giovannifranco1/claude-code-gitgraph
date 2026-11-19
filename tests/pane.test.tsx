@@ -280,6 +280,18 @@ test('GG-24 a merged branch with its remote on its commit is one gone pill: ghos
   await ui.unmount()
 })
 
+test('TG-01 a tag is drawn in the color of the main branch', async ($, on) => {
+  await setup($, on, newFake())
+  const ui = await $.ui.mount(pane('terminal'))
+  const segs = async (key: string) => ((await ui.find({ type: 'Client', key }))?.props.props as { segments: { text: string; bg: string }[] }).segments
+  // v0.1 is on B (feat's lane); main is on M
+  const tag = await segs(`pill:${B}:1`)
+  expect(tag.map(g => g.text)).toContain('v0.1')
+  expect(tag[0]?.bg).toBe((await segs(`pill:${M}:0`))[0]?.bg)
+  expect(tag[0]?.bg).not.toBe((await segs(`pill:${B}:0`))[0]?.bg)
+  await ui.unmount()
+})
+
 const CHANGELOG = `# Changelog
 
 ## [1.6.0] - 2026-11-18

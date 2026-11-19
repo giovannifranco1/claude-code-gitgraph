@@ -10,7 +10,7 @@ import { absTime, fitGraph, HASH_W, relTime, short, truncate, truncateMiddle } f
 import { layout } from './lanes'
 import { clampTop, findByHash, isHashQuery, topOf, visibleRange, widestIn, windowAt, wrapRows } from './virtual'
 import { DETAIL_FORMAT, localsOf, LOG_FORMAT, parseDetail, parseLog, parseStatus, parseSync, remotesOf, UNCOMMITTED, withUncommitted } from './log'
-import { basesOf, defaultTagMessage, finishArgs, finishPushArgs, flowArgs, flowCliOf, nextVersion, parseFlowConfig, resumeArgs, topicFor, topicOf, typeOf } from './flow'
+import { basesOf, defaultTagMessage, finishArgs, mainOf, finishPushArgs, flowArgs, flowCliOf, nextVersion, parseFlowConfig, resumeArgs, topicFor, topicOf, typeOf } from './flow'
 import { BRANCH_REFS_ARGS, branchNamesOf, DEFAULT_FORM, initArgs, initFormError, initFormFor, staleBaseArgs, trimForm } from './flowinit'
 import { checkoutArgs, defaultPushRemotes, deleteBranchArgs, type MenuItem, menuFor, menuGroups, pushRuns, renameArgs } from './menu'
 import { drawPill, type PillProps, type PillSegment, shade } from './pilldraw'
@@ -644,6 +644,8 @@ type Ctx = {
   columns: Columns
   branchColors: Map<string, string>
   dead: Set<string>
+  // The main branch's pill color, which tags take; absent while it is not loaded.
+  mainColor: string | undefined
 }
 
 // The dark shade of a pill's color: its remotes' segment (light text) and its icon.
@@ -655,10 +657,12 @@ const LIGHT_FG = '#f0f0f0'
 // shade of the pill color. Icons are in that dark shade.
 // A badge's color: a gone one (merged, or deleted here) gray; a remote branch the dark shade of
 // its local branch's color (its own lane's while that one is not loaded), as a local pill's
-// remote segment is; a tag or a detached HEAD its own; a branch its lane's.
-function pillBg({ branchColors }: Ctx, badge: Badge, lane: string): string {
+// remote segment is; a tag the main branch's (its own while main is not loaded); a detached
+// HEAD its own; a branch its lane's.
+function pillBg({ branchColors, mainColor }: Ctx, badge: Badge, lane: string): string {
   if (badge.isGone) return GRAY_BG
   if (badge.kind === 'remote') return shade(branchColors.get(branchOf(badge.label)) ?? lane, SHADE)
+  if (badge.kind === 'tag' && mainColor) return mainColor
   return BADGE_BG[badge.kind] ?? lane
 }
 
@@ -1880,6 +1884,7 @@ async function renderPane($: EngineInterface, els: Ctx['els'], surface: string, 
     graphWidth: Math.min(graphMax, cache.maxCells),
     branchColors: cache.branchColors,
     dead: deadFor(cache, flow),
+    mainColor: cache.branchColors.get(mainOf(flow?.config, graph.locals ?? [])),
     now: Math.floor(Date.now() / 1000),
     isRound,
     icons: hasNerd ? ICONS.nerd : ICONS.plain,

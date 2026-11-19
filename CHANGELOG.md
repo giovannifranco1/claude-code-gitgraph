@@ -12,6 +12,7 @@ Mudanças do Git Graph (`gitgraph`) por versão, no formato [Keep a Changelog](h
 - No máximo dois badges de branch (local ou remota) por commit na coluna Description, mais as tags, que não contam no limite; as demais branches entram no `+N`. Os badges depois do primeiro têm mais espaço antes de serem cortados: a descrição do commit reserva 10 colunas, não mais 20.
 - Badge de branch remota (`origin/x` num commit diferente do da local) no tom escuro da cor da branch local, com texto claro (o mesmo tom do segmento `origin` do badge local), não mais em cinza; só a branch morta continua cinza, com o fantasminha.
 - Branch remota mergeada numa base (`main`/`develop`, as do git flow) aparece morta (fantasminha e cinza), mesmo que a branch local ainda exista. No mesmo commit da local, as duas viram um badge só, desenhado como o badge da branch atual: fantasminha e nome no cinza, e o remoto no tom escuro do cinza (`👻 feature/a` + `origin`, sem separador). Não contam as próprias bases nem uma branch recém-criada, ainda no topo da base.
+- Tags na cor da branch `main` (a base principal do git flow, ou `main`/`master`), não mais em amarelo fixo; o amarelo fica só enquanto a `main` não está entre os commits carregados.
 - Cores das lanes: uma branch nova nunca pega a cor de uma lane ainda aberta (ex.: um hotfix saindo da `main` azul não é azul), mesmo depois de a paleta dar a volta.
 - Commits de merge com o texto em cinza (descrição, autor e hash, em `#808080`), como o Git Graph do VS Code; o grafo e os badges mantêm as cores.
 

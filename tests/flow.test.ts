@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import type { FlowConfig } from '../types'
-import { defaultTagMessage, finishArgs, finishPushArgs, flowArgs, flowCliOf, flowMenuFor, nextVersion, parseFlowConfig, resumeArgs, topicOf, updateLabel } from '../hooks/flow'
+import { defaultTagMessage, finishArgs, finishPushArgs, flowArgs, flowCliOf, flowMenuFor, mainOf, nextVersion, parseFlowConfig, resumeArgs, topicOf, updateLabel } from '../hooks/flow'
 
 // What `git config --get-regexp ^gitflow\.` prints after `git flow init -d` (git-flow-next 1.1).
 const NEXT_CONFIG = `gitflow.version 1.0
@@ -168,4 +168,12 @@ test('GF-09 without gitflow.origin the remote is origin when there is one, else 
   expect(parseFlowConfig(NEXT_CONFIG, [])?.remote).toBe('origin')
   expect(parseFlowConfig(`${NEXT_CONFIG}gitflow.origin upstream\n`, ['github'])?.remote).toBe('upstream')
   expect(parseFlowConfig(AVH_CONFIG, ['github'])?.remote).toBe('github')
+})
+
+test('TG-01 the main branch: the root base of git flow, else master only where there is no main', async () => {
+  const config: FlowConfig = { types: [], bases: [{ name: 'trunk', parent: '', isAutoUpdate: false }, { name: 'develop', parent: 'trunk', isAutoUpdate: false }], remote: 'origin', tagPrefix: '' }
+  expect(mainOf(config, ['trunk', 'main'])).toBe('trunk')
+  expect(mainOf(null, ['master', 'develop'])).toBe('master')
+  expect(mainOf(null, ['main', 'master'])).toBe('main')
+  expect(mainOf(null, [])).toBe('main')
 })
