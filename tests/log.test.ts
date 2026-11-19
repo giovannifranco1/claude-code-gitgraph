@@ -1,6 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
-import { localsOf, mergedArgs, parseChanges, parseDetail, parseMerged, parseTracks, REFS_ARGS, TRACK_ARGS, parseSync, parseLog, parseRefs, parseStatus, remotesOf, UNCOMMITTED, withUncommitted } from '../hooks/log'
+import type { Commit } from '../types'
+import { detailArgs, detailOf, isPseudoRow, localsOf, mergedArgs, parseChanges, parseDetail, parseMerged, parseStashes, parseTracks, REFS_ARGS, STASH_ARGS, TRACK_ARGS, parseSync, parseLog, parseRefs, parseStatus, remotesOf, UNCOMMITTED, withStashes, withUncommitted } from '../hooks/log'
 
 const US = '\x1f'
 const RS = '\x1e'
@@ -156,4 +157,45 @@ test('CM-02 the staged files are counted, the changes listed with what changed, 
     { path: 'conflict.ts', code: 'U', isStaged: false },
   ])
   expect(parseChanges('# branch.head main\n')).toEqual([])
+})
+
+const commit = (hash: string, time: number, ...parents: string[]): Commit => ({ hash, parents, refs: [], author: '', time, subject: hash })
+
+test('SH-01 the stash list gives each stash its base commit, time, name and message', async () => {
+  expect(STASH_ARGS).toEqual(['stash', 'list', '--format=%H%x1f%P%x1f%at%x1f%gd%x1f%s%x1e'])
+  const out = line('s0', 'b1 i0 u0', '1700000300', 'stash@{0}', 'WIP on main: b1 two') + line('s1', 'b2 i1', '1700000100', 'stash@{1}', 'On main: wip a')
+  expect(parseStashes(out)).toEqual([
+    { hash: 's0', base: 'b1', time: 1700000300, name: 'stash@{0}', subject: 'WIP on main: b1 two' },
+    { hash: 's1', base: 'b2', time: 1700000100, name: 'stash@{1}', subject: 'On main: wip a' },
+  ])
+  expect(parseStashes('')).toEqual([])
+})
+
+test('SH-01 a stash sits above its base, by date among the commits, off its base alone', async () => {
+  const commits = [commit('c3', 400, 'c2'), commit('c2', 300, 'c1'), commit('c1', 200, 'c0'), commit('c0', 100)]
+  const stashes = [
+    { hash: 's0', base: 'c1', time: 350, name: 'stash@{0}', subject: 'newer' },
+    { hash: 's1', base: 'c1', time: 250, name: 'stash@{1}', subject: 'older' },
+    { hash: 's2', base: 'gone', time: 500, name: 'stash@{2}', subject: 'base not loaded' },
+  ]
+  // a stash's row goes by its name
+  const rows = withStashes(commits, stashes)
+  expect(rows.map(c => c.hash)).toEqual(['c3', 'stash@{0}', 'c2', 'stash@{1}', 'c1', 'c0'])
+  expect(rows[1]).toEqual({ hash: 'stash@{0}', parents: ['c1'], refs: [], author: '', time: 350, subject: 'newer' })
+})
+
+test('SH-01 the uncommitted changes and the stashes are rows of no log commit; a stash details from git stash show', async () => {
+  expect([UNCOMMITTED, 'stash@{3}', 'c1', null].map(isPseudoRow)).toEqual([true, true, false, false])
+  expect(detailArgs('stash@{1}')).toEqual(['stash', 'show', '--numstat', '--include-untracked', 'stash@{1}'])
+  expect(detailArgs('c1')[0]).toBe('show')
+  const stash = commit('stash@{1}', 250, 'c1')
+  expect(detailOf(stash, '2\t1\tsrc/a.ts\n-\t-\tlogo.png\n')).toEqual({ hash: 'stash@{1}', author: '', email: '', time: 250, body: 'stash@{1}', files: [{ path: 'src/a.ts', adds: 2, dels: 1 }, { path: 'logo.png', adds: null, dels: null }] })
+})
+
+test('SH-01 a stash newer than every commit above its base goes right above it, never below', async () => {
+  const commits = [commit('c2', 300, 'c1'), commit('c1', 200)]
+  // a stash dated after c2 but based on c1: on top, still above its base
+  expect(withStashes(commits, [{ hash: 's0', base: 'c1', time: 900, name: 'stash@{0}', subject: 'x' }]).map(c => c.hash)).toEqual(['stash@{0}', 'c2', 'c1'])
+  // dated before its base (a clock skew): right above the base
+  expect(withStashes(commits, [{ hash: 's0', base: 'c2', time: 1, name: 'stash@{0}', subject: 'x' }]).map(c => c.hash)).toEqual(['stash@{0}', 'c2', 'c1'])
 })

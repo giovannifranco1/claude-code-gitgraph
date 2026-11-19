@@ -1,5 +1,8 @@
 import type { Cell, Commit } from '../types'
-import { UNCOMMITTED } from './log'
+import { isStashRow, UNCOMMITTED } from './log'
+
+// A row's node: a commit, the uncommitted changes, a stash.
+export const NODES = new Set(['●', '○', '◇'])
 
 const UP = 1
 const DOWN = 2
@@ -79,7 +82,7 @@ export function layout(commits: Commit[], size = 8): Cell[][] {
     dirs.forEach((d, i) => {
       if (d) cells[i * 2] = { ch: GLYPH[d] ?? ' ', color: colorOf(i) }
     })
-    cells[col * 2] = { ch: commit.hash === UNCOMMITTED ? '○' : '●', color: colorOf(col) }
+    cells[col * 2] = { ch: commit.hash === UNCOMMITTED ? '○' : isStashRow(commit.hash) ? '◇' : '●', color: colorOf(col) }
 
     while (cells.length && cells[cells.length - 1]?.ch === ' ') cells.pop()
     while (lanes.length && lanes[lanes.length - 1] === null) lanes.pop()

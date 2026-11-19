@@ -10,6 +10,9 @@ export type Commit = {
   subject: string
 }
 
+// A stash of `git stash list`: its commit, the commit it was made on, when, `stash@{N}`, message.
+export type Stash = { hash: string; base: string; time: number; name: string; subject: string }
+
 export type BadgeKind = 'head' | 'detached' | 'branch' | 'remote' | 'tag'
 // `isGone`: a dead branch: a remote one with no local branch of its name (deleted here), or
 // merged into a base (then its local branch on its commit too, which carries its remote).

@@ -4,16 +4,16 @@ import type { ClientElements, Elements, EngineInterface, ProcessRunResult, Regis
 import type { Badge, BadgeKind, BadgeStyle, Cell, Change, Changelog, Columns, CommitDetail, ConfigScope, FileStat, FlowConfig, FlowConflict, FlowInfo, FlowInitForm, FlowKind, FlowOptions, FlowTopic, FlowView, Graph, GraphRow, Ref, RepoSettings, Repos, Screen, View } from '../types'
 import { parseChangelog, versionOf } from './changelog'
 import { CLOSED, dismissModal, FLOW_CLOSED, hasModal } from './dismiss'
-import { badgeParts, badgesOf, branchOf, diffBar, fitBadges, syncText, withSync } from './badges'
+import { badgeParts, badgesOf, branchOf, diffBar, fitBadges, plainPillWidth, syncText, withSync } from './badges'
 import { isBranchNameCandidate } from './detect'
 import { absTime, fitGraph, HASH_W, relTime, short, truncate, truncateMiddle } from './format'
-import { layout } from './lanes'
+import { layout, NODES } from './lanes'
 import { clampTop, findCommit, isHashQuery, topOf, visibleRange, widestIn, windowAt, wrapRows } from './virtual'
-import { DETAIL_FORMAT, localsOf, LOG_FORMAT, mergedArgs, parseChanges, parseMerged, parseTracks, REFS_ARGS, TRACK_ARGS, parseDetail, parseLog, parseStatus, parseSync, remotesOf, UNCOMMITTED, withUncommitted } from './log'
+import { detailArgs, detailOf, isPseudoRow, isStashRow, localsOf, LOG_FORMAT, mergedArgs, parseChanges, parseMerged, parseStashes, parseTracks, REFS_ARGS, STASH_ARGS, TRACK_ARGS, parseLog, parseStatus, parseSync, remotesOf, UNCOMMITTED, withStashes, withUncommitted } from './log'
 import { basesOf, defaultTagMessage, finishArgs, mainOf, finishPushArgs, flowArgs, flowCliOf, nextVersion, parseFlowConfig, resumeArgs, topicFor, topicOf, typeOf } from './flow'
 import { BRANCH_REFS_ARGS, branchNamesOf, DEFAULT_FORM, initArgs, initFormError, initFormFor, staleBaseArgs, trimForm } from './flowinit'
 import { cleanMessage, COMMIT_SYSTEM, commitPrompt, commitRuns, contextArgs, newFiles } from './commit'
-import { checkoutArgs, defaultPushRemotes, deleteBranchArgs, type MenuItem, menuFor, menuGroups, pushRuns, renameArgs, type ResetMode, resetArgs, stashArgs } from './menu'
+import { checkoutArgs, defaultPushRemotes, deleteBranchArgs, type MenuItem, menuFor, menuGroups, pushRuns, renameArgs, type ResetMode, resetArgs, stashArgs, STASH_DONE, stashRunArgs, type StashVerb } from './menu'
 import { drawPill, type PillProps, type PillSegment, shade } from './pilldraw'
 import { BRANCH_ARGS, FIND_ARGS, UPSTREAM_ARGS, parseBranch, parseUpstream, parseRepos, pickActive, branchColumn, repoLabel } from './repos'
 import { addRemotePlan, isRemoteUrl, parseRemotes, userConfigArgs } from './settings'
@@ -243,11 +243,14 @@ async function load($: EngineInterface, known?: RepoState): Promise<void> {
   const view = await read($, viewState)
   busy = true
   try {
-    const [log, status, refs, track] = await Promise.all([
-      git($, ['log', ...(view.scope === 'all' ? ['--all'] : ['--branches', 'HEAD']), '--date-order', `-n${view.limit + 1}`, LOG_FORMAT]),
+    // The stashes are rows of their own (STASH_ARGS): `--all` leaves `refs/stash` out, or the
+    // latest would show as git's commits for it (its work, index and untracked files).
+    const [log, status, refs, track, stashes] = await Promise.all([
+      git($, ['log', ...(view.scope === 'all' ? ['--exclude=refs/stash', '--all'] : ['--branches', 'HEAD']), '--date-order', `-n${view.limit + 1}`, LOG_FORMAT]),
       known?.status ?? git($, STATUS_ARGS),
       known?.refs ?? git($, REFS_ARGS),
       git($, TRACK_ARGS),
+      git($, STASH_ARGS),
     ])
     if (!isCurrent()) return
     if (status.exitCode !== 0) {
@@ -270,7 +273,8 @@ async function load($: EngineInterface, known?: RepoState): Promise<void> {
       merged = out?.exitCode === 0 ? parseMerged(out.stdout, refs.stdout, bases) : []
     }
     const commits = parseLog(log.exitCode === 0 ? log.stdout : '', remotes)
-    const shown = withUncommitted(commits.slice(0, view.limit), head, dirty)
+    const loaded = commits.slice(0, view.limit)
+    const shown = withUncommitted(withStashes(loaded, stashes.exitCode === 0 ? parseStashes(stashes.stdout) : []), head, dirty)
     const cells = layout(shown, PALETTE.length)
     signature = signatureOf(status.stdout, refs.stdout)
     await setGraph($, (): Graph => ({
@@ -322,6 +326,11 @@ async function select($: EngineInterface, hash: string): Promise<void> {
 async function stashChanges($: EngineInterface, message: string): Promise<void> {
   await setView($, v => ({ ...v, selected: null }))
   await runAction($, stashArgs(message), 'Stashed the changes')
+}
+
+async function runStash($: EngineInterface, verb: StashVerb, name: string): Promise<void> {
+  await setView($, v => ({ ...v, selected: null }))
+  await runAction($, stashRunArgs(verb, name), `${STASH_DONE[verb]} ${name}`)
 }
 
 async function resetChanges($: EngineInterface, mode: ResetMode): Promise<void> {
@@ -393,9 +402,12 @@ async function suggestCommit($: EngineInterface): Promise<void> {
 }
 
 async function loadDetail($: EngineInterface, hash: string): Promise<void> {
-  const out = await git($, ['show', '--numstat', '--diff-merges=first-parent', DETAIL_FORMAT, hash])
+  const { graph, indexOf } = await readCache($)
+  const commit = graph.rows[indexOf.get(hash) ?? -1]?.commit
+  if (!commit) return
+  const out = await git($, detailArgs(hash))
   if ((await read($, viewState)).selected !== hash) return
-  await update($, detailState, () => (out.exitCode === 0 ? parseDetail(out.stdout) : null))
+  await update($, detailState, () => (out.exitCode === 0 ? detailOf(commit, out.stdout) : null))
 }
 
 // Reloads everything on screen; the button shows it running, then `✓ updated` for a moment.
@@ -703,7 +715,7 @@ async function renameBranch($: EngineInterface, from: string, value: string): Pr
   if (name) await runAction($, renameArgs(from, name), `Branch ${from} renamed to ${name}`)
 }
 
-const laneColor = (cells: Cell[]) => PALETTE[(cells.find(c => c.ch === '●' || c.ch === '○')?.color ?? 0) % PALETTE.length] ?? '#4fc1ff'
+const laneColor = (cells: Cell[]) => PALETTE[(cells.find(c => NODES.has(c.ch))?.color ?? 0) % PALETTE.length] ?? '#4fc1ff'
 
 function groupCells(cells: Cell[]): { text: string; color: number }[] {
   const groups: { text: string; color: number }[] = []
@@ -961,7 +973,9 @@ function renderRow($: EngineInterface, ctx: Ctx, { commit, cells }: GraphRow) {
   const meta = metaOf(ctx, commit.author, commit.hash)
   // The first pill may fill the Description column; the others get what is left once the
   // subject keeps its minimum, the rest as `+N`.
-  const fixed = graphWidth + 1 + meta.length + EDGE_SAFETY
+  // A stash's row has its name for a badge, ahead of the refs' room.
+  const stash = isStashRow(commit.hash) ? commit.hash : ''
+  const fixed = graphWidth + 1 + meta.length + EDGE_SAFETY + (stash ? plainPillWidth(stash) : 0)
   const { shown, hidden, width } = fitBadges(rowBadges(commit.refs, ctx.graph, ctx.view, ctx.dead), Math.max(0, cols - fixed - MIN_SUBJECT), Math.max(0, cols - fixed))
   const more = hidden > 0 ? `+${hidden}` : ''
   const room = Math.max(0, cols - fixed - width)
@@ -991,6 +1005,7 @@ function renderRow($: EngineInterface, ctx: Ctx, { commit, cells }: GraphRow) {
           {renderPill(ctx, plainPill(ctx, more, GRAY_BG))}
         </Box>
       )}
+      {stash && <Box flexShrink={0}>{renderPill(ctx, plainPill(ctx, stash, lane))}</Box>}
       <Button key={commit.hash} plain dimColor={mergeColor ? true : undefined} onPress={() => select($, commit.hash)}>
         <Text backgroundColor={isSelected ? SELECTED_BG : undefined} weight={isSelected ? 'bold' : undefined} color={mergeColor}>
           {truncate(commit.subject, room).padEnd(room)}
@@ -1405,7 +1420,8 @@ function renderDetail($: EngineInterface, ctx: Ctx, { commit, cells }: GraphRow)
   const { Text, Button } = els
   const { Input } = ctx
   const lane = laneColor(cells)
-  if (commit.hash === UNCOMMITTED) return renderStash($, ctx, commit.subject, lane)
+  if (commit.hash === UNCOMMITTED) return renderUncommitted($, ctx, commit.subject, lane)
+  if (isStashRow(commit.hash)) return framed(ctx, lane, ctx.graphWidth + 1, [line(ctx, pillTitle(ctx, commit.hash, commit.subject, lane)), blank(ctx), ...stashBody($, ctx, commit.hash)])
   const badges = rowBadges(commit.refs, ctx.graph, ctx.view, ctx.dead).filter(b => b.kind !== 'detached')
   const [subject = '', ...rest] = (detail?.body ?? commit.subject).split('\n')
   const body = rest.join('\n').trim().split('\n').filter((l, i, all) => l !== '' || (i > 0 && all[i - 1] !== ''))
@@ -1414,10 +1430,7 @@ function renderDetail($: EngineInterface, ctx: Ctx, { commit, cells }: GraphRow)
     line(
       ctx,
       [
-        <Text wrap="truncate-end">
-          {renderPill(ctx, plainPill(ctx, short(commit.hash), lane, true))}
-          <Text weight="bold">{subject}</Text>
-        </Text>,
+        pillTitle(ctx, short(commit.hash), subject, lane),
         <Button key="detail-actions-toggle" plain dimColor={!view.isActionsOpen} onPress={() => setView($, v => ({ ...v, isActionsOpen: !v.isActionsOpen, confirm: null }))}>
           {iconLabel(ctx, icons.actions)}
         </Button>,
@@ -1595,9 +1608,41 @@ function commitFilesForm($: EngineInterface, ctx: Ctx): Omit<Dialog, 'color'> {
   }
 }
 
+// A detail's title: a bold badge (a commit's short hash, a stash's name), then the bold subject.
+const pillTitle = (ctx: Ctx, label: string, subject: string, lane: string) => (
+  <ctx.els.Text wrap="truncate-end">
+    {renderPill(ctx, plainPill(ctx, label, lane, true))}
+    <ctx.els.Text weight="bold">{subject}</ctx.els.Text>
+  </ctx.els.Text>
+)
+
+// A stash's actions, as the uncommitted changes list theirs (drop pressed twice), then its files.
+function stashBody($: EngineInterface, ctx: Ctx, name: string): RenderChildren[] {
+  const run = (verb: StashVerb) => () => runStash($, verb, name)
+  const item = (id: string, entry: Entry): ListItem => ({ id, key: `stash-${id}`, entry })
+  const actions = ctx.view.running
+    ? [renderRunning(ctx)]
+    : entryList(ctx, 'stash', [
+        [
+          item('apply', { label: 'Apply stash', isActive: false, onPress: run('apply') }),
+          item('pop', { label: 'Pop stash', isActive: false, onPress: run('pop') }),
+          item('drop', armedEntry($, ctx, `stash-drop:${name}`, 'Drop stash…', run('drop'))),
+        ],
+      ])
+  const files = ctx.detail === null ? [line(ctx, <ctx.els.Text color={MUTED}>Loading files…</ctx.els.Text>)] : renderFiles(ctx, ctx.detail.files)
+  return [...actions, blank(ctx), ...files]
+}
+
+// A stash as a dialog on a docked terminal pane: its actions and files.
+function stashDialog($: EngineInterface, ctx: Ctx, { commit, cells }: GraphRow): Dialog {
+  const close = closeButton(ctx, 'stash-close', () => setView($, v => ({ ...v, selected: null, confirm: null })))
+  const color = laneColor(cells)
+  return { title: pillTitle(ctx, commit.hash, commit.subject, color), rows: stashBody($, ctx, commit.hash), actions: line(ctx, close), color }
+}
+
 // The uncommitted changes under their row where no dialog floats: the title, the actions, and
 // the form one opened under them.
-function renderStash($: EngineInterface, ctx: Ctx, title: string, lane: string) {
+function renderUncommitted($: EngineInterface, ctx: Ctx, title: string, lane: string) {
   const form = uncommittedForm($, ctx)
   const rows: RenderChildren[] = [line(ctx, <ctx.els.Text weight="bold">{title}</ctx.els.Text>), blank(ctx), ...uncommittedActions($, ctx), ...(form ? [blank(ctx), ...form.rows, form.actions] : [])]
   return framed(ctx, lane, ctx.graphWidth + 1, rows, form?.extraRows ?? 0)
@@ -2088,6 +2133,7 @@ function pinnedDialog($: EngineInterface, ctx: Ctx, menuRow: GraphRow | undefine
   if (menuRow && view.menu) return { key: 'menu-dialog', dialog: menuDialog($, ctx, menuRow, view.menu.badge) }
   if (selectedRow && view.isActionsOpen && !view.running) return { key: 'actions-dialog', dialog: actionsDialog($, ctx, selectedRow) }
   if (selectedRow?.commit.hash === UNCOMMITTED) return { key: 'uncommitted-dialog', dialog: uncommittedDialog($, ctx, selectedRow) }
+  if (selectedRow && isStashRow(selectedRow.commit.hash)) return { key: 'stash-dialog', dialog: stashDialog($, ctx, selectedRow) }
   return null
 }
 
@@ -2101,9 +2147,9 @@ function layoutPane($: EngineInterface, ctx: Ctx, indexOf: Map<string, number>) 
   const menuRow = rowOf(view.menu?.hash)
   const menuBox = menuRow && view.menu && !ctx.isPinned ? renderMenu($, ctx, menuRow, view.menu.badge) : undefined
   const selectedRow = rowOf(view.selected)
-  // On a docked terminal pane the uncommitted changes float as a dialog, not under their row.
-  const isUncommittedDialog = ctx.isPinned && selectedRow?.commit.hash === UNCOMMITTED
-  const detailBox = selectedRow && !isUncommittedDialog ? renderDetail($, ctx, selectedRow) : undefined
+  // On a docked terminal pane the uncommitted changes and the stashes float as a dialog, not under their row.
+  const isDialogRow = ctx.isPinned && isPseudoRow(view.selected)
+  const detailBox = selectedRow && !isDialogRow ? renderDetail($, ctx, selectedRow) : undefined
   const heights = graph.rows.map(r => 1 + (r === menuRow ? (menuBox?.height ?? 0) : 0) + (r === selectedRow ? (detailBox?.height ?? 0) : 0))
   // "Load more" is one row more at the end.
   if (graph.hasMore) heights.push(1)

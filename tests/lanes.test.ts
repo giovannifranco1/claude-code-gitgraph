@@ -41,6 +41,10 @@ test('GG-03 each lane keeps its color and a freed column gets a new one', async 
   expect(colorsOf(rows[1])).toEqual([1])
 })
 
+test('SH-01 a stash is a diamond on a lane off its base commit', async () => {
+  expect(draw(layout([c('a', 'b'), c('stash@{0}', 'b'), c('b')]))).toEqual(['●', '│ ◇', '●─╯'])
+})
+
 test('GG-07 the uncommitted pseudo-commit is a hollow dot', async () => {
   expect(draw(layout([c(UNCOMMITTED, 'h'), c('h')]))).toEqual(['○', '●'])
 })

@@ -7,6 +7,11 @@ Mudanças do Git Graph (`gitgraph`) por versão, no formato [Keep a Changelog](h
 ### Adicionado
 
 - **Reset changes…** nas ações das **Uncommitted changes (N)**, depois de **Commit changes…** e **Stash changes…**: a modal pede o modo, **Mixed** (`git reset`: tira tudo do stage, os arquivos ficam como estão) ou **Hard** (`git reset --hard`: descarta as mudanças dos arquivos rastreados). Abrir a modal não roda nada, escolher o modo é a confirmação. Arquivos novos ficam nos dois modos (sem `git clean`); **cancel** volta para a lista.
+- Stashes no grafo: cada stash de `git stash list` é uma linha com um nó `◇` saindo do commit em que foi criado, acima dele e na ordem de data, com o nome (`stash@{0}`) num badge. Clicar abre os arquivos dele (com os novos) e as ações **Apply stash**, **Pop stash** e **Drop stash…** (drop pede um segundo clique). Um stash cujo commit não está carregado aparece com **Load more**.
+
+### Corrigido
+
+- O stash mais recente aparecia como três commits do git (`WIP on…`, `index on…`, `untracked files on…`) com um badge `refs/stash`: o log deixa `refs/stash` de fora.
 
 ## [1.8.1] - 2026-11-19
 
