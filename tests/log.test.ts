@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { localsOf, mergedArgs, parseDetail, parseMerged, parseTracks, REFS_ARGS, TRACK_ARGS, parseSync, parseLog, parseRefs, parseStatus, remotesOf, UNCOMMITTED, withUncommitted } from '../hooks/log'
+import { localsOf, mergedArgs, parseChanges, parseDetail, parseMerged, parseTracks, REFS_ARGS, TRACK_ARGS, parseSync, parseLog, parseRefs, parseStatus, remotesOf, UNCOMMITTED, withUncommitted } from '../hooks/log'
 
 const US = '\x1f'
 const RS = '\x1e'
@@ -75,9 +75,9 @@ test('GG-08 parses commit detail with numstat and binary files', async () => {
 
 test('GG-07 GF-06 porcelain v2 status gives HEAD, branch, the dirty count and the conflicts', async () => {
   const out = '# branch.oid abc123\n# branch.head main\n# branch.upstream origin/main\n1 .M N... 100644 100644 100644 x y src/a.ts\n? new.txt\n'
-  expect(parseStatus(out)).toEqual({ head: 'abc123', branch: 'main', dirty: 2, conflicts: 0 })
-  expect(parseStatus('# branch.oid (initial)\n# branch.head main\n')).toEqual({ head: '', branch: 'main', dirty: 0, conflicts: 0 })
-  expect(parseStatus('# branch.oid abc\n# branch.head (detached)\n')).toEqual({ head: 'abc', branch: '', dirty: 0, conflicts: 0 })
+  expect(parseStatus(out)).toMatchObject({ head: 'abc123', branch: 'main', dirty: 2, conflicts: 0 })
+  expect(parseStatus('# branch.oid (initial)\n# branch.head main\n')).toEqual({ head: '', branch: 'main', dirty: 0, staged: 0, conflicts: 0 })
+  expect(parseStatus('# branch.oid abc\n# branch.head (detached)\n')).toEqual({ head: 'abc', branch: '', dirty: 0, staged: 0, conflicts: 0 })
   expect(parseStatus('# branch.head x\nu UU N... 100644 100644 100644 100644 a b c src/a.ts\n1 .M N... 100644 100644 100644 x y src/b.ts\n').conflicts).toBe(1)
 })
 
@@ -127,4 +127,33 @@ test('BS-01 each local branch is ahead of and behind its upstream, read on a loa
   // the poll's refs stay a plain list; the count is its own query
   expect(REFS_ARGS).toEqual(['for-each-ref', '--format=%(objectname) %(refname)'])
   expect(TRACK_ARGS).toEqual(['for-each-ref', '--format=%(refname:short)%09%(upstream:track,nobracket)', 'refs/heads'])
+})
+
+const STATUS_V2 = [
+  '# branch.oid abc',
+  '# branch.head main',
+  '1 M. N... 100644 100644 100644 a1 b1 hooks/staged one.ts',
+  '1 .M N... 100644 100644 100644 a2 b2 hooks/register.tsx',
+  '1 MM N... 100644 100644 100644 a3 b3 both.ts',
+  '1 A. N... 000000 100644 100644 00 c4 new-added.ts',
+  '1 .D N... 100644 100644 000000 a5 00 gone.ts',
+  '2 R. N... 100644 100644 100644 a6 b6 R100 renamed.ts\told.ts',
+  '? untracked.md',
+  'u UU N... 100644 100644 100644 100644 a b c conflict.ts',
+  '',
+].join('\n')
+
+test('CM-02 the staged files are counted, the changes listed with what changed, from the status the load reads', async () => {
+  expect(parseStatus(STATUS_V2).staged).toBe(4)
+  expect(parseChanges(STATUS_V2)).toEqual([
+    { path: 'hooks/staged one.ts', code: 'M', isStaged: true },
+    { path: 'hooks/register.tsx', code: 'M', isStaged: false },
+    { path: 'both.ts', code: 'M', isStaged: true },
+    { path: 'new-added.ts', code: 'A', isStaged: true },
+    { path: 'gone.ts', code: 'D', isStaged: false },
+    { path: 'renamed.ts', from: 'old.ts', code: 'R', isStaged: true },
+    { path: 'untracked.md', code: 'A', isStaged: false },
+    { path: 'conflict.ts', code: 'U', isStaged: false },
+  ])
+  expect(parseChanges('# branch.head main\n')).toEqual([])
 })

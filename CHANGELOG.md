@@ -8,11 +8,19 @@ Mudanças do Git Graph (`gitgraph`) por versão, no formato [Keep a Changelog](h
 
 - Busca por hash **e** por texto: o mesmo campo acha o commit pelo começo do hash, pela mensagem ou pelo autor (sem diferenciar maiúsculas). Com vários resultados, o campo fica aberto com o termo e o toast diz `Match 2/5`; buscar de novo vai para o próximo, em loop. Sem resultado entre os commits carregados, sugere **Load more**.
 - ↑/↓ no badge de cada branch local publicada: quantos commits ela está à frente e atrás do remoto dela (`feat` + `origin ↑2 ↓1`; com o remoto em outro commit, só `↑2`). A conta vem de um `git for-each-ref` rodado junto com o load, não no poll de 5 s (contar é caro), e é refeita a cada push, pull ou commit, que já recarregam o painel.
-- Stash pelo grafo: clicar na linha **Uncommitted changes (N)** abre um painel com **Stash message** (opcional) e **stash**, que roda `git stash push --include-untracked` (arquivos novos, ainda fora do git, entram também); sem mensagem, o git dá o nome.
+- Ações das mudanças não commitadas, como as de uma branch: clicar na linha **Uncommitted changes (N)** abre a lista (no terminal docked, numa modal; nas outras superfícies, sob a linha) com **Commit changes…** e **Stash changes…**, e cada uma abre a sua própria modal; **cancel** (ou Esc) volta para a lista. **Stash changes…** pede uma mensagem opcional e roda `git stash push --include-untracked` (arquivos novos entram também); sem mensagem, o git dá o nome.
+- **Commit changes…** em duas etapas. Primeiro os arquivos: cada mudança com o que mudou (**M** modificado, **A** novo, **D** apagado, **R** renomeado) e um ☑/☐, e **Stage all changes** para marcar ou desmarcar todos (começa tudo marcado); **Next** segue. Depois a mensagem: o Claude (haiku) lê o diff **só dos arquivos escolhidos** e os últimos commits do repo e escreve no estilo deles; ela aparece inteira, sem edição, numa modal mais larga. **Commit** (o Enter) commita só esses arquivos (`git add -A -- <arquivos>` + `git commit -- <arquivos>`, o resto continua como mudança), **✨ suggest again** pede outra, **← files** volta à escolha e **cancel** descarta tudo.
+- `Staged (N)` em vermelho ao lado de **Uncommitted changes (N)**: quantos arquivos já estão em stage. Vem do mesmo `git status` do load.
 
 ### Alterado
 
+- Botões de ação centralizados no rodapé de todas as modais (commit, stash, push, delete, rename, Git Flow, aviso de erro).
+- **Enter** aplica a ação principal das modais: o foco já começa no botão de **push**, **delete**, **finish**, **continue** e **update** (e no **Dismiss** de um erro); nas modais com campo (commit, rename, nome da branch), o Enter envia o campo.
 - Header sem o `⎇`: a branch atual aparece como o badge dela no grafo, com o ✔ antes do nome, em negrito e na cor da lane (HEAD destacado: o hash curto).
+
+### Corrigido
+
+- `Esc` (e `Enter`) nas modais: ao abrir uma modal, o painel pede o teclado (se o prompt estiver vazio), porque o `Esc` só chega à modal com o painel focado; antes, uma modal aberta pelo clique num badge deixava o teclado no prompt e o `Esc` não fazia nada. Depois de um `Esc` que volta de um formulário para a lista, o painel pede o teclado de novo.
 
 ## [1.7.2] - 2026-11-19
 

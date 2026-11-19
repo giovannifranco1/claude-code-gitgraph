@@ -25,6 +25,8 @@ type Fake = {
   merged?: string
   // feat's track against its upstream (`ahead 2, behind 1`).
   featTrack?: string
+  // The status's change lines (porcelain v2), in place of the one unstaged `src/a.ts`.
+  statusLines?: string
   // The commit HEAD is on (M by default), as after a reset.
   head?: string
   remotes?: string[]
@@ -40,6 +42,8 @@ type Fake = {
   isConflicted?: boolean
   // Each pane open's `closeOnEscape`, in order.
   opens?: (true | undefined)[]
+  // Each pane open's `focus`, in order.
+  focuses?: (true | undefined)[]
   // A push or a fetch waits on this, so a test can look at the pane while the action runs.
   hold?: Promise<void>
   // `-c` settings a call carried, as `<verb>: <key=value>`.
@@ -132,7 +136,7 @@ function answer(fake: Fake, raw: readonly string[], cwd = '.') {
     case 'log':
       return ok(logOf(fake))
     case 'status':
-      return ok(`# branch.oid ${fake.head ?? M}\n# branch.head ${fake.branch ?? 'main'}\n${fake.sync ?? ''}1 .M N... 100644 100644 100644 x y src/a.ts\n${fake.isConflicted ? 'u UU N... 100644 100644 100644 100644 a b c src/b.ts\n' : ''}`)
+      return ok(`# branch.oid ${fake.head ?? M}\n# branch.head ${fake.branch ?? 'main'}\n${fake.sync ?? ''}${fake.statusLines ?? '1 .M N... 100644 100644 100644 x y src/a.ts\n'}${fake.isConflicted ? 'u UU N... 100644 100644 100644 100644 a b c src/b.ts\n' : ''}`)
     case 'flow': {
       const cli = fake.flow ?? 'next'
       if (cli === 'none') return { ...fail("git: 'flow' is not a git command."), exitCode: 1 }
@@ -174,6 +178,7 @@ async function setup($: Engine, on: On, fake: Fake, copied: string[] = [], toast
   on('command.register', () => ({ value: { command: 'gitgraph' } }))
   on('ui.open', (_, e) => {
     fake.opens?.push(e.closeOnEscape)
+    fake.focuses?.push(e.focus)
     return { value: { isPlaced: true } }
   })
   on('ui.toast', (_, e) => {
@@ -377,15 +382,19 @@ test('CL-02 the changelog icon swaps the graph for the versions, the installed o
 test('ESC-01 the pane takes Escape as its close only while a modal is open', async ($, on) => {
   mockFiles(on, { '/CHANGELOG.md': CHANGELOG, '/.claude-plugin/plugin.json': '{ "version": "1.5.1" }' })
   const opens: (true | undefined)[] = []
-  await setup($, on, newFake({ opens }))
+  const focuses: (true | undefined)[] = []
+  await setup($, on, newFake({ opens, focuses }))
   const ui = await $.ui.mount(pane('terminal'))
   expect(opens).toEqual([undefined])
   await ui.press({ key: B })
   expect(opens).toEqual([undefined])
   await ui.press({ key: 'refmenu-0' })
   expect(opens.at(-1)).toBe(true)
+  // the pane asks for the keyboard with it, so Escape (and Enter) reach the dialog
+  expect(focuses.at(-1)).toBe(true)
   await ui.press({ key: 'menu-close' })
   expect(opens.at(-1)).toBeUndefined()
+  expect(focuses.at(-1)).toBeUndefined()
   await ui.press({ key: 'changelog' })
   expect(opens.at(-1)).toBe(true)
   await ui.press({ key: 'changelog-back' })
@@ -426,14 +435,156 @@ test('ST-01 the uncommitted changes row opens a stash, with an optional message,
   await ui.press({ key: 'uncommitted' })
   // no `git show` for a commit that is not one
   expect(fake.calls.some(c => c[1] === 'show' && c.includes('*'))).toBe(false)
+  // the actions first; the stash form only once picked
+  expect(await ui.find({ type: 'Input', key: 'stash-message' })).toBeUndefined()
+  await ui.press({ key: 'uncommitted-stash' })
   expect(await ui.find({ type: 'Input', key: 'stash-message' })).toBeDefined()
   await ui.input({ key: 'stash-message', text: 'wip: header' })
   expect(callOf(fake, ['stash', 'push', '--include-untracked', '-m', 'wip: header'])).toBeGreaterThan(-1)
   expect(toasts).toContain('Stashed the changes')
   // again, no message: git names the stash itself
   await ui.press({ key: 'uncommitted' })
+  await ui.press({ key: 'uncommitted-stash' })
   await ui.input({ key: 'stash-message', text: '' })
   expect(callOf(fake, ['stash', 'push', '--include-untracked'])).toBeGreaterThan(-1)
+  await ui.unmount()
+})
+
+test('CM-01 the uncommitted changes commit with the message Claude suggests from the diff, shown whole, not edited', async ($, on) => {
+  const toasts: string[] = []
+  const asked: { model: string; prompt: string }[] = []
+  on('model.complete', (_, e) => {
+    asked.push({ model: e.model, prompt: e.prompt })
+    return { value: { isAnswered: true, text: '```\nfeat(graph): add the commit box\n```', usage: {} } } as never
+  })
+  const fake = newFake()
+  await setup($, on, fake, [], toasts)
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: 'uncommitted' })
+  // the files first; Next asks Claude at once
+  await ui.press({ key: 'uncommitted-commit' })
+  expect(asked).toHaveLength(0)
+  await ui.press({ key: 'commit-next' })
+  expect(asked).toHaveLength(1)
+  // nothing is committed by a suggestion: it is shown, as text, no field to edit
+  expect(asked[0]?.model).toBe('haiku')
+  expect(asked[0]?.prompt).toContain('Recent commit subjects')
+  expect(fake.calls.some(c => c[1] === 'diff' && c.includes('HEAD'))).toBe(true)
+  expect(await ui.find({ type: 'Input', key: 'commit-message' })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: 'feat(graph): add the commit box' })).toBeDefined()
+  expect(fake.calls.some(c => c[1] === 'commit')).toBe(false)
+  // another version on request
+  expect((await ui.find({ type: 'Button', key: 'commit-suggest' }))?.text).toContain('suggest again')
+  await ui.press({ key: 'commit-suggest' })
+  expect(asked).toHaveLength(2)
+  // cancel keeps nothing: opened again, Claude writes a new one
+  await ui.press({ key: 'commit-cancel' })
+  await ui.press({ key: 'uncommitted-commit' })
+  await ui.press({ key: 'commit-next' })
+  expect(asked).toHaveLength(3)
+  // Commit, the main button (Enter): every change, with the message shown
+  expect((await ui.find({ type: 'Button', key: 'commit-run' }))?.props.autoFocus).toBe(true)
+  await ui.press({ key: 'commit-run' })
+  expect(callOf(fake, ['add', '-A', '--', 'src/a.ts'])).toBeGreaterThan(-1)
+  expect(callOf(fake, ['commit', '-m', 'feat(graph): add the commit box', '--', 'src/a.ts'])).toBeGreaterThan(callOf(fake, ['add', '-A', '--', 'src/a.ts']))
+  expect(toasts).toContain('Committed: feat(graph): add the commit box')
+  await ui.unmount()
+})
+
+test('CM-01 without a suggestion there is nothing to commit, only to ask again', async ($, on) => {
+  const toasts: string[] = []
+  on('model.complete', () => ({ value: { isAnswered: false, reason: 'empty-reply' } }) as never)
+  const fake = newFake()
+  await setup($, on, fake, [], toasts)
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: 'uncommitted' })
+  await ui.press({ key: 'uncommitted-commit' })
+  await ui.press({ key: 'commit-next' })
+  expect(toasts).toContain('Claude could not suggest a message')
+  await ui.press({ key: 'commit-run' })
+  expect(fake.calls.some(c => c[1] === 'commit')).toBe(false)
+  expect(toasts.at(-1)).toMatch(/suggest again/)
+  await ui.unmount()
+})
+
+test('CM-02 the commit picks its files first, all at once or one by one; the row counts the staged in red', async ($, on) => {
+  const asked: string[] = []
+  on('model.complete', (_, e) => {
+    asked.push(e.prompt)
+    return { value: { isAnswered: true, text: 'fix(graph): x', usage: {} } } as never
+  })
+  const statusLines = [
+    '1 M. N... 100644 100644 100644 a1 b1 staged.ts',
+    '1 .M N... 100644 100644 100644 a2 b2 edited.ts',
+    '? new.md',
+    '',
+  ].join('\n')
+  const fake = newFake({ statusLines })
+  await setup($, on, fake)
+  const ui = await $.ui.mount(pane('terminal'))
+  const staged = await ui.find({ type: 'Text', text: /^Staged \(1\)$/ })
+  expect(staged?.props.color).toBe('error')
+  await ui.press({ key: 'uncommitted' })
+  await ui.press({ key: 'uncommitted-commit' })
+  // every file listed with what changed, all chosen to start with
+  const file = async (i: number) => (await ui.find({ type: 'Button', key: `commit-file-${i}` }))?.text ?? ''
+  expect(await file(0)).toMatch(/☑ M +staged\.ts/)
+  expect(await file(1)).toMatch(/☑ M +edited\.ts/)
+  expect(await file(2)).toMatch(/☑ A +new\.md/)
+  expect((await ui.find({ type: 'Button', key: 'commit-all' }))?.text).toMatch(/☑ Stage all changes \(3\)/)
+  // all off: Next does nothing; one back on, then another
+  await ui.press({ key: 'commit-all' })
+  expect(await file(0)).toMatch(/☐/)
+  await ui.press({ key: 'commit-next' })
+  expect(asked).toHaveLength(0)
+  await ui.press({ key: 'commit-file-1' })
+  await ui.press({ key: 'commit-file-2' })
+  expect((await ui.find({ type: 'Button', key: 'commit-all' }))?.text).toMatch(/☐ Stage all changes/)
+  await ui.press({ key: 'commit-next' })
+  // Claude reads those files alone
+  expect(asked).toHaveLength(1)
+  expect(fake.calls.some(c => c.join(' ') === 'git diff HEAD -- edited.ts new.md')).toBe(true)
+  expect(asked[0]).toContain('new.md')
+  // back to the files, the choice kept; then the commit, of those files alone
+  await ui.press({ key: 'commit-back' })
+  expect(await file(0)).toMatch(/☐/)
+  expect(await file(1)).toMatch(/☑/)
+  await ui.press({ key: 'commit-next' })
+  await ui.press({ key: 'commit-run' })
+  expect(callOf(fake, ['add', '-A', '--', 'edited.ts', 'new.md'])).toBeGreaterThan(-1)
+  expect(callOf(fake, ['commit', '-m', 'fix(graph): x', '--', 'edited.ts', 'new.md'])).toBeGreaterThan(-1)
+  await ui.unmount()
+})
+
+test('ST-02 the uncommitted changes open their actions in a dialog, each action its own dialog, as a ref menu', async ($, on) => {
+  await setup($, on, newFake())
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: 'uncommitted' })
+  expect(await ui.find({ key: 'uncommitted-dialog' })).toBeDefined()
+  // the actions, no form yet
+  expect(await ui.find({ type: 'Button', key: 'uncommitted-commit' })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'uncommitted-stash' })).toBeDefined()
+  expect(await ui.find({ type: 'Input', key: 'commit-message' })).toBeUndefined()
+  // commit opens its own dialog, in place of the list; cancel goes back to the list
+  await ui.press({ key: 'uncommitted-commit' })
+  await ui.press({ key: 'commit-next' })
+  expect(await ui.find({ key: 'commit-message' })).toBeDefined()
+  expect(await ui.find({ type: 'Input', key: 'stash-message' })).toBeUndefined()
+  expect(await ui.find({ type: 'Button', key: 'uncommitted-stash' })).toBeUndefined()
+  // the message whole: three lines of text in a wider dialog, as tall as they need
+  // (title, blank, the message's 3, blank, the buttons, and the border's 2)
+  const box = await ui.find({ key: 'uncommitted-dialog' })
+  expect(box?.props.height).toBe(1 + 1 + 3 + 1 + 1 + 2)
+  expect(box?.props.width).toBeGreaterThan(60)
+  await ui.press({ key: 'commit-cancel' })
+  expect(await ui.find({ type: 'Button', key: 'uncommitted-stash' })).toBeDefined()
+  // stash too
+  await ui.press({ key: 'uncommitted-stash' })
+  expect(await ui.find({ type: 'Input', key: 'stash-message' })).toBeDefined()
+  expect(await ui.find({ key: 'commit-message' })).toBeUndefined()
+  await ui.press({ key: 'stash-cancel' })
+  await ui.press({ key: 'uncommitted-close' })
+  expect(await ui.find({ key: 'uncommitted-dialog' })).toBeUndefined()
   await ui.unmount()
 })
 
@@ -614,6 +765,34 @@ test('GG-11 pills are rounded with a Nerd Font and fall back to text pills witho
   expect(await vs.find({ type: 'Text', text: /v0\.1/ })).toBeDefined()
   expect(await vs.find({ type: 'Text', text: /^\ue0b4/ })).toBeDefined()
   await vs.unmount()
+})
+
+test('EN-01 a dialog starts its focus on its main button, so Enter runs it: push, delete', async ($, on) => {
+  await setup($, on, newFake())
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.pointer({ type: 'down', x: 1, y: 0, button: 'right', in: `pill:${B}:0` })
+  await ui.press({ key: 'menu-push' })
+  expect((await ui.find({ type: 'Button', key: 'push-run' }))?.props.autoFocus).toBe(true)
+  await ui.press({ key: 'push-cancel' })
+  await ui.press({ key: 'menu-delete' })
+  expect((await ui.find({ type: 'Button', key: 'menu-delete-run' }))?.props.autoFocus).toBe(true)
+  await ui.unmount()
+})
+
+test('DL-01 a dialog centers its buttons: push, the ref menu, the uncommitted changes', async ($, on) => {
+  await setup($, on, newFake())
+  const ui = await $.ui.mount(pane('terminal'))
+  const centered = async () => (await ui.find({ key: 'dialog-actions' }))?.props.justifyContent
+  await ui.pointer({ type: 'down', x: 1, y: 0, button: 'right', in: `pill:${B}:0` })
+  expect(await centered()).toBe('center')
+  await ui.press({ key: 'menu-push' })
+  expect(await centered()).toBe('center')
+  await ui.press({ key: 'push-cancel' })
+  await ui.press({ key: 'menu-close' })
+  await ui.press({ key: 'uncommitted' })
+  await ui.press({ key: 'uncommitted-stash' })
+  expect(await centered()).toBe('center')
+  await ui.unmount()
 })
 
 test('GG-12 a right click on a pill opens its branch menu; push asks for the remote, then runs', async ($, on) => {

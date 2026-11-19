@@ -1,4 +1,4 @@
-import type { Commit, CommitDetail, FileStat, Ref, Track } from '../types'
+import type { Change, Commit, CommitDetail, FileStat, Ref, Track } from '../types'
 import { branchOf } from './badges'
 
 // Every ref with its commit, `<oid> <refname>` a line: what the poll compares, and the format the
@@ -54,7 +54,7 @@ export function parseLog(stdout: string, remotes?: string[]): Commit[] {
 // A `# branch.<name> <value>` header of `git status --porcelain=v2 --branch`; '' when absent.
 const statusHeader = (stdout: string, name: string) => stdout.match(new RegExp(`^# branch\\.${name} (.+)$`, 'm'))?.[1] ?? ''
 
-export function parseStatus(stdout: string): { head: string; branch: string; dirty: number; conflicts: number } {
+export function parseStatus(stdout: string): { head: string; branch: string; dirty: number; staged: number; conflicts: number } {
   const header = (name: string) => statusHeader(stdout, name)
   const head = header('oid')
   const branch = header('head')
@@ -62,8 +62,30 @@ export function parseStatus(stdout: string): { head: string; branch: string; dir
     head: head === '(initial)' ? '' : head,
     branch: branch === '(detached)' ? '' : branch,
     dirty: stdout.split('\n').filter(l => l !== '' && !l.startsWith('#')).length,
+    staged: parseChanges(stdout).filter(c => c.isStaged).length,
     conflicts: stdout.split('\n').filter(l => l.startsWith('u ')).length,
   }
+}
+
+// The uncommitted changes, file by file, from `git status --porcelain=v2`: `1 XY … path` (X the
+// index, Y the worktree; `.` unchanged), `2 XY … score path<TAB>from` (renamed), `? path`
+// (untracked: new), `u XY … path` (unmerged).
+export function parseChanges(stdout: string): Change[] {
+  return stdout.split('\n').flatMap((line): Change[] => {
+    const fields = line.split(' ')
+    const [kind = '', xy = ''] = fields
+    const x = xy[0] ?? '.'
+    const y = xy[1] ?? '.'
+    if (kind === '?') return [{ path: line.slice(2), code: 'A', isStaged: false }]
+    if (kind === 'u') return [{ path: fields.slice(10).join(' '), code: 'U', isStaged: false }]
+    if (kind === '2') {
+      const [path = '', from = ''] = fields.slice(9).join(' ').split('\t')
+      return [{ path, from, code: 'R', isStaged: x !== '.' }]
+    }
+    if (kind !== '1') return []
+    const code = x === 'A' ? 'A' : x === 'D' || y === 'D' ? 'D' : 'M'
+    return [{ path: fields.slice(8).join(' '), code, isStaged: x !== '.' }]
+  })
 }
 
 // The checked-out branch's upstream remote and the commits it is ahead of and behind it, from

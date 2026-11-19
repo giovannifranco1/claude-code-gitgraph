@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { ClientElements, Elements, EngineInterface, ProcessRunResult, Register, RenderChildren, RenderSurface } from 'claude-code'
 
-import type { Badge, BadgeKind, BadgeStyle, Cell, Changelog, Columns, CommitDetail, ConfigScope, FileStat, FlowConfig, FlowConflict, FlowInfo, FlowInitForm, FlowKind, FlowOptions, FlowTopic, FlowView, Graph, GraphRow, Ref, RepoSettings, Repos, Screen, View } from '../types'
+import type { Badge, BadgeKind, BadgeStyle, Cell, Change, Changelog, Columns, CommitDetail, ConfigScope, FileStat, FlowConfig, FlowConflict, FlowInfo, FlowInitForm, FlowKind, FlowOptions, FlowTopic, FlowView, Graph, GraphRow, Ref, RepoSettings, Repos, Screen, View } from '../types'
 import { parseChangelog, versionOf } from './changelog'
 import { CLOSED, dismissModal, FLOW_CLOSED, hasModal } from './dismiss'
 import { badgeParts, badgesOf, branchOf, diffBar, fitBadges, syncText, withSync } from './badges'
@@ -9,9 +9,10 @@ import { isBranchNameCandidate } from './detect'
 import { absTime, fitGraph, HASH_W, relTime, short, truncate, truncateMiddle } from './format'
 import { layout } from './lanes'
 import { clampTop, findCommit, isHashQuery, topOf, visibleRange, widestIn, windowAt, wrapRows } from './virtual'
-import { DETAIL_FORMAT, localsOf, LOG_FORMAT, mergedArgs, parseMerged, parseTracks, REFS_ARGS, TRACK_ARGS, parseDetail, parseLog, parseStatus, parseSync, remotesOf, UNCOMMITTED, withUncommitted } from './log'
+import { DETAIL_FORMAT, localsOf, LOG_FORMAT, mergedArgs, parseChanges, parseMerged, parseTracks, REFS_ARGS, TRACK_ARGS, parseDetail, parseLog, parseStatus, parseSync, remotesOf, UNCOMMITTED, withUncommitted } from './log'
 import { basesOf, defaultTagMessage, finishArgs, mainOf, finishPushArgs, flowArgs, flowCliOf, nextVersion, parseFlowConfig, resumeArgs, topicFor, topicOf, typeOf } from './flow'
 import { BRANCH_REFS_ARGS, branchNamesOf, DEFAULT_FORM, initArgs, initFormError, initFormFor, staleBaseArgs, trimForm } from './flowinit'
+import { cleanMessage, COMMIT_SYSTEM, commitPrompt, commitRuns, contextArgs, newFiles } from './commit'
 import { checkoutArgs, defaultPushRemotes, deleteBranchArgs, type MenuItem, menuFor, menuGroups, pushRuns, renameArgs, stashArgs } from './menu'
 import { drawPill, type PillProps, type PillSegment, shade } from './pilldraw'
 import { BRANCH_ARGS, FIND_ARGS, UPSTREAM_ARGS, parseBranch, parseUpstream, parseRepos, pickActive, branchColumn, repoLabel } from './repos'
@@ -83,7 +84,7 @@ const NERD_FONT_CHECK = 'ls ~/Library/Fonts /Library/Fonts ~/.local/share/fonts 
 
 const DEFAULT_FLOW: FlowView = { starting: null, finishing: null, opts: { isNoFf: true, isPush: true, isKeep: true }, tagMessage: null, conflict: null, init: null, confirming: null, isMenuOpen: false }
 const EMPTY_GRAPH: Graph = { status: 'idle', rows: [], head: '', branch: '', conflicts: 0, remotes: [], hasMore: false }
-const DEFAULT_VIEW: View = { scope: 'all', limit: PAGE, selected: null, confirm: null, menu: null, isRenaming: false, isDeleting: false, isForce: false, push: null, running: null, screen: 'graph', configScope: 'local', editingRemote: null, isAddingRemote: false, remoteDraft: '', scrollTo: null, isSearching: false, search: '', refresh: 'idle', isOpen: false, flow: DEFAULT_FLOW, isActionsOpen: false, notice: null }
+const DEFAULT_VIEW: View = { scope: 'all', limit: PAGE, selected: null, confirm: null, menu: null, isRenaming: false, isDeleting: false, isForce: false, push: null, running: null, screen: 'graph', configScope: 'local', editingRemote: null, isAddingRemote: false, remoteDraft: '', scrollTo: null, isSearching: false, search: '', commitDraft: '', isSuggesting: false, uncommittedForm: null, commitStep: 'files', commitFiles: [], refresh: 'idle', isOpen: false, flow: DEFAULT_FLOW, isActionsOpen: false, notice: null }
 
 const graphState = atom({ plugin: 'gitgraph', key: 'graph' } as const, EMPTY_GRAPH)
 // Bumped with every graph write: renders read this small number and keep the graph
@@ -91,7 +92,7 @@ const graphState = atom({ plugin: 'gitgraph', key: 'graph' } as const, EMPTY_GRA
 const versionState = atom({ plugin: 'gitgraph', key: 'graphVersion' } as const, 0)
 // Tagged with the shape of View: a view an older version kept (without fields added
 // since) reads as absent after an update, instead of breaking the render.
-const viewState = atom({ plugin: 'gitgraph', key: 'view' } as const, DEFAULT_VIEW, { shape: 'view-13' })
+const viewState = atom({ plugin: 'gitgraph', key: 'view' } as const, DEFAULT_VIEW, { shape: 'view-16' })
 const detailState = atom({ plugin: 'gitgraph', key: 'detail' } as const, null as CommitDetail | null)
 const roundState = atom({ plugin: 'gitgraph', key: 'isRound' } as const, false)
 const nerdState = atom({ plugin: 'gitgraph', key: 'hasNerdFont' } as const, false)
@@ -212,7 +213,9 @@ async function setView($: EngineInterface, change: (v: View) => View): Promise<V
 }
 
 // Opens the pane (or sets its manners again): Escape is its close while a modal is open.
-const openPane = ($: EngineInterface, view: View) => $.ui.open({ id: PANE, title: TITLE, ...(hasModal(view) && { closeOnEscape: true }) })
+// With a modal it asks for the keyboard too (taken only over an idle, empty prompt): Escape
+// reaches it as the pane's close only while the pane holds the keys, and Enter its main button.
+const openPane = ($: EngineInterface, view: View) => $.ui.open({ id: PANE, title: TITLE, ...(hasModal(view) && { closeOnEscape: true, focus: true }) })
 
 async function setGraph($: EngineInterface, change: (g: Graph) => Graph): Promise<void> {
   const graph = await update($, graphState, change)
@@ -251,7 +254,7 @@ async function load($: EngineInterface, known?: RepoState): Promise<void> {
       await setGraph($, (): Graph => ({ ...EMPTY_GRAPH, status: 'no-repo' }))
       return
     }
-    const { head, branch, dirty, conflicts } = parseStatus(status.stdout)
+    const { head, branch, dirty, staged, conflicts } = parseStatus(status.stdout)
     const remotes = remotesOf(refs.stdout)
     const locals = localsOf(refs.stdout)
     // The remotes merged into a base: needs the branches the refs name, so it runs after them,
@@ -281,6 +284,8 @@ async function load($: EngineInterface, known?: RepoState): Promise<void> {
       merged,
       mergedKey,
       tracks: track.exitCode === 0 ? parseTracks(track.stdout) : {},
+      changes: parseChanges(status.stdout),
+      staged,
       sync: parseSync(status.stdout),
       hasMore: commits.length > view.limit,
     }))
@@ -317,6 +322,69 @@ async function select($: EngineInterface, hash: string): Promise<void> {
 async function stashChanges($: EngineInterface, message: string): Promise<void> {
   await setView($, v => ({ ...v, selected: null }))
   await runAction($, stashArgs(message), 'Stashed the changes')
+}
+
+// Commits every uncommitted change with the message as reviewed; an empty one commits nothing.
+// The uncommitted changes picked for the commit, as the graph last read them.
+async function pickedChanges($: EngineInterface): Promise<Change[]> {
+  const [graph, view] = await Promise.all([readGraph($), read($, viewState)])
+  return (graph.changes ?? []).filter(c => view.commitFiles.includes(c.path))
+}
+
+// Commits the picked files alone with the message shown; none, or no message, commits nothing.
+async function commitChanges($: EngineInterface, message: string): Promise<void> {
+  const text = message.trim()
+  const files = await pickedChanges($)
+  if (!text || !files.length) {
+    $.ui.toast(files.length ? 'No message to commit yet: ✨ suggest again' : 'Pick a file to commit')
+    return
+  }
+  await setView($, v => ({ ...v, selected: null, commitDraft: '' }))
+  await runActions($, commitRuns(text, files), `Committed: ${text}`, 'Committing…')
+}
+
+// The files step's Next: on to the message, which Claude writes at once.
+async function commitNext($: EngineInterface): Promise<void> {
+  if (!(await pickedChanges($)).length) {
+    $.ui.toast('Pick a file to commit')
+    return
+  }
+  await setView($, v => ({ ...v, commitStep: 'message', commitDraft: '' }))
+  await suggestCommit($)
+}
+
+// Picks a file, or (none given) every file or none: all of them on unless they all are.
+async function pickFile($: EngineInterface, path?: string): Promise<void> {
+  const all = ((await readGraph($)).changes ?? []).map(c => c.path)
+  await setView($, v => {
+    if (path === undefined) return { ...v, commitFiles: v.commitFiles.length === all.length ? [] : all }
+    const files = v.commitFiles.includes(path) ? v.commitFiles.filter(p => p !== path) : [...v.commitFiles, path]
+    return { ...v, commitFiles: all.filter(p => files.includes(p)) }
+  })
+}
+
+// Claude reads the changes and the recent subjects and writes a message into the field, to be
+// reviewed there: a suggestion commits nothing.
+async function suggestCommit($: EngineInterface): Promise<void> {
+  if ((await read($, viewState)).isSuggesting) return
+  await setView($, v => ({ ...v, isSuggesting: true }))
+  try {
+    const files = await pickedChanges($)
+    const args = contextArgs(files)
+    const [stat, diff, log] = await Promise.all([args.stat, args.diff, args.log].map(a => git($, a)))
+    const reply = await $.model.complete({
+      model: 'haiku',
+      system: COMMIT_SYSTEM,
+      prompt: commitPrompt({ stat: stat?.stdout ?? '', diff: diff?.stdout ?? '', untracked: newFiles(files), log: log?.stdout ?? '' }),
+      maxTokens: 200,
+    })
+    const message = reply.isAnswered ? cleanMessage(reply.text) : ''
+    if (!message) $.ui.toast('Claude could not suggest a message')
+    await setView($, v => ({ ...v, isSuggesting: false, commitDraft: message || v.commitDraft }))
+  } catch (err) {
+    $.ui.toast(`Claude could not suggest a message: ${firstLine(String(err))}`)
+    await setView($, v => ({ ...v, isSuggesting: false }))
+  }
 }
 
 async function loadDetail($: EngineInterface, hash: string): Promise<void> {
@@ -881,7 +949,9 @@ function renderRow($: EngineInterface, ctx: Ctx, { commit, cells }: GraphRow) {
           {commit.subject}
         </Text>
       </Button>,
-    ])
+      // How many of them are staged, beside it in red.
+      ...(ctx.graph.staged ? [<Text color="error">{`Staged (${ctx.graph.staged})`}</Text>] : []),
+    ], 2)
   const lane = laneColor(cells)
   const meta = metaOf(ctx, commit.author, commit.hash)
   // The first pill may fill the Description column; the others get what is left once the
@@ -996,7 +1066,7 @@ function pushParts($: EngineInterface, ctx: Ctx, badge: Badge, item: MenuItem): 
       ctx,
       [
         chosen.length ? (
-          <Button key="push-run" variant="primary" onPress={() =>
+          <Button key="push-run" variant="primary" autoFocus onPress={() =>
             runActions(
               $,
               pushRuns(item, chosen),
@@ -1107,8 +1177,8 @@ function entryList(ctx: Ctx, prefix: string, groups: ListItem[][]): RenderChildr
 const framedWidth = ({ cols, graphWidth }: Ctx) => cols - graphWidth - 1 - 4
 
 // A framed box exactly `rows.length + 2` rows tall: the border, then one row each.
-function framed({ els: { Box } }: Ctx, color: string, indent: number, rows: RenderChildren[]) {
-  const height = rows.length + 2
+function framed({ els: { Box } }: Ctx, color: string, indent: number, rows: RenderChildren[], extraRows = 0) {
+  const height = rows.length + extraRows + 2
   return {
     node: (
       <Box flexDirection="column" borderStyle="round" borderColor={color} paddingX={1} marginLeft={indent} height={height} overflow="hidden" flexShrink={0}>
@@ -1209,7 +1279,7 @@ function menuFormDialog($: EngineInterface, ctx: Ctx, badge: Badge): Omit<Dialog
       actions: line(
         ctx,
         [
-          <Button key="menu-delete-run" variant="primary" onPress={() => runAction($, deleteBranchArgs(branch, view.isForce), `Deleted ${branch}`)}>
+          <Button key="menu-delete-run" variant="primary" autoFocus onPress={() => runAction($, deleteBranchArgs(branch, view.isForce), `Deleted ${branch}`)}>
             Delete
           </Button>,
           closeButton(ctx, 'menu-delete-cancel', () => setView($, v => ({ ...v, isDeleting: false, isForce: false })), 'cancel'),
@@ -1376,14 +1446,143 @@ function renderDetail($: EngineInterface, ctx: Ctx, { commit, cells }: GraphRow)
   return framed(ctx, lane, ctx.graphWidth + 1, rows)
 }
 
-// The uncommitted changes' panel: stash them all, with an optional message.
+// Opens a form of the uncommitted changes (null: back to their actions). Leaving the commit form
+// keeps no message: each time it opens Claude writes a new one.
+async function openUncommittedForm($: EngineInterface, form: View['uncommittedForm']): Promise<void> {
+  // The commit lists the changes as they are now (the graph's may predate them, or this code),
+  // every one picked to start with.
+  if (form === 'commit') {
+    const status = await git($, STATUS_ARGS)
+    if (status.exitCode === 0) {
+      const { staged } = parseStatus(status.stdout)
+      await setGraph($, g => ({ ...g, changes: parseChanges(status.stdout), staged }))
+    }
+  }
+  const all = ((await readGraph($)).changes ?? []).map(c => c.path)
+  await setView($, v => ({ ...v, uncommittedForm: form, commitDraft: '', commitStep: 'files', commitFiles: all }))
+}
+
+// The uncommitted changes' actions, as a ref's menu lists its own: each opens its form.
+function uncommittedActions($: EngineInterface, ctx: Ctx): RenderChildren[] {
+  const item = (id: 'commit' | 'stash', label: string): ListItem => ({
+    id,
+    key: `uncommitted-${id}`,
+    entry: { label, isActive: ctx.view.uncommittedForm === id, onPress: () => openUncommittedForm($, id) },
+  })
+  return entryList(ctx, 'uncommitted', [[item('commit', 'Commit changes…'), item('stash', 'Stash changes…')]])
+}
+
+// The form an action opened: commit them all (the message written, or Claude's suggestion
+// reviewed) or stash them all (an optional message); cancel goes back to the actions.
+function uncommittedForm($: EngineInterface, ctx: Ctx): Omit<Dialog, 'color'> | null {
+  const { els: { Text, Button }, Input, view } = ctx
+  if (!Input || !view.uncommittedForm) return null
+  const cancel = (key: string) => line(ctx, closeButton(ctx, key, () => openUncommittedForm($, null), 'cancel'))
+  if (view.running) return { title: 'Uncommitted changes', rows: [renderRunning(ctx)], actions: line(ctx, null) }
+  if (view.uncommittedForm === 'stash')
+    return {
+      title: 'Stash changes',
+      rows: [line(ctx, <Input key="stash-message" label="Message" placeholder="optional" submitLabel="stash" autoFocus onSubmit={value => stashChanges($, value)} />)],
+      actions: cancel('stash-cancel'),
+    }
+  if (view.commitStep === 'files') return commitFilesForm($, ctx)
+  // Claude's message, whole (wrapped over a few lines of a wider dialog) and not edited: Commit
+  // (Enter) takes it as shown, ✨ asks for another, ← files goes back to the files.
+  const message = view.isSuggesting
+    ? line(ctx, [renderSpinner(ctx, 'suggest-spinner'), <Text color={MUTED}>Claude is writing a message…</Text>], 1)
+    : view.commitDraft
+      ? <Text wrap="wrap">{view.commitDraft}</Text>
+      : <Text color={MUTED}>No message yet: ✨ suggest again</Text>
+  return {
+    title: 'Commit changes',
+    width: COMMIT_DIALOG_W,
+    extraRows: COMMIT_ROWS - 1,
+    rows: [
+      <ctx.els.Box key="commit-message" height={COMMIT_ROWS} overflow="hidden" flexShrink={0} flexDirection="column">
+        {message}
+      </ctx.els.Box>,
+    ],
+    actions: line(
+      ctx,
+      [
+        <Button key="commit-run" variant="primary" autoFocus onPress={() => commitChanges($, view.commitDraft)}>
+          Commit
+        </Button>,
+        <Button key="commit-suggest" plain dimColor onPress={() => suggestCommit($)}>
+          ✨ suggest again
+        </Button>,
+        <Button key="commit-back" plain dimColor onPress={() => setView($, v => ({ ...v, commitStep: 'files', commitDraft: '' }))}>
+          ← files
+        </Button>,
+        closeButton(ctx, 'commit-cancel', () => openUncommittedForm($, null), 'cancel'),
+      ],
+      2,
+    ),
+  }
+}
+
+// The commit's first step: Stage all changes, then a line a file (picked or not, what changed);
+// past COMMIT_FILES of them the rest are counted, picked or not by Stage all. Next goes on.
+function commitFilesForm($: EngineInterface, ctx: Ctx): Omit<Dialog, 'color'> {
+  const { els: { Button, Text }, view, graph } = ctx
+  const changes = graph.changes ?? []
+  const box = (isOn: boolean) => (isOn ? '☑' : '☐')
+  const isAll = changes.length > 0 && view.commitFiles.length === changes.length
+  const shown = changes.slice(0, COMMIT_FILES)
+  const rows: RenderChildren[] = [
+    line(
+      ctx,
+      <Button key="commit-all" plain onPress={() => pickFile($)}>
+        {`${box(isAll)} Stage all changes (${changes.length})`}
+      </Button>,
+    ),
+    blank(ctx),
+    ...shown.map((c, i) =>
+      line(
+        ctx,
+        <Button key={`commit-file-${i}`} plain dimColor={!view.commitFiles.includes(c.path)} onPress={() => pickFile($, c.path)}>
+          {`${box(view.commitFiles.includes(c.path))} ${c.code}  ${c.from ? `${c.from} → ` : ''}${c.path}`}
+        </Button>,
+        0,
+        undefined,
+        `commit-file-row-${i}`,
+      ),
+    ),
+    ...(changes.length > shown.length ? [line(ctx, <Text color={MUTED}>{`… and ${changes.length - shown.length} more`}</Text>)] : []),
+  ]
+  return {
+    title: `Commit changes · ${view.commitFiles.length} of ${changes.length} files`,
+    width: COMMIT_DIALOG_W,
+    rows,
+    actions: line(
+      ctx,
+      [
+        <Button key="commit-next" variant="primary" autoFocus onPress={() => commitNext($)}>
+          Next
+        </Button>,
+        closeButton(ctx, 'commit-files-cancel', () => openUncommittedForm($, null), 'cancel'),
+      ],
+      2,
+    ),
+  }
+}
+
+// The uncommitted changes under their row where no dialog floats: the title, the actions, and
+// the form one opened under them.
 function renderStash($: EngineInterface, ctx: Ctx, title: string, lane: string) {
-  const { els: { Text }, Input, view } = ctx
-  const rows: RenderChildren[] = [line(ctx, <Text weight="bold">{title}</Text>), blank(ctx)]
-  if (view.running) rows.push(renderRunning(ctx))
-  else if (Input)
-    rows.push(line(ctx, <Input key="stash-message" label="Stash message" placeholder="optional" submitLabel="stash" autoFocus onSubmit={value => stashChanges($, value)} />))
-  return framed(ctx, lane, ctx.graphWidth + 1, rows)
+  const form = uncommittedForm($, ctx)
+  const rows: RenderChildren[] = [line(ctx, <ctx.els.Text weight="bold">{title}</ctx.els.Text>), blank(ctx), ...uncommittedActions($, ctx), ...(form ? [blank(ctx), ...form.rows, form.actions] : [])]
+  return framed(ctx, lane, ctx.graphWidth + 1, rows, form?.extraRows ?? 0)
+}
+
+// The uncommitted changes as a dialog on a docked terminal pane, as a ref's menu: the actions,
+// or in their place the form one opened. Close (or Escape) closes it.
+function uncommittedDialog($: EngineInterface, ctx: Ctx, { commit, cells }: GraphRow): Dialog {
+  const color = laneColor(cells)
+  const form = uncommittedForm($, ctx)
+  if (form) return { ...form, color }
+  const close = closeButton(ctx, 'uncommitted-close', () => setView($, v => ({ ...v, selected: null })))
+  return { title: commit.subject, rows: uncommittedActions($, ctx), actions: line(ctx, close), color }
 }
 
 // A screen's title, its way back to the graph, and a rule.
@@ -1580,7 +1779,7 @@ function conflictRows($: EngineInterface, ctx: Ctx, conflict: FlowConflict) {
     line(
       ctx,
       [
-        <Button key="flow-continue" variant="primary" onPress={() => runFlow($, [{ args: resumeArgs(conflict, '--continue') }], 'Continued ✓', 'Continuing…', conflict)}>
+        <Button key="flow-continue" variant="primary" autoFocus onPress={() => runFlow($, [{ args: resumeArgs(conflict, '--continue') }], 'Continued ✓', 'Continuing…', conflict)}>
           Continue
         </Button>,
         confirmButton($, ctx, 'flow-abort', 'flow-abort', 'Abort', () => runFlow($, [{ args: resumeArgs(conflict, '--abort') }], 'Aborted', 'Aborting…')),
@@ -1629,14 +1828,19 @@ const flowSummary = (config: FlowConfig) =>
   [config.bases.map(b => b.name).join(' · '), config.types.map(t => t.prefix).join(' ')].filter(Boolean).join(' · ')
 
 // A dialog: its title (a string drawn bold, or a node), body rows, buttons row and frame color.
-type Dialog = { title?: RenderChildren; rows: RenderChildren[]; actions: RenderChildren; color?: string }
+// `width`: the columns it wants, past the usual DIALOG_W (the pane's at most); `extraRows`: what its
+// rows take past one each (a field several lines tall).
+type Dialog = { title?: RenderChildren; rows: RenderChildren[]; actions: RenderChildren; color?: string; width?: number; extraRows?: number }
 
 // The dialog's rows: its title and a blank row (when it has one), its body, a blank row, its buttons.
+// Its buttons centered under the body, every dialog alike.
 const dialogRows = (ctx: Ctx, { title, rows, actions }: Dialog): RenderChildren[] => [
   ...(title === undefined ? [] : [line(ctx, typeof title === 'string' ? <ctx.els.Text weight="bold">{title}</ctx.els.Text> : title), blank(ctx)]),
   ...rows,
   blank(ctx),
-  actions,
+  <ctx.els.Box key="dialog-actions" height={1} overflow="hidden" flexDirection="row" justifyContent="center">
+    {actions}
+  </ctx.els.Box>,
 ]
 
 // A dialog's dim close (or cancel) button.
@@ -1682,7 +1886,7 @@ function flowDialog($: EngineInterface, ctx: Ctx): Dialog | null {
           : []),
       ],
       actions: actions(
-        <Button key="flow-finish-run" variant="primary" onPress={() => finishTopic($, finishing)}>
+        <Button key="flow-finish-run" variant="primary" autoFocus onPress={() => finishTopic($, finishing)}>
           Finish
         </Button>,
         'flow-finish-cancel',
@@ -1698,7 +1902,7 @@ function flowDialog($: EngineInterface, ctx: Ctx): Dialog | null {
       title: `${verb} ${topic.branch}`,
       rows: [line(ctx, <Text>{question}</Text>)],
       actions: actions(
-        <Button key="flow-confirm-run" variant="primary" onPress={() => updateTopic($, topic)}>
+        <Button key="flow-confirm-run" variant="primary" autoFocus onPress={() => updateTopic($, topic)}>
           {verb}
         </Button>,
         'flow-confirm-cancel',
@@ -1712,12 +1916,17 @@ function flowDialog($: EngineInterface, ctx: Ctx): Dialog | null {
 // commit's actions): framed, centered in the window above the footer, over a blank layer
 // so the rows beneath do not show through.
 const DIALOG_W = 60
+// The commit dialog: wider, its message field several lines tall, to show a message whole.
+const COMMIT_DIALOG_W = 96
+const COMMIT_ROWS = 3
+// The files the commit's first step lists at most; Stage all picks the rest too.
+const COMMIT_FILES = 12
 
 function renderDialog(ctx: Ctx, key: string, dialog: Dialog, top: number, room: number) {
   const { Box, Text } = ctx.els
   const rows = dialogRows(ctx, dialog)
-  const width = Math.max(20, Math.min(DIALOG_W, ctx.cols - 2))
-  const height = rows.length + 2
+  const width = Math.max(20, Math.min(dialog.width ?? DIALOG_W, ctx.cols - 2))
+  const height = rows.length + (dialog.extraRows ?? 0) + 2
   const left = Math.max(0, Math.floor((ctx.cols - width) / 2))
   return (
     <Box key={key} position="absolute" top={top + Math.max(0, Math.floor((room - height) / 2))} left={left} width={width} height={height} flexDirection="column">
@@ -1833,7 +2042,7 @@ function noticeDialog($: EngineInterface, ctx: Ctx, notice: NonNullable<View['no
       ? line(ctx, [renderSpinner(ctx, 'notice-spinner'), <Text>{notice.label}</Text>], 2, 'center')
       : line(ctx, <Text color="error">{notice.error}</Text>, 0, 'center')
   const dismiss = (
-    <Button key="notice-dismiss" onPress={() => setView($, v => ({ ...v, notice: null }))}>
+    <Button key="notice-dismiss" autoFocus onPress={() => setView($, v => ({ ...v, notice: null }))}>
       Dismiss
     </Button>
   )
@@ -1850,6 +2059,7 @@ function pinnedDialog($: EngineInterface, ctx: Ctx, menuRow: GraphRow | undefine
   if (flowBox) return { key: 'flow-dialog', dialog: flowBox }
   if (menuRow && view.menu) return { key: 'menu-dialog', dialog: menuDialog($, ctx, menuRow, view.menu.badge) }
   if (selectedRow && view.isActionsOpen && !view.running) return { key: 'actions-dialog', dialog: actionsDialog($, ctx, selectedRow) }
+  if (selectedRow?.commit.hash === UNCOMMITTED) return { key: 'uncommitted-dialog', dialog: uncommittedDialog($, ctx, selectedRow) }
   return null
 }
 
@@ -1863,7 +2073,9 @@ function layoutPane($: EngineInterface, ctx: Ctx, indexOf: Map<string, number>) 
   const menuRow = rowOf(view.menu?.hash)
   const menuBox = menuRow && view.menu && !ctx.isPinned ? renderMenu($, ctx, menuRow, view.menu.badge) : undefined
   const selectedRow = rowOf(view.selected)
-  const detailBox = selectedRow ? renderDetail($, ctx, selectedRow) : undefined
+  // On a docked terminal pane the uncommitted changes float as a dialog, not under their row.
+  const isUncommittedDialog = ctx.isPinned && selectedRow?.commit.hash === UNCOMMITTED
+  const detailBox = selectedRow && !isUncommittedDialog ? renderDetail($, ctx, selectedRow) : undefined
   const heights = graph.rows.map(r => 1 + (r === menuRow ? (menuBox?.height ?? 0) : 0) + (r === selectedRow ? (detailBox?.height ?? 0) : 0))
   // "Load more" is one row more at the end.
   if (graph.hasMore) heights.push(1)
@@ -2045,12 +2257,15 @@ export const register: Register = (on, options) => {
   // keeping the pane: no `next`.
   on('ui.close', { id: PANE }, async ($, e, next) => {
     let isDismissed = false
-    await setView($, v => {
+    const view = await setView($, v => {
       const dismissed = e.origin.kind === 'person' ? dismissModal(v) : null
       isDismissed = dismissed !== null
       return dismissed ?? { ...v, isOpen: false }
     })
-    return isDismissed ? { value: undefined } : next(e)
+    if (!isDismissed) return next(e)
+    // Escape handed the keys back: with a modal still open (a form back to its list), ask again.
+    if (hasModal(view)) await openPane($, view)
+    return { value: undefined }
   }).catch(($, e, next) => next(e))
 
   // A pill posts `{ button }`: a click opens its ref's menu (again, closes it); a second left
