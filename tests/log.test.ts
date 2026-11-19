@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { localsOf, mergedArgs, parseDetail, parseMerged, parseSync, parseLog, parseRefs, parseStatus, remotesOf, UNCOMMITTED, withUncommitted } from '../hooks/log'
+import { localsOf, mergedArgs, parseDetail, parseMerged, parseTracks, REFS_ARGS, TRACK_ARGS, parseSync, parseLog, parseRefs, parseStatus, remotesOf, UNCOMMITTED, withUncommitted } from '../hooks/log'
 
 const US = '\x1f'
 const RS = '\x1e'
@@ -107,7 +107,7 @@ test('FD-07 the upstream of the branch and how far it is ahead of and behind it,
 
 test('GG-24 merged remotes come from git, into any base that exists here', async () => {
   expect(mergedArgs(['main', 'master', 'develop', 'dev'], ['main', 'develop', 'feat'])).toEqual([
-    'for-each-ref', '--format=%(objectname) %(refname)', '--merged=refs/heads/main', '--merged=refs/heads/develop', 'refs/remotes',
+    ...REFS_ARGS, '--merged=refs/heads/main', '--merged=refs/heads/develop', 'refs/remotes',
   ])
   expect(mergedArgs(['main'], ['trunk'])).toBeNull()
 })
@@ -119,4 +119,12 @@ test('GG-24 a merged remote is dead; not a base, origin/HEAD, or one on a base t
   expect(parseMerged('', refs, ['main'])).toEqual([])
   // a remote branch merely ending in a base's name is not a base: its tip is no base tip
   expect(parseMerged('m1 refs/remotes/origin/feature/main\n', 'm1 refs/remotes/origin/feature/main\nz9 refs/heads/main\n', ['main'])).toEqual(['origin/feature/main'])
+})
+
+test('BS-01 each local branch is ahead of and behind its upstream, read on a load apart from the refs', async () => {
+  const track = ['feat\tahead 2, behind 1', 'main\t', 'fix\tbehind 3', 'old\tgone', ''].join('\n')
+  expect(parseTracks(track)).toEqual({ feat: { ahead: 2, behind: 1 }, fix: { ahead: 0, behind: 3 } })
+  // the poll's refs stay a plain list; the count is its own query
+  expect(REFS_ARGS).toEqual(['for-each-ref', '--format=%(objectname) %(refname)'])
+  expect(TRACK_ARGS).toEqual(['for-each-ref', '--format=%(refname:short)%09%(upstream:track,nobracket)', 'refs/heads'])
 })

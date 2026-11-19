@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { clampTop, findByHash, isHashQuery, topOf, visibleRange, widestIn, windowAt, wrapRows } from '../hooks/virtual'
+import { clampTop, findCommit, isHashQuery, topOf, visibleRange, widestIn, windowAt, wrapRows } from '../hooks/virtual'
 
 const ones = (n: number) => Array.from({ length: n }, () => 1)
 
@@ -21,13 +21,6 @@ test('GG-15 a tall expanded row counts with its whole height', async () => {
 test('GG-16 a hash search takes 4 to 40 hex digits only', async () => {
   for (const ok of ['abcd', 'ABCD12', 'f46e232', '0123456789abcdef0123456789abcdef01234567']) expect({ ok, v: isHashQuery(ok) }).toEqual({ ok, v: true })
   for (const bad of ['', 'abc', 'xyz1', '--all', 'HEAD', 'a b c d', '0'.repeat(41)]) expect({ bad, v: isHashQuery(bad) }).toEqual({ bad, v: false })
-})
-
-test('GG-16 a hash prefix finds the first loaded commit it starts', async () => {
-  const hashes = ['aaaa1111', 'f46e2320', 'f46e9999']
-  expect(findByHash(hashes, 'F46E')).toBe('f46e2320')
-  expect(findByHash(hashes, 'f46e99')).toBe('f46e9999')
-  expect(findByHash(hashes, 'dead')).toBeUndefined()
 })
 
 test('GF-01 bar items wrap onto the next row when the pane is too narrow', async () => {
@@ -59,4 +52,22 @@ test('GG-21 a scroll keeps the window inside the graph', async () => {
   expect(clampTop(7, 20, 5)).toBe(7)
   expect(clampTop(30, 20, 5)).toBe(15)
   expect(clampTop(4, 3, 5)).toBe(0)
+})
+
+test('SR-01 a search matches the hash prefix, the message or the author, the next one after the selected', async () => {
+  const c = (hash: string, subject: string, author: string) => ({ hash, subject, author })
+  const commits = [c('f46e2320', 'fix(pane): close on Escape', 'Ana'), c('a1b2c3d4', 'feat(graph): badges', 'Bia'), c('dead0001', 'fix(graph): colors', 'ana maria')]
+  expect(findCommit(commits, 'f46e')).toEqual({ hash: 'f46e2320', index: 1, count: 1 })
+  expect(findCommit(commits, 'BADGES')).toEqual({ hash: 'a1b2c3d4', index: 1, count: 1 })
+  // 'fix' is in two messages: the first, then the one after the selected, in a loop
+  expect(findCommit(commits, 'fix')).toEqual({ hash: 'f46e2320', index: 1, count: 2 })
+  expect(findCommit(commits, 'fix', 'f46e2320')).toEqual({ hash: 'dead0001', index: 2, count: 2 })
+  expect(findCommit(commits, 'fix', 'dead0001')).toEqual({ hash: 'f46e2320', index: 1, count: 2 })
+  // selected between matches: the next one below it
+  expect(findCommit(commits, 'fix', 'a1b2c3d4')).toEqual({ hash: 'dead0001', index: 2, count: 2 })
+  // the author, case apart; a hash-looking term also finds text
+  expect(findCommit(commits, 'ANA')).toEqual({ hash: 'f46e2320', index: 1, count: 2 })
+  expect(findCommit(commits, 'dead')).toEqual({ hash: 'dead0001', index: 1, count: 1 })
+  expect(findCommit(commits, 'nothing')).toBeUndefined()
+  expect(findCommit(commits, '  ')).toBeUndefined()
 })

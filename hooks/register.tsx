@@ -4,12 +4,12 @@ import type { ClientElements, Elements, EngineInterface, ProcessRunResult, Regis
 import type { Badge, BadgeKind, BadgeStyle, Cell, Changelog, Columns, CommitDetail, ConfigScope, FileStat, FlowConfig, FlowConflict, FlowInfo, FlowInitForm, FlowKind, FlowOptions, FlowTopic, FlowView, Graph, GraphRow, Ref, RepoSettings, Repos, Screen, View } from '../types'
 import { parseChangelog, versionOf } from './changelog'
 import { CLOSED, dismissModal, FLOW_CLOSED, hasModal } from './dismiss'
-import { badgeParts, badgesOf, branchOf, diffBar, fitBadges } from './badges'
+import { badgeParts, badgesOf, branchOf, diffBar, fitBadges, syncText, withSync } from './badges'
 import { isBranchNameCandidate } from './detect'
 import { absTime, fitGraph, HASH_W, relTime, short, truncate, truncateMiddle } from './format'
 import { layout } from './lanes'
-import { clampTop, findByHash, isHashQuery, topOf, visibleRange, widestIn, windowAt, wrapRows } from './virtual'
-import { DETAIL_FORMAT, localsOf, LOG_FORMAT, mergedArgs, parseMerged, REFS_ARGS, parseDetail, parseLog, parseStatus, parseSync, remotesOf, UNCOMMITTED, withUncommitted } from './log'
+import { clampTop, findCommit, isHashQuery, topOf, visibleRange, widestIn, windowAt, wrapRows } from './virtual'
+import { DETAIL_FORMAT, localsOf, LOG_FORMAT, mergedArgs, parseMerged, parseTracks, REFS_ARGS, TRACK_ARGS, parseDetail, parseLog, parseStatus, parseSync, remotesOf, UNCOMMITTED, withUncommitted } from './log'
 import { basesOf, defaultTagMessage, finishArgs, mainOf, finishPushArgs, flowArgs, flowCliOf, nextVersion, parseFlowConfig, resumeArgs, topicFor, topicOf, typeOf } from './flow'
 import { BRANCH_REFS_ARGS, branchNamesOf, DEFAULT_FORM, initArgs, initFormError, initFormFor, staleBaseArgs, trimForm } from './flowinit'
 import { checkoutArgs, defaultPushRemotes, deleteBranchArgs, type MenuItem, menuFor, menuGroups, pushRuns, renameArgs } from './menu'
@@ -83,7 +83,7 @@ const NERD_FONT_CHECK = 'ls ~/Library/Fonts /Library/Fonts ~/.local/share/fonts 
 
 const DEFAULT_FLOW: FlowView = { starting: null, finishing: null, opts: { isNoFf: true, isPush: true, isKeep: true }, tagMessage: null, conflict: null, init: null, confirming: null, isMenuOpen: false }
 const EMPTY_GRAPH: Graph = { status: 'idle', rows: [], head: '', branch: '', conflicts: 0, remotes: [], hasMore: false }
-const DEFAULT_VIEW: View = { scope: 'all', limit: PAGE, selected: null, confirm: null, menu: null, isRenaming: false, isDeleting: false, isForce: false, push: null, running: null, screen: 'graph', configScope: 'local', editingRemote: null, isAddingRemote: false, remoteDraft: '', scrollTo: null, isSearching: false, refresh: 'idle', isOpen: false, flow: DEFAULT_FLOW, isActionsOpen: false, notice: null }
+const DEFAULT_VIEW: View = { scope: 'all', limit: PAGE, selected: null, confirm: null, menu: null, isRenaming: false, isDeleting: false, isForce: false, push: null, running: null, screen: 'graph', configScope: 'local', editingRemote: null, isAddingRemote: false, remoteDraft: '', scrollTo: null, isSearching: false, search: '', refresh: 'idle', isOpen: false, flow: DEFAULT_FLOW, isActionsOpen: false, notice: null }
 
 const graphState = atom({ plugin: 'gitgraph', key: 'graph' } as const, EMPTY_GRAPH)
 // Bumped with every graph write: renders read this small number and keep the graph
@@ -91,7 +91,7 @@ const graphState = atom({ plugin: 'gitgraph', key: 'graph' } as const, EMPTY_GRA
 const versionState = atom({ plugin: 'gitgraph', key: 'graphVersion' } as const, 0)
 // Tagged with the shape of View: a view an older version kept (without fields added
 // since) reads as absent after an update, instead of breaking the render.
-const viewState = atom({ plugin: 'gitgraph', key: 'view' } as const, DEFAULT_VIEW, { shape: 'view-12' })
+const viewState = atom({ plugin: 'gitgraph', key: 'view' } as const, DEFAULT_VIEW, { shape: 'view-13' })
 const detailState = atom({ plugin: 'gitgraph', key: 'detail' } as const, null as CommitDetail | null)
 const roundState = atom({ plugin: 'gitgraph', key: 'isRound' } as const, false)
 const nerdState = atom({ plugin: 'gitgraph', key: 'hasNerdFont' } as const, false)
@@ -219,8 +219,9 @@ async function setGraph($: EngineInterface, change: (g: Graph) => Graph): Promis
   graphCache = cacheOf(await update($, versionState, n => n + 1), graph)
 }
 
-// A commit's badges as the pane draws them: remotes alone only with all branches on, merged ones gone.
-const rowBadges = (refs: Ref[], graph: Graph, view: View, dead: Set<string>) => badgesOf(refs, graph.locals, view.scope === 'all', dead)
+// A commit's badges as the pane draws them: remotes alone only with all branches on, merged ones
+// gone, a local branch with how far it is from its upstream.
+const rowBadges = (refs: Ref[], graph: Graph, view: View, dead: Set<string>) => withSync(badgesOf(refs, graph.locals, view.scope === 'all', dead), graph.tracks ?? {})
 
 async function readCache($: EngineInterface): Promise<GraphCache> {
   const version = await read($, versionState)
@@ -239,10 +240,11 @@ async function load($: EngineInterface, known?: RepoState): Promise<void> {
   const view = await read($, viewState)
   busy = true
   try {
-    const [log, status, refs] = await Promise.all([
+    const [log, status, refs, track] = await Promise.all([
       git($, ['log', ...(view.scope === 'all' ? ['--all'] : ['--branches', 'HEAD']), '--date-order', `-n${view.limit + 1}`, LOG_FORMAT]),
       known?.status ?? git($, STATUS_ARGS),
       known?.refs ?? git($, REFS_ARGS),
+      git($, TRACK_ARGS),
     ])
     if (!isCurrent()) return
     if (status.exitCode !== 0) {
@@ -278,6 +280,7 @@ async function load($: EngineInterface, known?: RepoState): Promise<void> {
       locals,
       merged,
       mergedKey,
+      tracks: track.exitCode === 0 ? parseTracks(track.stdout) : {},
       sync: parseSync(status.stdout),
       hasMore: commits.length > view.limit,
     }))
@@ -336,22 +339,23 @@ async function checkoutRef($: EngineInterface, badge: Badge): Promise<void> {
   else $.ui.toast(badge.kind === 'head' ? `Already on ${badge.label}` : `Nothing to check out for ${badge.label}`)
 }
 
-// Selects the loaded commit the hash starts, and scrolls the pane to it: the render
-// draws the window around `scrollTo` so the row exists to be scrolled to.
+// A search by hash, message or author over the loaded commits: the next match after the selected
+// one, selected and scrolled to (the render draws the window around `scrollTo`). With several the
+// field stays, holding the term, so finding again goes on to the next.
 async function searchCommit($: EngineInterface, value: string): Promise<void> {
   const query = value.trim()
-  if (!isHashQuery(query)) {
-    $.ui.toast('Invalid hash: use 4 to 40 hex digits')
+  if (!query) return
+  const [graph, view] = await Promise.all([readGraph($), read($, viewState)])
+  const found = findCommit(graph.rows.map(r => r.commit).filter(c => c.hash !== UNCOMMITTED), query, view.selected ?? undefined)
+  if (!found) {
+    // A hash past the loaded commits: say so, rather than that there is none.
+    const exists = isHashQuery(query) && (await git($, ['rev-parse', '--verify', '--quiet', `${query}^{commit}`])).exitCode === 0
+    $.ui.toast(exists ? `Commit ${query} is not among the ${graph.rows.length} loaded: use "Load more"` : `No commit matches "${query}" among the ${graph.rows.length} loaded: use "Load more"`)
     return
   }
-  const graph = await readGraph($)
-  const hash = findByHash(graph.rows.map(r => r.commit.hash).filter(h => h !== UNCOMMITTED), query)
-  if (!hash) {
-    const exists = (await git($, ['rev-parse', '--verify', '--quiet', `${query}^{commit}`])).exitCode === 0
-    $.ui.toast(exists ? `Commit ${query} is not among the ${graph.rows.length} loaded: use "Load more"` : `No commit with hash ${query}`)
-    return
-  }
-  await setView($, v => ({ ...v, scrollTo: hash, menu: null, isSearching: false }))
+  const { hash, index, count } = found
+  if (count > 1) $.ui.toast(`Match ${index}/${count}`)
+  await setView($, v => ({ ...v, scrollTo: hash, menu: null, isSearching: count > 1, search: count > 1 ? query : '' }))
   if ((await read($, viewState)).selected !== hash) await select($, hash)
   // A pane scrolling its own rows draws the commit centered until the next scroll.
   if (ownScroll) return
@@ -834,7 +838,7 @@ function renderHeader($: EngineInterface, ctx: Ctx) {
     lines.push(
       line(
         ctx,
-        <Input key="search" label={`${icons.search} `} placeholder="find commit by hash" submitLabel="find" autoFocus onSubmit={value => searchCommit($, value)} />,
+        <Input key="search" label={`${icons.search} `} value={view.search} placeholder="find by hash, message or author" submitLabel="find" autoFocus onSubmit={value => searchCommit($, value)} />,
       ),
     )
   // As wide as a row (EDGE_SAFETY too), `Author` and `Commit` over the rows' meta; over
@@ -1778,7 +1782,7 @@ function flowContext({ flow, graph }: Ctx): string {
   const type = topic && typeOf(flow.config, topic.kind)
   if (!topic || !type) return ''
   const { sync } = graph
-  const counts = sync ? [sync.ahead ? `↑${sync.ahead}` : '', sync.behind ? `↓${sync.behind}` : ''].filter(Boolean).join(' ') : ''
+  const counts = sync ? syncText(sync) : ''
   const state = !sync ? 'not published' : counts ? `${counts} ${sync.remote}` : `in sync with ${sync.remote}`
   return [topic.branch, `from ${type.startpoint}`, state].join(' · ')
 }

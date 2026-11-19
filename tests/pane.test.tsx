@@ -23,6 +23,8 @@ type Fake = {
   featRefs?: string
   // What `for-each-ref --merged` prints: the remotes merged into a base.
   merged?: string
+  // feat's track against its upstream (`ahead 2, behind 1`).
+  featTrack?: string
   // The commit HEAD is on (M by default), as after a reset.
   head?: string
   remotes?: string[]
@@ -125,6 +127,7 @@ function answer(fake: Fake, raw: readonly string[], cwd = '.') {
       if (rest[0]?.startsWith('--format=%(upstream')) return ok(`${fake.upstreams?.[cwd] ?? ''}\0\n`)
       if (rest[0] === '--format=%(refname)') return ok(fake.branchRefs ?? 'refs/heads/main\nrefs/heads/feat\n')
       if (rest.some(a => a.startsWith('--merged='))) return ok(fake.merged ?? '')
+      if (rest[0]?.startsWith('--format=%(refname:short)')) return ok(`main\t\nfeat\t${fake.featTrack ?? ''}\n`)
       return ok(`${M} refs/heads/main\n${B} refs/heads/feat\n${(fake.remotes ?? ['origin']).map(r => `${M} refs/remotes/${r}/main\n`).join('')}rev${fake.rev} refs/heads/moving\n`)
     case 'log':
       return ok(logOf(fake))
@@ -323,6 +326,14 @@ test('GG-24 the checked-out branch, merged, keeps its check: gray, the check whe
   await ui.unmount()
 })
 
+test('BS-01 a branch ahead of or behind its upstream says so on its badge', async ($, on) => {
+  await setup($, on, newFake({ featTrack: 'ahead 2, behind 1' }))
+  const ui = await $.ui.mount(pane('terminal'))
+  const segments = ((await ui.find({ type: 'Client', key: `pill:${B}:0` }))?.props.props as { segments: { text: string }[] }).segments
+  expect(segments.map(g => g.text)).toEqual(['feat', '↑2 ↓1'])
+  await ui.unmount()
+})
+
 const CHANGELOG = `# Changelog
 
 ## [1.6.0] - 2026-11-18
@@ -450,14 +461,15 @@ test('GG-09 after a Bash call the pane reloads only if the repository changed', 
   expect(logCalls(fake).length).toBe(before + 1)
 })
 
-test('GG-09 a load runs git in one parallel batch of three processes, then the merged remotes query', async ($, on) => {
+test('GG-09 a load runs git in one parallel batch of four processes, then the merged remotes query', async ($, on) => {
   const fake = newFake()
   await setup($, on, fake)
   const flow = ['flow', 'config', 'tag', 'remote']
   const calls = gitCalls(fake).filter(c => !flow.includes(c[1] ?? ''))
-  expect(calls.slice(0, 3).map(c => c[1] ?? '').sort()).toEqual(['for-each-ref', 'log', 'status'])
-  expect(calls[3]).toContain('--merged=refs/heads/main')
-  expect(calls).toHaveLength(4)
+  // log, status, the refs and the branches' tracks at once; then the merged remotes
+  expect(calls.slice(0, 4).map(c => c[1] ?? '').sort()).toEqual(['for-each-ref', 'for-each-ref', 'log', 'status'])
+  expect(calls[4]).toContain('--merged=refs/heads/main')
+  expect(calls).toHaveLength(5)
   // a reload over the same refs and bases (the scope toggle) does not ask again
   const ui = await $.ui.mount(pane('terminal'))
   const asked = () => gitCalls(fake).filter(c => c.some(a => a.startsWith('--merged='))).length
@@ -828,7 +840,7 @@ test('GG-16 the search icon opens a hash search that selects the commit and scro
   const ui = await $.ui.mount(pane('terminal'))
   expect(await ui.find({ type: 'Input', key: 'search' })).toBeUndefined()
   await ui.press({ key: 'search-toggle' })
-  await ui.input({ key: 'search', text: 'E000020' })
+  await ui.input({ key: 'search', text: 'E0000200' })
   expect(fk.calls.at(-1)?.slice(-2)).toEqual(['--format=%H%x1f%an%x1f%ae%x1f%at%x1f%B%x1e', 'e0000200'])
   // A commit found closes the search.
   expect(await ui.find({ type: 'Input', key: 'search' })).toBeUndefined()
@@ -837,12 +849,34 @@ test('GG-16 the search icon opens a hash search that selects the commit and scro
   expect(await there.find({ type: 'Text', text: /bia@x\.io/ })).toBeDefined()
   await there.press({ key: 'search-toggle' })
   await there.input({ key: 'search', text: 'xyz' })
-  expect(toasts.at(-1)).toMatch(/Invalid hash/)
+  expect(toasts.at(-1)).toMatch(/^No commit matches "xyz" among the \d+ loaded/)
   await there.input({ key: 'search', text: 'dead' })
-  expect(toasts.at(-1)).toBe('No commit with hash dead')
+  expect(toasts.at(-1)).toMatch(/^No commit matches "dead" among the \d+ loaded/)
   await there.input({ key: 'search', text: 'beef' })
   expect(toasts.at(-1)).toMatch(/not among the \d+ loaded/)
   await there.unmount()
+})
+
+test('SR-01 a search finds by message or author too; again, the next match, in a loop', async ($, on) => {
+  const toasts: string[] = []
+  await setup($, on, newFake(), [], toasts)
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: 'search-toggle' })
+  expect((await ui.find({ type: 'Input', key: 'search' }))?.props.placeholder).toBe('find by hash, message or author')
+  // 'work' is in two messages: A (Work on main), then B (Work on feat), then A again
+  await ui.input({ key: 'search', text: 'work' })
+  expect(toasts.at(-1)).toBe('Match 1/2')
+  expect(await ui.find({ type: 'Text', text: /Branch actions:|Refs:|Ana/ })).toBeDefined()
+  // more than one: the field stays, with the term, for the next
+  expect((await ui.find({ type: 'Input', key: 'search' }))?.props.value).toBe('work')
+  await ui.input({ key: 'search', text: 'work' })
+  expect(toasts.at(-1)).toBe('Match 2/2')
+  await ui.input({ key: 'search', text: 'work' })
+  expect(toasts.at(-1)).toBe('Match 1/2')
+  // the author: one match, the field closes
+  await ui.input({ key: 'search', text: 'BIA' })
+  expect(await ui.find({ type: 'Input', key: 'search' })).toBeUndefined()
+  await ui.unmount()
 })
 
 test('GG-17 refresh reloads the graph and the open commit, then flashes a check', async ($, on) => {
