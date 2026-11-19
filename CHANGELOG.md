@@ -2,7 +2,13 @@
 
 Mudanças do Git Graph (`gitgraph`) por versão, no formato [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e com versões em [SemVer](https://semver.org/lang/pt-BR/).
 
-## [Unreleased]
+## [1.8.1] - 2026-11-19
+
+### Corrigido
+
+- O changelog e a versão da 1.8.0: as mudanças dela estavam em `[Unreleased]` e o `plugin.json` (e o badge do README) seguiam em 1.7.2, então a tela de changelog marcava a versão errada como a sua.
+
+## [1.8.0] - 2026-11-19
 
 ### Adicionado
 
