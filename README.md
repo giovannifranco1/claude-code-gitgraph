@@ -48,13 +48,14 @@ Then open the pane with:
 ## Features
 
 - **The commit graph** of the session's repository, one row per commit: a colored lane per line of history, merges (`─╮`), forks (`─╯`) and crossings drawn the way the VS Code extension does, and an `Uncommitted changes` row on top while the working tree is dirty
-- **Ref badges** in the color of their lane, drawn in segments: a branch and its remotes in one badge, the remotes on a darker shade of its color (`[develop][origin github]`); the checked-out branch in bold with a check before its name; tags with a tag icon segment before the version; a branch only on a remote (merged and deleted here) with a ghost. The first badge may fill the Description column before its name is cut; the rest are shortened, then counted as `+N`
+- **Ref badges** in the color of their lane, drawn in segments: a branch and its remotes in one badge, the remotes on a darker shade of its color (`[develop][origin github]`), with how far the branch is ahead of and behind its upstream (`[feat][origin ↑2 ↓1]`); a remote branch on another commit in that darker shade; the checked-out branch in bold with a check before its name; tags in the color of `main`, with a tag icon segment before the version; a dead branch (merged into `main`/`develop`, or deleted here) gray with a ghost. Up to two branch badges per commit, tags apart, the rest counted as `+N`; the first may fill the Description column before its name is cut
 - **All branches or just HEAD** with the switch in the header, and **Load more** past 300 commits
 - **Several repositories:** when the session folder holds more than one repo (or is no repo but has repos inside, up to three levels down), a `repo:` dropdown at the start of the header picks the one the graph and every action use; each option shows, in a right column, the branch that repo is on (`[develop]`)
 
   <img src="media/graph.png" alt="The Git Graph pane docked beside the chat: colored lanes, branch and tag badges, authors, short hashes and the Git Flow bar at the bottom" width="800">
 
 - **Click a commit's text** to open its details: author, date, full message and every changed file with a diffstat bar. The ⋯ icon on its first row opens its actions: copy its hash, check it out, cherry-pick it or **reset the current branch to it (soft)**; below, create a branch on it. A soft reset moves the branch there and its changes stay staged: the branch moves there and its changes stay staged. As in the VS Code extension, a commit left behind stays in the graph while a ref keeps it (the branch you pushed, `origin/…`), so you can reset back to it
+- **Click the Uncommitted changes row** to commit or stash them, in a dialog of their own (in the docked terminal pane). **Commit message** commits every change, new files too (`git add -A`, then `git commit`); **✨ suggest a message** has Claude (haiku) read the diff and the recent commits and write one in their style into the field, to review and edit before you press **commit**. Below, an optional message and **stash** run `git stash push --include-untracked`
 
   <img src="media/details.png" alt="A commit opened in the pane: hash badge, author, date, full message, changed files with +/- bars and the commit actions" width="800">
 
@@ -67,7 +68,7 @@ Then open the pane with:
 
 - **Push to the remotes you pick:** Push branch opens a choice of remotes, starting with the ones the branch tracks, plus `all`. A push to several remotes runs one push each and reports every failure by its remote
 - **Safe actions:** destructive ones ask for a second press (or run from their dialog's button); a spinner shows what git is doing and further presses wait for it; push and fetch never hang on a password prompt
-- **Find a commit by hash** from the search icon, 4 to 40 hex digits: the pane selects it and scrolls to it
+- **Find a commit by hash, message or author** from the search icon: the pane selects it and scrolls to it. With several matches the field keeps the term and says `Match 2/5`; find again for the next one, in a loop
 - **Git Flow** with [git-flow-next](https://github.com/gittower/git-flow-next), from the footer: `Git Flow · feature/login · from develop · ↑2 ↓1 origin` says where the branch came from and how it stands with its upstream (or `not published`), and opens the Git Flow dialog, a row per type:
   - **Start** a feature, bugfix, release or hotfix from the base your git flow config gives it; a release or hotfix name comes filled in with the next version after your highest tag
   - On a work branch: **finish** (switches for `no-ff`, push afterwards and keep branch, all on by default; release and hotfix tags get an editable message, the version by default) and **rebase** (or merge, as your config says). To publish a branch, use **Push branch**
@@ -77,7 +78,7 @@ Then open the pane with:
 
   <img src="media/settings.png" alt="The settings screen: user name and email per scope, and the remotes with their URLs" width="800">
 
-- **Always current:** after every Bash call Claude makes and every 5 seconds while the pane is open, gitgraph compares the repository's refs and status and reloads only when something changed. The header's icon buttons: **search** (magnifier) opens the hash search; **settings** (gear) opens the repository settings; **changelog** (☰) shows what changed in each version, yours marked; **fetch** (cloud) runs `git fetch --all` (in a dialog while it runs, in the docked terminal pane) and redraws the graph with what the remotes brought; **refresh** reloads everything on screen and flashes `✓`
+- **Always current:** after every Bash call Claude makes and every 5 seconds while the pane is open, gitgraph compares the repository's refs and status and reloads only when something changed. The header's icon buttons: **search** (magnifier) opens the search; **settings** (gear) opens the repository settings; **changelog** (☰) shows what changed in each version, yours marked; **fetch** (cloud) runs `git fetch --all` (in a dialog while it runs, in the docked terminal pane) and redraws the graph with what the remotes brought; **refresh** reloads everything on screen and flashes `✓`
 - **Light on big histories:** only the rows on screen are drawn, so scrolling stays smooth with hundreds of commits; in the docked terminal pane gitgraph scrolls its own rows, so the header and footer hold still. The graph column is as wide as the rows on screen need
 
 ## Settings

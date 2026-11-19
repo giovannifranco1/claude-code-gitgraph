@@ -1,4 +1,4 @@
-import type { Badge, BadgeKind, Ref } from '../types'
+import type { Badge, BadgeKind, Ref, Track } from '../types'
 
 const ORDER: BadgeKind[] = ['head', 'detached', 'branch', 'remote', 'tag']
 
@@ -38,9 +38,21 @@ export function badgesOf(refs: Ref[], branches?: string[], hasRemotes = true, de
 }
 
 // The badge's parts: an icon before the name (`lead`: the checked-out branch, a tag, a
-// gone branch), the name, then its remotes.
+// gone branch), the name, then its remotes and how far it is from its upstream (`origin ↑2 ↓1`).
 export function badgeParts(badge: Badge): { lead: boolean; name: string; remotes: string } {
-  return { lead: badge.kind === 'head' || badge.kind === 'tag' || badge.isGone === true, name: badge.label, remotes: badge.remotes.join(' ') }
+  const sync = syncText(badge)
+  return { lead: badge.kind === 'head' || badge.kind === 'tag' || badge.isGone === true, name: badge.label, remotes: [...badge.remotes, ...(sync ? [sync] : [])].join(' ') }
+}
+
+// `↑2 ↓1`: how far a branch is from its upstream, each side only when not 0; '' in step.
+export const syncText = ({ ahead, behind }: Partial<Track>) => [...(ahead ? [`↑${ahead}`] : []), ...(behind ? [`↓${behind}`] : [])].join(' ')
+
+// The local branches' badges with how far each is from its upstream (`tracks`, by branch).
+export function withSync(badges: Badge[], tracks: Record<string, Track>): Badge[] {
+  return badges.map(b => {
+    const t = (b.kind === 'head' || b.kind === 'branch') && tracks[b.label]
+    return t ? { ...b, ...(t.ahead && { ahead: t.ahead }), ...(t.behind && { behind: t.behind }) } : b
+  })
 }
 
 // Each segment is its text with a cell each side (round caps take the outer two); an icon

@@ -27,6 +27,10 @@ export function splitRemote(ref: string, remotes: string[]): { remote: string; b
 
 export const renameArgs = (from: string, to: string) => ['branch', '-m', from, to]
 
+// Stashes every uncommitted change, untracked files too (nothing left behind); with a message
+// when given, else git names it after the commit it sits on.
+export const stashArgs = (message: string) => ['stash', 'push', '--include-untracked', ...(message.trim() ? ['-m', message.trim()] : [])]
+
 // `-D` deletes a branch whose work is merged nowhere; `-d` refuses to.
 export const deleteBranchArgs = (name: string, isForce: boolean) => ['branch', isForce ? '-D' : '-d', name]
 

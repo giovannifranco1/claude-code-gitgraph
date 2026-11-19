@@ -13,7 +13,13 @@ export type Commit = {
 export type BadgeKind = 'head' | 'detached' | 'branch' | 'remote' | 'tag'
 // `isGone`: a dead branch: a remote one with no local branch of its name (deleted here), or
 // merged into a base (then its local branch on its commit too, which carries its remote).
-export type Badge = { kind: BadgeKind; label: string; remotes: string[]; isGone?: true }
+// How far a local branch is from its upstream: its commits past it and short of it.
+export type Track = { ahead: number; behind: number }
+// An uncommitted change: its path (and the one it was renamed from), what changed (Modified,
+// Added or untracked, Deleted, Renamed, Unmerged) and whether it is staged.
+export type Change = { path: string; from?: string; code: 'M' | 'A' | 'D' | 'R' | 'U'; isStaged: boolean }
+// `ahead`/`behind`: a local branch's Track, when not 0.
+export type Badge = { kind: BadgeKind; label: string; remotes: string[]; isGone?: true; ahead?: number; behind?: number }
 
 export type Cell = { ch: string; color: number }
 export type GraphRow = { commit: Commit; cells: Cell[] }
@@ -41,10 +47,15 @@ export type Graph = {
   locals?: string[]
   // The remote branches merged into a base (main, develop): drawn as gone.
   merged?: string[]
+  // The uncommitted changes, file by file, and how many of them are staged.
+  changes?: Change[]
+  staged?: number
+  // Each local branch off its upstream: how far ahead and behind.
+  tracks?: Record<string, Track>
   // What `merged` was worked out from (the refs and the bases), to skip the query while unchanged.
   mergedKey?: string
   // The checked-out branch against its upstream; null where it has none (not published).
-  sync?: { remote: string; ahead: number; behind: number } | null
+  sync?: (Track & { remote: string }) | null
   hasMore: boolean
   error?: string
 }
@@ -78,6 +89,17 @@ export type View = {
   scrollTo: string | null
   // The hash search field, opened from its toolbar icon.
   isSearching: boolean
+  // The last term searched, kept in the field while it matches several (find again: the next).
+  search: string
+  // The uncommitted changes' commit message being written (or Claude's suggestion), and
+  // whether Claude is writing one.
+  commitDraft: string
+  isSuggesting: boolean
+  // The form the uncommitted changes' actions opened, in a dialog of its own; null: the actions.
+  uncommittedForm: 'commit' | 'stash' | null
+  // The commit's step (pick the files, then the message) and the files picked, by path.
+  commitStep: 'files' | 'message'
+  commitFiles: string[]
   // The refresh button's feedback: running, then `done` for a moment.
   refresh: 'idle' | 'running' | 'done'
   isOpen: boolean

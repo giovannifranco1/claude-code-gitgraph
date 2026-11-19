@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { badgeParts, badgesOf, badgeWidth, diffBar, fitBadges } from '../hooks/badges'
+import { badgeParts, badgesOf, badgeWidth, diffBar, fitBadges, syncText, withSync } from '../hooks/badges'
 import { parseRefs } from '../hooks/log'
 import { shade } from '../hooks/pilldraw'
 
@@ -130,4 +130,16 @@ test('GG-24 a dead remote is joined to its local branch on its commit, alone els
   // away from its local branch it stands alone, a ghost
   const away = badgesOf(parseRefs('origin/feature/a', ['origin']), ['feature/a'], true, dead)
   expect(away).toEqual([{ kind: 'remote', label: 'origin/feature/a', remotes: [], isGone: true }])
+})
+
+test('BS-01 a published branch shows how far ahead and behind its upstream it is, after its remotes', async () => {
+  const feat = { kind: 'branch' as const, label: 'feat', remotes: ['origin'] }
+  expect(badgeParts({ ...feat, ahead: 2, behind: 1 })).toEqual({ lead: false, name: 'feat', remotes: 'origin ↑2 ↓1' })
+  // its remote elsewhere (ahead of it): the count alone
+  expect(badgeParts({ ...feat, remotes: [], ahead: 2 })).toEqual({ lead: false, name: 'feat', remotes: '↑2' })
+  expect(badgeParts(feat).remotes).toBe('origin')
+  expect([syncText({ ahead: 2, behind: 1 }), syncText({ behind: 4 }), syncText({ ahead: 0, behind: 0 })]).toEqual(['↑2 ↓1', '↓4', ''])
+  // the width counts it: ' feat ' 6 + ' origin ↑2 ↓1 ' 14
+  expect(badgeWidth({ ...feat, ahead: 2, behind: 1 })).toBe(6 + 14)
+  expect(withSync([feat, { kind: 'tag', label: 'v1', remotes: [] }], { feat: { ahead: 0, behind: 4 } })).toEqual([{ ...feat, behind: 4 }, { kind: 'tag', label: 'v1', remotes: [] }])
 })
