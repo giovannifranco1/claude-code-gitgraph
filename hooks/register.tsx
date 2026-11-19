@@ -774,6 +774,7 @@ function renderHeader($: EngineInterface, ctx: Ctx) {
   const isAll = view.scope === 'all'
   const headRow = graph.rows.find(r => r.commit.hash === graph.head)
   const head = headName(graph)
+  const headColor = headRow ? laneColor(headRow.cells) : (PALETTE[0] ?? '#4fc1ff')
   const lines = [
     <Box height={1} overflow="hidden" flexDirection="row" justifyContent="space-between" columnGap={2}>
       {/* With several repos, the repo comes first: its options open as rows below the header's first row. */}
@@ -786,7 +787,8 @@ function renderHeader($: EngineInterface, ctx: Ctx) {
       )}
       <Box flexShrink={1} flexGrow={1} overflow="hidden">
         <Text wrap="truncate-end">
-          {renderPill(ctx, plainPill(ctx, `⎇ ${head}`, headRow ? laneColor(headRow.cells) : PALETTE[0] ?? '#4fc1ff', true))}
+          {/* The checked-out branch as its badge in the graph (a detached HEAD: its short hash). */}
+          {renderPill(ctx, graph.branch ? pillProps(ctx, { kind: 'head', label: head, remotes: [] }, headColor) : plainPill(ctx, head, headColor, true))}
         </Text>
       </Box>
       <Box flexDirection="row" gap={2} flexShrink={0}>

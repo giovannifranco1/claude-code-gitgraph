@@ -589,7 +589,8 @@ test('GG-11 pills are rounded with a Nerd Font and fall back to text pills witho
   expect((await ui.find({ type: 'Client', key: `pill:${M}:0` }))?.props.props).toMatchObject({ isRound: true })
   await ui.unmount()
   const vs = await $.ui.mount(pane('vscode'))
-  expect((await vs.find({ type: 'Text', text: /\uf058 +main/ }))?.text).toContain('origin')
+  // the graph's main badge (the header's has no remote)
+  expect((await vs.findAll({ type: 'Text', text: /\uf058 +main/ })).some(t => t.text.includes('origin'))).toBe(true)
   expect(await vs.find({ type: 'Text', text: /v0\.1/ })).toBeDefined()
   expect(await vs.find({ type: 'Text', text: /^\ue0b4/ })).toBeDefined()
   await vs.unmount()
@@ -1327,6 +1328,15 @@ test('MR-04 each picker option shows the branch its repo is on in a right column
   await ui.press({ key: 'repo' })
   expect(await ui.find({ type: 'Text', text: /\[feature\/y\]/ })).toBeDefined()
   expect(fake.cwds.filter((_, i) => fake.calls[i]?.[1] === 'symbolic-ref')).toContain('web')
+  await ui.unmount()
+})
+
+test('HD-01 the header shows the checked-out branch as its badge in the graph: the check, no branch glyph', async ($, on) => {
+  await setup($, on, newFake())
+  const ui = await $.ui.mount(pane('terminal'))
+  const texts = (await ui.findAll({ type: 'Text' })).map(t => t.text)
+  expect(texts.some(t => t.includes('⎇'))).toBe(false)
+  expect(texts.some(t => /^(✔|\u{f058})  main/u.test(t))).toBe(true)
   await ui.unmount()
 })
 

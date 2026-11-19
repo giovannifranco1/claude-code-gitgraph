@@ -9,6 +9,10 @@ Mudanças do Git Graph (`gitgraph`) por versão, no formato [Keep a Changelog](h
 - Busca por hash **e** por texto: o mesmo campo acha o commit pelo começo do hash, pela mensagem ou pelo autor (sem diferenciar maiúsculas). Com vários resultados, o campo fica aberto com o termo e o toast diz `Match 2/5`; buscar de novo vai para o próximo, em loop. Sem resultado entre os commits carregados, sugere **Load more**.
 - ↑/↓ no badge de cada branch local publicada: quantos commits ela está à frente e atrás do remoto dela (`feat` + `origin ↑2 ↓1`; com o remoto em outro commit, só `↑2`). A conta vem de um `git for-each-ref` rodado junto com o load, não no poll de 5 s (contar é caro), e é refeita a cada push, pull ou commit, que já recarregam o painel.
 
+### Alterado
+
+- Header sem o `⎇`: a branch atual aparece como o badge dela no grafo, com o ✔ antes do nome, em negrito e na cor da lane (HEAD destacado: o hash curto).
+
 ## [1.7.2] - 2026-11-19
 
 ### Corrigido
