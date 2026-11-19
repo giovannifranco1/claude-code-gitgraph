@@ -47,3 +47,9 @@ test('ESC-01 the uncommitted changes dialog closes; a selected commit is no moda
   expect(dismissModal({ ...VIEW, selected: '*', uncommittedForm: 'commit' })).toEqual({ ...VIEW, selected: '*' })
   expect(hasModal({ ...VIEW, selected: 'aaaaaaa1' })).toBe(false)
 })
+
+test('SH-02 a stash dialog closes on Escape, its armed drop first', async () => {
+  expect(hasModal({ ...VIEW, selected: 'stash@{1}' })).toBe(true)
+  expect(dismissModal({ ...VIEW, selected: 'stash@{1}' })).toEqual(VIEW)
+  expect(dismissModal({ ...VIEW, selected: 'stash@{1}', confirm: 'stash-drop:stash@{1}' })).toEqual({ ...VIEW, selected: 'stash@{1}' })
+})

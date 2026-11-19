@@ -89,8 +89,11 @@ const MAX_BRANCH_PILLS = 2
 // where needed; the rest counted for a `+N` pill. The first may take the whole `column` (the
 // subject then gets less) before it is cut: a branch shows its full name. `width` is what they
 // take, the `+N` pill and every gap included.
+// A pill of one plain segment (`+N`, a stash's name) and its gap, in cells.
+export const plainPillWidth = (text: string) => text.length + 3
+
 export function fitBadges(badges: Badge[], max: number, column = max): { shown: Badge[]; hidden: number; width: number } {
-  const plus = (n: number) => (n > 0 ? `+${n}`.length + 3 : 0)
+  const plus = (n: number) => (n > 0 ? plainPillWidth(`+${n}`) : 0)
   const shown: Badge[] = []
   let used = 0
   const isTag = (b: Badge) => b.kind === 'tag'

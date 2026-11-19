@@ -31,6 +31,12 @@ export const renameArgs = (from: string, to: string) => ['branch', '-m', from, t
 // when given, else git names it after the commit it sits on.
 export const stashArgs = (message: string) => ['stash', 'push', '--include-untracked', ...(message.trim() ? ['-m', message.trim()] : [])]
 
+// A stash put back onto the working tree (`apply` keeps it, `pop` drops it after) or dropped,
+// and what the toast says once it is done.
+export type StashVerb = 'apply' | 'pop' | 'drop'
+export const stashRunArgs = (verb: StashVerb, name: string) => ['stash', verb, name]
+export const STASH_DONE: Record<StashVerb, string> = { apply: 'Applied', pop: 'Popped', drop: 'Dropped' }
+
 // Resets the uncommitted changes: mixed unstages them (the files stay as they are), hard discards
 // those of tracked files. Untracked files stay either way: no `git clean`.
 export type ResetMode = 'mixed' | 'hard'

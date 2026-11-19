@@ -1,4 +1,4 @@
-import type { Change, Commit, CommitDetail, FileStat, Ref, Track } from '../types'
+import type { Change, Commit, CommitDetail, FileStat, Ref, Stash, Track } from '../types'
 import { branchOf } from './badges'
 
 // Every ref with its commit, `<oid> <refname>` a line: what the poll compares, and the format the
@@ -143,6 +143,51 @@ export function parseTracks(stdout: string): Record<string, Track> {
   return tracks
 }
 
+// Every stash: its commit, parents (the first is the commit it was made on), time, name, message.
+export const STASH_ARGS = ['stash', 'list', '--format=%H%x1f%P%x1f%at%x1f%gd%x1f%s%x1e']
+
+export function parseStashes(stdout: string): Stash[] {
+  const stashes: Stash[] = []
+  for (const record of stdout.split(RS)) {
+    const fields = record.replace(/^\n/, '').split(US)
+    const [hash, parents = '', time = '0', name = '', subject = ''] = fields
+    const base = parents.split(' ')[0]
+    if (!hash || !base || fields.length < 5) continue
+    stashes.push({ hash, base, time: Number(time), name, subject })
+  }
+  return stashes
+}
+
+// A stash's row goes by its name (`stash@{0}`), so it is told from a commit by its hash alone.
+export const isStashRow = (hash: string) => hash.startsWith('stash@{')
+
+// The rows of no log commit, the uncommitted changes and the stashes: they have no `git show`,
+// and on a docked terminal pane they float as a dialog.
+export const isPseudoRow = (hash: string | null) => hash !== null && (hash === UNCOMMITTED || isStashRow(hash))
+
+// Each stash as a row off its base commit alone (its index and untracked commits are git's
+// bookkeeping): among the commits by date, never below its base; left out while its base is not
+// loaded. Of those at one place, the newer (lower `stash@{N}`) goes above.
+export function withStashes(commits: Commit[], stashes: Stash[]): Commit[] {
+  const index = new Map(commits.map((c, i) => [c.hash, i]))
+  const placed = stashes
+    .flatMap((s, n) => {
+      const base = index.get(s.base)
+      if (base === undefined) return []
+      let at = 0
+      while (at < base && (commits[at]?.time ?? 0) > s.time) at++
+      return [{ at, n, row: { hash: s.name, parents: [s.base], refs: [], author: '', time: s.time, subject: s.subject } }]
+    })
+    .sort((a, b) => a.at - b.at || a.n - b.n)
+  const rows: Commit[] = []
+  let next = 0
+  commits.forEach((commit, i) => {
+    for (; placed[next]?.at === i; next++) rows.push(placed[next]!.row)
+    rows.push(commit)
+  })
+  return rows
+}
+
 export function withUncommitted(commits: Commit[], head: string, dirty: number): Commit[] {
   if (dirty <= 0) return commits
   const pseudo: Commit = {
@@ -163,14 +208,23 @@ function stat(line: string): FileStat | null {
   return { path: path.join('\t'), adds: num(adds), dels: num(dels) }
 }
 
+// A stash's files with their counts, untracked ones too.
+export const stashShowArgs = (name: string) => ['stash', 'show', '--numstat', '--include-untracked', name]
+
+// `--numstat` lines as files.
+export const parseNumstat = (stdout: string): FileStat[] => stdout.split('\n').map(stat).filter((f): f is FileStat => f !== null)
+
+// What a row's detail reads: a commit's `git show`, a stash's `git stash show`.
+export const detailArgs = (hash: string) => (isStashRow(hash) ? stashShowArgs(hash) : ['show', '--numstat', '--diff-merges=first-parent', DETAIL_FORMAT, hash])
+
+// A row's detail from what `detailArgs` printed; a stash has no author line, its message the body.
+export const detailOf = (commit: Commit, stdout: string): CommitDetail | null =>
+  isStashRow(commit.hash) ? { hash: commit.hash, author: '', email: '', time: commit.time, body: commit.subject, files: parseNumstat(stdout) } : parseDetail(stdout)
+
 export function parseDetail(stdout: string): CommitDetail | null {
   const cut = stdout.indexOf(RS)
   if (cut < 0) return null
   const [hash = '', author = '', email = '', time = '0', ...body] = stdout.slice(0, cut).split(US)
-  const files = stdout
-    .slice(cut + 1)
-    .split('\n')
-    .map(stat)
-    .filter((f): f is FileStat => f !== null)
+  const files = parseNumstat(stdout.slice(cut + 1))
   return { hash, author, email, time: Number(time), body: body.join(US).trim(), files }
 }

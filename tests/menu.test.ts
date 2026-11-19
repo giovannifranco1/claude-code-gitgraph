@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import type { FlowConfig } from '../types'
-import { checkoutArgs, deleteBranchArgs, defaultPushRemotes, menuFor, menuGroups, pushRuns, renameArgs, resetArgs, splitRemote, stashArgs } from '../hooks/menu'
+import { checkoutArgs, deleteBranchArgs, defaultPushRemotes, menuFor, menuGroups, pushRuns, renameArgs, resetArgs, splitRemote, stashArgs, stashRunArgs } from '../hooks/menu'
 
 const ids = (items: { id: string }[]) => items.map(i => i.id)
 
@@ -114,4 +114,10 @@ test('ST-01 a stash takes untracked files too, and the message only when there i
 test('RS-01 a mixed reset unstages the changes, a hard one discards them; neither cleans untracked files', async () => {
   expect(resetArgs('mixed')).toEqual(['reset'])
   expect(resetArgs('hard')).toEqual(['reset', '--hard'])
+})
+
+test('SH-02 a stash is applied, popped or dropped by its name', async () => {
+  expect(stashRunArgs('apply', 'stash@{1}')).toEqual(['stash', 'apply', 'stash@{1}'])
+  expect(stashRunArgs('pop', 'stash@{0}')).toEqual(['stash', 'pop', 'stash@{0}'])
+  expect(stashRunArgs('drop', 'stash@{2}')).toEqual(['stash', 'drop', 'stash@{2}'])
 })

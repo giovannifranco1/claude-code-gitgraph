@@ -63,6 +63,8 @@ type Fake = {
   sync?: string
   // The mod's store ($.store), kept between sessions.
   store?: Map<string, unknown>
+  // What `git stash list` prints (its format); none by default.
+  stashes?: string
 }
 
 const FLOW_CONFIG = [
@@ -148,6 +150,10 @@ function answer(fake: Fake, raw: readonly string[], cwd = '.') {
       }
       return ok()
     }
+    case 'stash':
+      if (rest[0] === 'list') return ok(fake.stashes ?? '')
+      if (rest[0] === 'show') return ok('2\t1\tsrc/stashed.ts\n')
+      return ok()
     case 'tag':
       return ok('1.0.0\n1.0.1\n')
     case 'show':
@@ -478,6 +484,49 @@ test('RS-01 the uncommitted changes reset, mixed or hard, once the mode is picke
   await ui.unmount()
 })
 
+const S = 'eeeeeee5'
+const STASH = 'stash@{0}'
+const STASHES = [S, `${A} fffffff6`, '1699995000', 'stash@{0}', 'On main: wip header'].join(US) + RS + '\n'
+
+test('SH-01 each stash is a row off its base, its name in a badge; the log leaves refs/stash out', async ($, on) => {
+  const fake = newFake({ stashes: STASHES })
+  await setup($, on, fake)
+  const log = logCalls(fake)[0] ?? []
+  expect(log.indexOf('--exclude=refs/stash')).toBe(log.indexOf('--all') - 1)
+  const ui = await $.ui.mount(pane('terminal'))
+  expect(await ui.find({ type: 'Button', key: STASH })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /stash@\{0\}/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /◇/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('SH-02 a stash row opens its files and actions: apply, pop, and drop pressed twice', async ($, on) => {
+  const toasts: string[] = []
+  const fake = newFake({ stashes: STASHES })
+  await setup($, on, fake, [], toasts)
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: STASH })
+  // its files come from the stash, untracked ones too; it is no commit to `git show`
+  expect(callOf(fake, ['stash', 'show', '--numstat', '--include-untracked', 'stash@{0}'])).toBeGreaterThan(-1)
+  expect(fake.calls.some(c => c[1] === 'show' && c.includes(S))).toBe(false)
+  expect(await ui.find({ type: 'Text', text: /src\/stashed\.ts/ })).toBeDefined()
+  await ui.press({ key: 'stash-apply' })
+  expect(callOf(fake, ['stash', 'apply', 'stash@{0}'])).toBeGreaterThan(-1)
+  expect(toasts).toContain('Applied stash@{0}')
+  await ui.press({ key: STASH })
+  await ui.press({ key: 'stash-pop' })
+  expect(callOf(fake, ['stash', 'pop', 'stash@{0}'])).toBeGreaterThan(-1)
+  expect(toasts).toContain('Popped stash@{0}')
+  // drop: the first press arms it, the second drops
+  await ui.press({ key: STASH })
+  await ui.press({ key: 'stash-drop' })
+  expect(callOf(fake, ['stash', 'drop', 'stash@{0}'])).toBe(-1)
+  await ui.press({ key: 'stash-drop' })
+  expect(callOf(fake, ['stash', 'drop', 'stash@{0}'])).toBeGreaterThan(-1)
+  expect(toasts).toContain('Dropped stash@{0}')
+  await ui.unmount()
+})
+
 test('CM-01 the uncommitted changes commit with the message Claude suggests from the diff, shown whole, not edited', async ($, on) => {
   const toasts: string[] = []
   const asked: { model: string; prompt: string }[] = []
@@ -660,15 +709,15 @@ test('GG-09 after a Bash call the pane reloads only if the repository changed', 
   expect(logCalls(fake).length).toBe(before + 1)
 })
 
-test('GG-09 a load runs git in one parallel batch of four processes, then the merged remotes query', async ($, on) => {
+test('GG-09 a load runs git in one parallel batch of five processes, then the merged remotes query', async ($, on) => {
   const fake = newFake()
   await setup($, on, fake)
   const flow = ['flow', 'config', 'tag', 'remote']
   const calls = gitCalls(fake).filter(c => !flow.includes(c[1] ?? ''))
-  // log, status, the refs and the branches' tracks at once; then the merged remotes
-  expect(calls.slice(0, 4).map(c => c[1] ?? '').sort()).toEqual(['for-each-ref', 'for-each-ref', 'log', 'status'])
-  expect(calls[4]).toContain('--merged=refs/heads/main')
-  expect(calls).toHaveLength(5)
+  // log, status, the refs, the branches' tracks and the stashes at once; then the merged remotes
+  expect(calls.slice(0, 5).map(c => c[1] ?? '').sort()).toEqual(['for-each-ref', 'for-each-ref', 'log', 'stash', 'status'])
+  expect(calls[5]).toContain('--merged=refs/heads/main')
+  expect(calls).toHaveLength(6)
   // a reload over the same refs and bases (the scope toggle) does not ask again
   const ui = await $.ui.mount(pane('terminal'))
   const asked = () => gitCalls(fake).filter(c => c.some(a => a.startsWith('--merged='))).length
