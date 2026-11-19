@@ -41,6 +41,7 @@ const SELECTED_BG = '#264f78'
 const ADD_COLOR = '#89d185'
 const DEL_COLOR = '#f48771'
 const HUNK_COLOR = '#4fc1ff'
+
 const DIFF_COLORS: Record<DiffLine['kind'], string | undefined> = { hunk: HUNK_COLOR, add: ADD_COLOR, del: DEL_COLOR, ctx: undefined, note: MUTED }
 const AUTHOR_W = 12
 // The subject's columns the pills after the first leave it (the first may take them all).
@@ -74,8 +75,10 @@ const ICONS = {
     flow: '\uf126',
     // Material Design's ghost: Font Awesome's (\uf6e2) is not in Nerd Fonts 3.
     ghost: '\u{f02a0}',
+    // Octicons' git compare (nf-oct-git_compare): the commit marked for compare.
+    compare: '',
   },
-  plain: { on: '◉', off: '○', fetch: '☁', refresh: '↻', settings: '⚙', search: '⌕', changelog: '☰', feature: '✦', bugfix: '✱', release: '◆', hotfix: '▲', actions: '⋯', head: '✔', tag: '◆', flow: '⑂', ghost: '◌' },
+  plain: { on: '◉', off: '○', fetch: '☁', refresh: '↻', settings: '⚙', search: '⌕', changelog: '☰', feature: '✦', bugfix: '✱', release: '◆', hotfix: '▲', actions: '⋯', head: '✔', tag: '◆', flow: '⑂', ghost: '◌', compare: '①' },
 }
 // No git the pane runs opens an editor (merge, rebase or tag messages) or asks for a password.
 const GIT_ENV = { GIT_TERMINAL_PROMPT: '0', GIT_EDITOR: 'true', GIT_MERGE_AUTOEDIT: 'no' }
@@ -1033,9 +1036,12 @@ function renderRow($: EngineInterface, ctx: Ctx, { commit, cells }: GraphRow) {
   const meta = metaOf(ctx, commit.author, commit.hash)
   // The first pill may fill the Description column; the others get what is left once the
   // subject keeps its minimum, the rest as `+N`.
-  // A stash's row has its name for a badge, ahead of the refs' room.
+  // A stash's row has its name for a badge, ahead of the refs' room; the commit marked for
+  // compare ends its description with an icon.
   const stash = isStashRow(commit.hash) ? commit.hash : ''
-  const fixed = graphWidth + 1 + meta.length + EDGE_SAFETY + (stash ? plainPillWidth(stash) : 0)
+  // The icon after a space, in the diff's hunk blue; a Nerd Font one takes two cells.
+  const mark = view.compareMark === commit.hash ? ` ${ctx.icons.compare}${' '.repeat(iconCells(ctx) - 1)}` : ''
+  const fixed = graphWidth + 1 + meta.length + EDGE_SAFETY + (stash ? plainPillWidth(stash) : 0) + mark.length
   const { shown, hidden, width } = fitBadges(rowBadges(commit.refs, ctx.graph, ctx.view, ctx.dead), Math.max(0, cols - fixed - MIN_SUBJECT), Math.max(0, cols - fixed))
   const more = hidden > 0 ? `+${hidden}` : ''
   const room = Math.max(0, cols - fixed - width)
@@ -1066,10 +1072,12 @@ function renderRow($: EngineInterface, ctx: Ctx, { commit, cells }: GraphRow) {
         </Box>
       )}
       {stash && <Box flexShrink={0}>{renderPill(ctx, plainPill(ctx, stash, lane))}</Box>}
+
       <Button key={commit.hash} plain dimColor={mergeColor ? true : undefined} onPress={() => select($, commit.hash)}>
         <Text backgroundColor={isSelected ? SELECTED_BG : undefined} weight={isSelected ? 'bold' : undefined} color={mergeColor}>
           {truncate(commit.subject, room).padEnd(room)}
         </Text>
+        {mark && <Text color={HUNK_COLOR}>{mark}</Text>}
         <Text color={MUTED}>
           {meta}
         </Text>
@@ -1476,6 +1484,7 @@ function commitActions($: EngineInterface, ctx: Ctx, commit: GraphRow['commit'])
   // An action that changes nothing runs on the first press.
   const plain = (id: string, label: string, run: Entry['onPress']): ListItem => ({ id, entry: { label, isActive: false, onPress: run } })
   const marked = ctx.view.compareMark
+  const isMarked = marked === commit.hash
   return entryList(ctx, 'detail', [
     [
       ...(isCheckedOut(commit.refs)
@@ -1489,9 +1498,10 @@ function commitActions($: EngineInterface, ctx: Ctx, commit: GraphRow['commit'])
     // Compare with HEAD, mark this one, or compare the one marked with this one.
     [
       ...(isHere ? [] : [plain('compare-head', 'Compare with HEAD', () => openCompare($, { from: commit.hash, to: 'HEAD', fromLabel: short(commit.hash), toLabel: head }))]),
-      plain('compare-mark', 'Mark for compare', async () => {
-        await setView($, v => ({ ...v, compareMark: commit.hash, isActionsOpen: false }))
-        $.ui.toast(`Marked ${short(commit.hash)} for compare`)
+      // The marked commit's own actions take the mark off.
+      plain('compare-mark', isMarked ? 'Unmark for compare' : 'Mark for compare', async () => {
+        await setView($, v => ({ ...v, compareMark: isMarked ? null : commit.hash, isActionsOpen: false }))
+        $.ui.toast(isMarked ? `Unmarked ${short(commit.hash)}` : `Marked ${short(commit.hash)} for compare`)
       }),
       ...(marked && marked !== commit.hash
         ? [
