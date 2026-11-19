@@ -605,6 +605,36 @@ test('CP-01 a commit marked for compare compares with another one', async ($, on
   await ui.unmount()
 })
 
+test('CP-03 the commit marked for compare shows an icon at the end of its description, and its actions unmark it', async ($, on) => {
+  const toasts: string[] = []
+  await setup($, on, newFake(), [], toasts)
+  const ui = await $.ui.mount(pane('terminal'))
+  expect(await ui.find({ type: 'Text', text: // })).toBeUndefined()
+  await ui.press({ key: B })
+  await ui.press({ key: 'detail-actions-toggle' })
+  await ui.press({ key: 'compare-mark' })
+  // the git compare icon alone (Nerd Font: it takes two cells), right after the padded description
+  expect((await ui.find({ type: 'Text', text: // }))?.text).toBe('  ')
+  expect(await ui.find({ type: 'Text', text: /compare/ })).toBeUndefined()
+  // on the marked commit the action unmarks it
+  await ui.press({ key: 'detail-actions-toggle' })
+  expect((await ui.find({ type: 'Button', key: 'compare-mark' }))?.text).toContain('Unmark for compare')
+  await ui.press({ key: 'compare-mark' })
+  expect(toasts).toContain('Unmarked ccccccc')
+  expect(await ui.find({ type: 'Text', text: // })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('CP-03 without a Nerd Font the marked commit ends its description with ①', async ($, on) => {
+  await setup($, on, newFake({ hasNoNerdFont: true }))
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: B })
+  await ui.press({ key: 'detail-actions-toggle' })
+  await ui.press({ key: 'compare-mark' })
+  expect((await ui.find({ type: 'Text', text: /①/ }))?.text).toBe(' ①')
+  await ui.unmount()
+})
+
 test('CP-01 a branch menu compares the current branch with that branch', async ($, on) => {
   const fake = newFake()
   await setup($, on, fake)
