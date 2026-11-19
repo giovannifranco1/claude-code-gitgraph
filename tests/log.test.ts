@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { localsOf, parseDetail, parseSync, parseLog, parseRefs, parseStatus, remotesOf, UNCOMMITTED, withUncommitted } from '../hooks/log'
+import { localsOf, mergedArgs, parseDetail, parseMerged, parseSync, parseLog, parseRefs, parseStatus, remotesOf, UNCOMMITTED, withUncommitted } from '../hooks/log'
 
 const US = '\x1f'
 const RS = '\x1e'
@@ -103,4 +103,20 @@ test('FD-07 the upstream of the branch and how far it is ahead of and behind it,
   expect(parseSync('# branch.head feature/x\n# branch.upstream github/feature/x\n# branch.ab +2 -1\n')).toEqual({ remote: 'github', ahead: 2, behind: 1 })
   expect(parseSync('# branch.head feature/x\n# branch.upstream origin/feature/x\n# branch.ab +0 -0\n')).toEqual({ remote: 'origin', ahead: 0, behind: 0 })
   expect(parseSync('# branch.head feature/x\n')).toBeNull()
+})
+
+test('GG-24 merged remotes come from git, into any base that exists here', async () => {
+  expect(mergedArgs(['main', 'master', 'develop', 'dev'], ['main', 'develop', 'feat'])).toEqual([
+    'for-each-ref', '--format=%(objectname) %(refname)', '--merged=refs/heads/main', '--merged=refs/heads/develop', 'refs/remotes',
+  ])
+  expect(mergedArgs(['main'], ['trunk'])).toBeNull()
+})
+
+test('GG-24 a merged remote is dead; not a base, origin/HEAD, or one on a base tip (a branch just started)', async () => {
+  const refs = 'd1 refs/heads/develop\nm1 refs/heads/main\nd1 refs/remotes/origin/develop\n'
+  const merged = 'a1 refs/remotes/origin/feature/a\nd1 refs/remotes/origin/feature/new\nd1 refs/remotes/origin/develop\nm1 refs/remotes/origin/HEAD\nm1 refs/remotes/origin/main\n'
+  expect(parseMerged(merged, refs, ['main', 'develop'])).toEqual(['origin/feature/a'])
+  expect(parseMerged('', refs, ['main'])).toEqual([])
+  // a remote branch merely ending in a base's name is not a base: its tip is no base tip
+  expect(parseMerged('m1 refs/remotes/origin/feature/main\n', 'm1 refs/remotes/origin/feature/main\nz9 refs/heads/main\n', ['main'])).toEqual(['origin/feature/main'])
 })

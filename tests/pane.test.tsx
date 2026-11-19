@@ -21,6 +21,8 @@ type Fake = {
   headRefs?: string
   // The refs on B, feat's commit (merged into main by M).
   featRefs?: string
+  // What `for-each-ref --merged` prints: the remotes merged into a base.
+  merged?: string
   // The commit HEAD is on (M by default), as after a reset.
   head?: string
   remotes?: string[]
@@ -122,6 +124,7 @@ function answer(fake: Fake, raw: readonly string[], cwd = '.') {
     case 'for-each-ref':
       if (rest[0]?.startsWith('--format=%(upstream')) return ok(`${fake.upstreams?.[cwd] ?? ''}\0\n`)
       if (rest[0] === '--format=%(refname)') return ok(fake.branchRefs ?? 'refs/heads/main\nrefs/heads/feat\n')
+      if (rest.some(a => a.startsWith('--merged='))) return ok(fake.merged ?? '')
       return ok(`${M} refs/heads/main\n${B} refs/heads/feat\n${(fake.remotes ?? ['origin']).map(r => `${M} refs/remotes/${r}/main\n`).join('')}rev${fake.rev} refs/heads/moving\n`)
     case 'log':
       return ok(logOf(fake))
@@ -248,7 +251,9 @@ test('MG-01 the text of a merge commit (subject, author, hash) is gray, as Git G
   expect((await ui.find({ type: 'Button', key: A }))?.props.dimColor).toBeFalsy()
   expect((await ui.find({ type: 'Text', text: /^Work on main/ }))?.props.color).toBeUndefined()
   const metas = await ui.findAll({ type: 'Text', text: /Ana|aaaaaaa|bbbbbbb/ })
-  expect(metas.filter(t => t.props.color === '#808080')).toHaveLength(1)
+  // author and hash are gray on every row, merge or not
+  expect(metas.length).toBeGreaterThan(1)
+  expect(metas.every(t => t.props.color === '#808080')).toBe(true)
   await ui.unmount()
 })
 
@@ -268,7 +273,7 @@ test('RC-01 a remote branch away from its local one has the dark shade of its co
 })
 
 test('GG-24 a merged branch with its remote on its commit is one gone pill: ghost and name on gray, the remote on its dark shade', async ($, on) => {
-  await setup($, on, newFake({ featRefs: 'feat, origin/feat' }))
+  await setup($, on, newFake({ featRefs: 'feat, origin/feat', merged: `${B} refs/remotes/origin/feat\n` }))
   const ui = await $.ui.mount(pane('terminal'))
   const props = (await ui.find({ type: 'Client', key: `pill:${B}:0` }))?.props.props as { segments: { text: string; bg: string; icon?: { text: string } }[] }
   expect(props.segments.map(g => g.text)).toEqual(['  feat', 'origin'])
@@ -277,6 +282,33 @@ test('GG-24 a merged branch with its remote on its commit is one gone pill: ghos
   // drawn as a checked-out pill: ghost and name on the gray, the remote on its dark shade
   expect(props.segments[1]?.bg).toBe('#474747')
   expect(await ui.find({ type: 'Client', key: `pill:${B}:1` })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('TG-01 a tag is drawn in the color of the main branch', async ($, on) => {
+  await setup($, on, newFake())
+  const ui = await $.ui.mount(pane('terminal'))
+  const segs = async (key: string) => ((await ui.find({ type: 'Client', key }))?.props.props as { segments: { text: string; bg: string }[] }).segments
+  // v0.1 is on B (feat's lane); main is on M
+  const tag = await segs(`pill:${B}:1`)
+  expect(tag.map(g => g.text)).toContain('v0.1')
+  expect(tag[0]?.bg).toBe((await segs(`pill:${M}:0`))[0]?.bg)
+  expect(tag[0]?.bg).not.toBe((await segs(`pill:${B}:0`))[0]?.bg)
+  await ui.unmount()
+})
+
+test('DM-01 secondary text is a set gray, never dimColor (faint, which many terminals barely draw)', async ($, on) => {
+  await setup($, on, newFake())
+  const ui = await $.ui.mount(pane('terminal'))
+  const dim = async () => (await ui.findAll({ type: 'Text' })).filter(t => t.props.dimColor).map(t => t.text)
+  expect(await dim()).toEqual([])
+  await ui.press({ key: B })
+  expect(await dim()).toEqual([])
+  for (const screen of ['settings', 'changelog']) {
+    await ui.press({ key: screen })
+    expect(await dim()).toEqual([])
+    await ui.press({ key: `${screen}-back` })
+  }
   await ui.unmount()
 })
 
@@ -407,11 +439,23 @@ test('GG-09 after a Bash call the pane reloads only if the repository changed', 
   expect(logCalls(fake).length).toBe(before + 1)
 })
 
-test('GG-09 a load runs git in one parallel batch of three processes', async ($, on) => {
+test('GG-09 a load runs git in one parallel batch of three processes, then the merged remotes query', async ($, on) => {
   const fake = newFake()
   await setup($, on, fake)
   const flow = ['flow', 'config', 'tag', 'remote']
-  expect(gitCalls(fake).map(c => c[1] ?? '').filter(v => !flow.includes(v)).sort()).toEqual(['for-each-ref', 'log', 'status'])
+  const calls = gitCalls(fake).filter(c => !flow.includes(c[1] ?? ''))
+  expect(calls.slice(0, 3).map(c => c[1] ?? '').sort()).toEqual(['for-each-ref', 'log', 'status'])
+  expect(calls[3]).toContain('--merged=refs/heads/main')
+  expect(calls).toHaveLength(4)
+  // a reload over the same refs and bases (the scope toggle) does not ask again
+  const ui = await $.ui.mount(pane('terminal'))
+  const asked = () => gitCalls(fake).filter(c => c.some(a => a.startsWith('--merged='))).length
+  // (the first reload may ask again: git flow's bases arrive after the first load)
+  await ui.press({ key: 'scope' })
+  const before = asked()
+  await ui.press({ key: 'scope' })
+  expect(asked()).toBe(before)
+  await ui.unmount()
 })
 
 test('GG-19 the commit actions sit behind an icon: closed, none show; open, a list in groups, reset last', async ($, on) => {

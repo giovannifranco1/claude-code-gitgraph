@@ -2,6 +2,14 @@
 
 Mudanças do Git Graph (`gitgraph`) por versão, no formato [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e com versões em [SemVer](https://semver.org/lang/pt-BR/).
 
+## [1.7.2] - 2026-11-19
+
+### Corrigido
+
+- Tags na cor da branch `main` (a base principal do git flow, ou `main`/`master`), não mais em amarelo fixo; o amarelo fica só enquanto a `main` não está entre os commits carregados.
+- Branch remota mergeada é detectada pelo git (`for-each-ref --merged` nas bases que existem aqui), não só pelos commits carregados: um merge antigo também vira fantasminha, sem precisar de **Load more**.
+- Textos secundários (autor, hash, avisos, cabeçalho da lista, Settings, Changelog) num cinza fixo (`#808080`), não no `dimColor` (o "esmaecido" do terminal), que em muitos temas quase não aparece.
+
 ## [1.7.1] - 2026-11-18
 
 ### Corrigido

@@ -1,4 +1,4 @@
-import type { Badge, BadgeKind, Commit, Ref } from '../types'
+import type { Badge, BadgeKind, Ref } from '../types'
 
 const ORDER: BadgeKind[] = ['head', 'detached', 'branch', 'remote', 'tag']
 
@@ -6,7 +6,7 @@ const ORDER: BadgeKind[] = ['head', 'detached', 'branch', 'remote', 'tag']
 // VS Code Git Graph does (`main` with an `origin` segment); remotes without a local stand alone,
 // gone where no local branch of their name is anywhere (`branches`, when given). Without
 // `hasRemotes` (all branches off) a remote only marks its local branch: no pill of its own.
-// A remote in `dead` (merged, see deadRemotes) is gone too: alone, or with its local branch
+// A remote in `dead` (merged into a base, see parseMerged) is gone too: alone, or with its local branch
 // on its commit, which then is one gone pill with it.
 // `origin/feat/x` → `feat/x`: the branch a remote-tracking ref follows.
 export const branchOf = (remoteRef: string) => remoteRef.slice(remoteRef.indexOf('/') + 1)
@@ -101,27 +101,4 @@ export function diffBar(adds: number | null, dels: number | null, width: number)
   if (a + d <= width) return { adds: a, dels: d }
   const scaled = Math.min(width - (d > 0 ? 1 : 0), Math.max(a > 0 ? 1 : 0, Math.round((a / (a + d)) * width)))
   return { adds: scaled, dels: width - scaled }
-}
-
-// The remote branches merged into a base (`bases`: main, develop): their commit is in a base's
-// history, below its tip. Not a base itself, nor one on a base's tip (a branch just started).
-// Only the commits loaded count: one merged past them is not known.
-export function deadRemotes(commits: Pick<Commit, 'hash' | 'parents' | 'refs'>[], bases: string[]): Set<string> {
-  const byHash = new Map(commits.map(c => [c.hash, c]))
-  const nameOf = (ref: Ref) => (ref.kind === 'remote' ? branchOf(ref.name) : ref.name)
-  const tips = new Set(commits.filter(c => c.refs.some(r => r.kind !== 'tag' && bases.includes(nameOf(r)))).map(c => c.hash))
-  const merged = new Set<string>()
-  const queue = [...tips]
-  while (queue.length) {
-    const hash = queue.pop()!
-    if (merged.has(hash)) continue
-    merged.add(hash)
-    queue.push(...(byHash.get(hash)?.parents ?? []))
-  }
-  const dead = new Set<string>()
-  for (const c of commits) {
-    if (!merged.has(c.hash) || tips.has(c.hash)) continue
-    for (const ref of c.refs) if (ref.kind === 'remote' && !bases.includes(branchOf(ref.name))) dead.add(ref.name)
-  }
-  return dead
 }

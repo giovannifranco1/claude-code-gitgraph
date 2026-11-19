@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { badgeParts, badgesOf, badgeWidth, deadRemotes, diffBar, fitBadges } from '../hooks/badges'
+import { badgeParts, badgesOf, badgeWidth, diffBar, fitBadges } from '../hooks/badges'
 import { parseRefs } from '../hooks/log'
 import { shade } from '../hooks/pilldraw'
 
@@ -119,19 +119,10 @@ test('SC-01 with all branches off, remote refs keep marking their local branch b
   expect(badgesOf(refs, ['main']).map(b => b.label)).toContain('origin/feat')
 })
 
-test('GG-24 a remote branch merged into a base is dead, joined to its local branch on its commit; a base, or one on its tip, is not', async () => {
-  const commit = (hash: string, parents: string[], refs: string) => ({ hash, parents, refs: parseRefs(refs, ['origin']), author: '', time: 0, subject: hash })
-  // develop merged feature/a (its remote is behind the merge); feature/b is ahead; feature/new is on develop's tip
-  const rows = [
-    commit('m', ['d', 'a'], 'develop, origin/develop, origin/feature/new'),
-    commit('b', ['d'], 'origin/feature/b'),
-    commit('a', ['d'], 'feature/a, origin/feature/a'),
-    commit('d', [], 'main, origin/main'),
-  ]
-  const dead = deadRemotes(rows, ['main', 'develop'])
-  expect([...dead].sort()).toEqual(['origin/feature/a'])
-  // on its local branch's commit the two are one dead pill, the remote after a separator
-  const pill = badgesOf(rows[2]!.refs, ['feature/a'], true, dead)
+test('GG-24 a dead remote is joined to its local branch on its commit, alone elsewhere', async () => {
+  const dead = new Set(['origin/feature/a'])
+  // on its local branch's commit the two are one dead pill
+  const pill = badgesOf(parseRefs('feature/a, origin/feature/a', ['origin']), ['feature/a'], true, dead)
   expect(pill).toEqual([{ kind: 'branch', label: 'feature/a', remotes: ['origin'], isGone: true }])
   expect(badgeParts(pill[0]!)).toEqual({ lead: true, name: 'feature/a', remotes: 'origin' })
   // ghost 3, ' feature/a ' 11, ' origin ' 8
