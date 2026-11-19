@@ -38,9 +38,25 @@ export function visibleRange(
 
 export const isHashQuery = (query: string) => /^[0-9a-fA-F]{4,40}$/.test(query)
 
-export function findByHash(hashes: string[], query: string): string | undefined {
-  const prefix = query.toLowerCase()
-  return hashes.find(h => h.startsWith(prefix))
+// The commit a search lands on: the hash prefix (a term that looks like one), the message or
+// the author, case apart; of several, the first below `after` (the selected one), in a loop.
+// `index` is its place among the `count` that match, from 1.
+export function findCommit(
+  commits: { hash: string; subject: string; author: string }[],
+  query: string,
+  after?: string,
+): { hash: string; index: number; count: number } | undefined {
+  const term = query.trim().toLowerCase()
+  if (!term) return undefined
+  const isHash = isHashQuery(term)
+  const matches = commits.flatMap((c, at) =>
+    (isHash && c.hash.startsWith(term)) || c.subject.toLowerCase().includes(term) || c.author.toLowerCase().includes(term) ? [at] : [],
+  )
+  if (!matches.length) return undefined
+  const from = after === undefined ? -1 : commits.findIndex(c => c.hash === after)
+  const next = matches.findIndex(at => at > from)
+  const pick = next < 0 ? 0 : next
+  return { hash: commits[matches[pick]!]!.hash, index: pick + 1, count: matches.length }
 }
 
 // Items of the given widths laid out in rows of at most `cols`, `gap` apart, in order:

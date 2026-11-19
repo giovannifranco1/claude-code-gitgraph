@@ -1,8 +1,13 @@
-import type { Commit, CommitDetail, FileStat, Ref } from '../types'
+import type { Commit, CommitDetail, FileStat, Ref, Track } from '../types'
 import { branchOf } from './badges'
 
-// Every ref with its commit, `<oid> <refname>` a line; the merged query reads the same format.
+// Every ref with its commit, `<oid> <refname>` a line: what the poll compares, and the format the
+// merged query reads too.
 export const REFS_ARGS = ['for-each-ref', '--format=%(objectname) %(refname)']
+
+// Each local branch and how far it is from its upstream (`<branch>\tahead 2, behind 1`; empty in
+// step or without one). Read on a load only: counting is a walk the 5s poll must not pay.
+export const TRACK_ARGS = ['for-each-ref', '--format=%(refname:short)%09%(upstream:track,nobracket)', 'refs/heads']
 
 const US = '\x1f'
 const RS = '\x1e'
@@ -63,7 +68,7 @@ export function parseStatus(stdout: string): { head: string; branch: string; dir
 
 // The checked-out branch's upstream remote and the commits it is ahead of and behind it, from
 // `git status --porcelain=v2 --branch`; null where it has no upstream (not published).
-export function parseSync(stdout: string): { remote: string; ahead: number; behind: number } | null {
+export function parseSync(stdout: string): (Track & { remote: string }) | null {
   const upstream = statusHeader(stdout, 'upstream')
   if (!upstream) return null
   const ab = /^\+(\d+) -(\d+)$/.exec(statusHeader(stdout, 'ab'))
@@ -100,6 +105,20 @@ export function parseMerged(stdout: string, refs: string, bases: string[]): stri
     const branch = branchOf(name)
     return bases.includes(branch) || branch === 'HEAD' || tips.has(oid) ? [] : [name]
   })
+}
+
+// How far each local branch is ahead of and behind its upstream, from TRACK_ARGS: only the
+// branches off by some (in step, gone or without one are left out).
+export function parseTracks(stdout: string): Record<string, Track> {
+  const tracks: Record<string, Track> = {}
+  for (const line of stdout.split('\n')) {
+    const [branch = '', track = ''] = line.split('\t')
+    const count = (word: string) => Number(new RegExp(`${word} (\\d+)`).exec(track)?.[1] ?? 0)
+    const ahead = count('ahead')
+    const behind = count('behind')
+    if (branch && (ahead || behind)) tracks[branch] = { ahead, behind }
+  }
+  return tracks
 }
 
 export function withUncommitted(commits: Commit[], head: string, dirty: number): Commit[] {

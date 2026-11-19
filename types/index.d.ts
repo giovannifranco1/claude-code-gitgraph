@@ -13,7 +13,10 @@ export type Commit = {
 export type BadgeKind = 'head' | 'detached' | 'branch' | 'remote' | 'tag'
 // `isGone`: a dead branch: a remote one with no local branch of its name (deleted here), or
 // merged into a base (then its local branch on its commit too, which carries its remote).
-export type Badge = { kind: BadgeKind; label: string; remotes: string[]; isGone?: true }
+// How far a local branch is from its upstream: its commits past it and short of it.
+export type Track = { ahead: number; behind: number }
+// `ahead`/`behind`: a local branch's Track, when not 0.
+export type Badge = { kind: BadgeKind; label: string; remotes: string[]; isGone?: true; ahead?: number; behind?: number }
 
 export type Cell = { ch: string; color: number }
 export type GraphRow = { commit: Commit; cells: Cell[] }
@@ -41,10 +44,12 @@ export type Graph = {
   locals?: string[]
   // The remote branches merged into a base (main, develop): drawn as gone.
   merged?: string[]
+  // Each local branch off its upstream: how far ahead and behind.
+  tracks?: Record<string, Track>
   // What `merged` was worked out from (the refs and the bases), to skip the query while unchanged.
   mergedKey?: string
   // The checked-out branch against its upstream; null where it has none (not published).
-  sync?: { remote: string; ahead: number; behind: number } | null
+  sync?: (Track & { remote: string }) | null
   hasMore: boolean
   error?: string
 }
@@ -78,6 +83,8 @@ export type View = {
   scrollTo: string | null
   // The hash search field, opened from its toolbar icon.
   isSearching: boolean
+  // The last term searched, kept in the field while it matches several (find again: the next).
+  search: string
   // The refresh button's feedback: running, then `done` for a moment.
   refresh: 'idle' | 'running' | 'done'
   isOpen: boolean
