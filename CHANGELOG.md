@@ -2,6 +2,12 @@
 
 Mudanças do Git Graph (`gitgraph`) por versão, no formato [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e com versões em [SemVer](https://semver.org/lang/pt-BR/).
 
+## [Unreleased]
+
+### Adicionado
+
+- **Reset changes…** nas ações das **Uncommitted changes (N)**, depois de **Commit changes…** e **Stash changes…**: a modal pede o modo, **Mixed** (`git reset`: tira tudo do stage, os arquivos ficam como estão) ou **Hard** (`git reset --hard`: descarta as mudanças dos arquivos rastreados). Abrir a modal não roda nada, escolher o modo é a confirmação. Arquivos novos ficam nos dois modos (sem `git clean`); **cancel** volta para a lista.
+
 ## [1.8.1] - 2026-11-19
 
 ### Corrigido

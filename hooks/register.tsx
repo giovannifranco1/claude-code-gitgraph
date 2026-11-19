@@ -13,7 +13,7 @@ import { DETAIL_FORMAT, localsOf, LOG_FORMAT, mergedArgs, parseChanges, parseMer
 import { basesOf, defaultTagMessage, finishArgs, mainOf, finishPushArgs, flowArgs, flowCliOf, nextVersion, parseFlowConfig, resumeArgs, topicFor, topicOf, typeOf } from './flow'
 import { BRANCH_REFS_ARGS, branchNamesOf, DEFAULT_FORM, initArgs, initFormError, initFormFor, staleBaseArgs, trimForm } from './flowinit'
 import { cleanMessage, COMMIT_SYSTEM, commitPrompt, commitRuns, contextArgs, newFiles } from './commit'
-import { checkoutArgs, defaultPushRemotes, deleteBranchArgs, type MenuItem, menuFor, menuGroups, pushRuns, renameArgs, stashArgs } from './menu'
+import { checkoutArgs, defaultPushRemotes, deleteBranchArgs, type MenuItem, menuFor, menuGroups, pushRuns, renameArgs, type ResetMode, resetArgs, stashArgs } from './menu'
 import { drawPill, type PillProps, type PillSegment, shade } from './pilldraw'
 import { BRANCH_ARGS, FIND_ARGS, UPSTREAM_ARGS, parseBranch, parseUpstream, parseRepos, pickActive, branchColumn, repoLabel } from './repos'
 import { addRemotePlan, isRemoteUrl, parseRemotes, userConfigArgs } from './settings'
@@ -322,6 +322,11 @@ async function select($: EngineInterface, hash: string): Promise<void> {
 async function stashChanges($: EngineInterface, message: string): Promise<void> {
   await setView($, v => ({ ...v, selected: null }))
   await runAction($, stashArgs(message), 'Stashed the changes')
+}
+
+async function resetChanges($: EngineInterface, mode: ResetMode): Promise<void> {
+  await setView($, v => ({ ...v, selected: null }))
+  await runAction($, resetArgs(mode), mode === 'hard' ? 'Discarded the changes' : 'Unstaged the changes')
 }
 
 // Commits every uncommitted change with the message as reviewed; an empty one commits nothing.
@@ -1464,12 +1469,12 @@ async function openUncommittedForm($: EngineInterface, form: View['uncommittedFo
 
 // The uncommitted changes' actions, as a ref's menu lists its own: each opens its form.
 function uncommittedActions($: EngineInterface, ctx: Ctx): RenderChildren[] {
-  const item = (id: 'commit' | 'stash', label: string): ListItem => ({
+  const item = (id: NonNullable<View['uncommittedForm']>, label: string): ListItem => ({
     id,
     key: `uncommitted-${id}`,
     entry: { label, isActive: ctx.view.uncommittedForm === id, onPress: () => openUncommittedForm($, id) },
   })
-  return entryList(ctx, 'uncommitted', [[item('commit', 'Commit changes…'), item('stash', 'Stash changes…')]])
+  return entryList(ctx, 'uncommitted', [[item('commit', 'Commit changes…'), item('stash', 'Stash changes…'), item('reset', 'Reset changes…')]])
 }
 
 // The form an action opened: commit them all (the message written, or Claude's suggestion
@@ -1477,13 +1482,36 @@ function uncommittedActions($: EngineInterface, ctx: Ctx): RenderChildren[] {
 function uncommittedForm($: EngineInterface, ctx: Ctx): Omit<Dialog, 'color'> | null {
   const { els: { Text, Button }, Input, view } = ctx
   if (!Input || !view.uncommittedForm) return null
-  const cancel = (key: string) => line(ctx, closeButton(ctx, key, () => openUncommittedForm($, null), 'cancel'))
+  const cancel = (key: string) => closeButton(ctx, key, () => openUncommittedForm($, null), 'cancel')
   if (view.running) return { title: 'Uncommitted changes', rows: [renderRunning(ctx)], actions: line(ctx, null) }
   if (view.uncommittedForm === 'stash')
     return {
       title: 'Stash changes',
       rows: [line(ctx, <Input key="stash-message" label="Message" placeholder="optional" submitLabel="stash" autoFocus onSubmit={value => stashChanges($, value)} />)],
-      actions: cancel('stash-cancel'),
+      actions: line(ctx, cancel('stash-cancel')),
+    }
+  // Picking the mode is the confirmation: opening the form runs nothing.
+  if (view.uncommittedForm === 'reset')
+    return {
+      title: 'Reset changes',
+      rows: [
+        line(ctx, <Text color={MUTED}>Mixed: unstage the changes, files stay as they are</Text>),
+        line(ctx, <Text color={MUTED}>Hard: discard the changes of tracked files</Text>),
+        line(ctx, <Text color={MUTED}>New files are kept either way</Text>),
+      ],
+      actions: line(
+        ctx,
+        [
+          <Button key="reset-mixed" variant="primary" autoFocus onPress={() => resetChanges($, 'mixed')}>
+            Mixed
+          </Button>,
+          <Button key="reset-hard" onPress={() => resetChanges($, 'hard')}>
+            Hard
+          </Button>,
+          cancel('reset-cancel'),
+        ],
+        2,
+      ),
     }
   if (view.commitStep === 'files') return commitFilesForm($, ctx)
   // Claude's message, whole (wrapped over a few lines of a wider dialog) and not edited: Commit
@@ -1514,7 +1542,7 @@ function uncommittedForm($: EngineInterface, ctx: Ctx): Omit<Dialog, 'color'> | 
         <Button key="commit-back" plain dimColor onPress={() => setView($, v => ({ ...v, commitStep: 'files', commitDraft: '' }))}>
           ← files
         </Button>,
-        closeButton(ctx, 'commit-cancel', () => openUncommittedForm($, null), 'cancel'),
+        cancel('commit-cancel'),
       ],
       2,
     ),

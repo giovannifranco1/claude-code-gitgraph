@@ -96,7 +96,7 @@ export type View = {
   commitDraft: string
   isSuggesting: boolean
   // The form the uncommitted changes' actions opened, in a dialog of its own; null: the actions.
-  uncommittedForm: 'commit' | 'stash' | null
+  uncommittedForm: 'commit' | 'stash' | 'reset' | null
   // The commit's step (pick the files, then the message) and the files picked, by path.
   commitStep: 'files' | 'message'
   commitFiles: string[]
