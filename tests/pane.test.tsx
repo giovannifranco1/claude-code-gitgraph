@@ -1534,6 +1534,52 @@ test('GF-06 a finish stopped by a conflict offers continue and abort', async ($,
   await ui.unmount()
 })
 
+test('CR-01 a git flow conflict asks Claude to resolve its files, naming the finish', async ($, on) => {
+  const toasts: string[] = []
+  const prompts: string[] = []
+  const fake = newFake({ branch: 'feature/login', conflictOn: 'finish' })
+  on('prompt.submit', (_, e) => {
+    prompts.push(e.text)
+    return { text: e.text }
+  })
+  await setup($, on, fake, [], toasts)
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: 'flow-open' })
+  await ui.press({ key: 'flow-finish' })
+  await ui.press({ key: 'flow-finish-run' })
+  await ui.press({ key: 'conflict-claude' })
+  expect(prompts).toHaveLength(1)
+  expect(prompts[0]).toContain('left by git flow finish of feature/login')
+  expect(prompts[0]).toContain('- src/b.ts')
+  expect(toasts).toContain('Asked Claude to resolve 1 conflicted file')
+  await ui.unmount()
+})
+
+test('CR-01 conflicted files show on the uncommitted changes row, whose actions start with asking Claude', async ($, on) => {
+  const prompts: string[] = []
+  on('prompt.submit', (_, e) => {
+    prompts.push(e.text)
+    return { text: e.text }
+  })
+  await setup($, on, newFake({ isConflicted: true }))
+  const ui = await $.ui.mount(pane('terminal'))
+  expect(await ui.find({ type: 'Text', text: /Conflicts \(1\)/ })).toBeDefined()
+  await ui.press({ key: 'uncommitted' })
+  await ui.press({ key: 'uncommitted-claude' })
+  expect(prompts[0]).toContain('Resolve the git conflicts in this repository.')
+  expect(prompts[0]).toContain('- src/b.ts')
+  await ui.unmount()
+})
+
+test('CR-01 with no conflict there is no asking Claude', async ($, on) => {
+  await setup($, on, newFake())
+  const ui = await $.ui.mount(pane('terminal'))
+  expect(await ui.find({ type: 'Text', text: /Conflicts/ })).toBeUndefined()
+  await ui.press({ key: 'uncommitted' })
+  expect(await ui.find({ type: 'Button', key: 'uncommitted-claude' })).toBeUndefined()
+  await ui.unmount()
+})
+
 test('GF-06 an update stopped by a conflict aborts the rebase on the second press', async ($, on) => {
   const fake = newFake({ branch: 'feature/login', conflictOn: 'update' })
   await setup($, on, fake)

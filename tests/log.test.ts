@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import type { Commit } from '../types'
-import { detailArgs, detailOf, isPseudoRow, localsOf, mergedArgs, parseChanges, parseDetail, parseMerged, parseStashes, parseTracks, REFS_ARGS, STASH_ARGS, TRACK_ARGS, parseSync, parseLog, parseRefs, parseStatus, remotesOf, UNCOMMITTED, withStashes, withUncommitted } from '../hooks/log'
+import { conflictedFiles, detailArgs, detailOf, isPseudoRow, localsOf, mergedArgs, parseChanges, parseDetail, parseMerged, parseStashes, parseTracks, REFS_ARGS, STASH_ARGS, TRACK_ARGS, parseSync, parseLog, parseRefs, parseStatus, remotesOf, UNCOMMITTED, withStashes, withUncommitted } from '../hooks/log'
 
 const US = '\x1f'
 const RS = '\x1e'
@@ -198,4 +198,10 @@ test('SH-01 a stash newer than every commit above its base goes right above it, 
   expect(withStashes(commits, [{ hash: 's0', base: 'c1', time: 900, name: 'stash@{0}', subject: 'x' }]).map(c => c.hash)).toEqual(['stash@{0}', 'c2', 'c1'])
   // dated before its base (a clock skew): right above the base
   expect(withStashes(commits, [{ hash: 's0', base: 'c2', time: 1, name: 'stash@{0}', subject: 'x' }]).map(c => c.hash)).toEqual(['stash@{0}', 'c2', 'c1'])
+})
+
+test('CR-01 the files in conflict come from the status, and are what it counts', async () => {
+  const out = '# branch.oid a1\n# branch.head main\nu UU N... 100644 100644 100644 100644 a b c src/b.ts\n1 .M N... 100644 100644 100644 x y src/a.ts\nu AA N... 100644 100644 100644 100644 a b c new file.ts\n'
+  expect(conflictedFiles(out)).toEqual(['src/b.ts', 'new file.ts'])
+  expect(parseStatus(out).conflicts).toBe(2)
 })
