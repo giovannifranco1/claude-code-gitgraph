@@ -5,13 +5,14 @@ import type { Badge, BadgeKind, BadgeStyle, Cell, Change, Changelog, Columns, Co
 import { parseChangelog, versionOf } from './changelog'
 import { diffKey, diffRuns, parseDiff, sourceLabel } from './diff'
 import { compareRuns, parseCount, rangeKey } from './compare'
+import { conflictOrigin, conflictPrompt, conflictToast } from './conflict'
 import { backOf, CLOSED, dismissModal, FLOW_CLOSED, hasModal } from './dismiss'
 import { badgeParts, badgesOf, branchOf, diffBar, fitBadges, plainPillWidth, syncText, withSync } from './badges'
 import { isBranchNameCandidate } from './detect'
 import { absTime, fitGraph, HASH_W, relTime, short, truncate, truncateMiddle } from './format'
 import { layout, NODES } from './lanes'
 import { clampTop, findCommit, isHashQuery, topOf, visibleRange, widestIn, windowAt, wrapRows } from './virtual'
-import { detailArgs, detailOf, isPseudoRow, isStashRow, localsOf, LOG_FORMAT, mergedArgs, parseChanges, parseMerged, parseNumstat, parseStashes, parseTracks, REFS_ARGS, STASH_ARGS, TRACK_ARGS, parseLog, parseStatus, parseSync, remotesOf, UNCOMMITTED, withStashes, withUncommitted } from './log'
+import { conflictedFiles, detailArgs, detailOf, isPseudoRow, isStashRow, localsOf, LOG_FORMAT, mergedArgs, parseChanges, parseMerged, parseNumstat, parseStashes, parseTracks, REFS_ARGS, STASH_ARGS, TRACK_ARGS, parseLog, parseStatus, parseSync, remotesOf, UNCOMMITTED, withStashes, withUncommitted } from './log'
 import { basesOf, defaultTagMessage, finishArgs, mainOf, finishPushArgs, flowArgs, flowCliOf, nextVersion, parseFlowConfig, resumeArgs, topicFor, topicOf, typeOf } from './flow'
 import { BRANCH_REFS_ARGS, branchNamesOf, DEFAULT_FORM, initArgs, initFormError, initFormFor, staleBaseArgs, trimForm } from './flowinit'
 import { cleanMessage, COMMIT_SYSTEM, commitPrompt, commitRuns, contextArgs, newFiles } from './commit'
@@ -650,6 +651,29 @@ async function readChangelog($: EngineInterface): Promise<Changelog> {
   return { versions: parseChangelog(md), installed: versionOf(manifest) }
 }
 
+// The uncommitted changes as they are now (the graph's may predate them): read afresh into the
+// graph, with the staged and conflicted counts; the stdout of the status, '' when it failed.
+async function readChanges($: EngineInterface): Promise<string> {
+  const status = await git($, STATUS_ARGS)
+  if (status.exitCode !== 0) return ''
+  const { staged, conflicts } = parseStatus(status.stdout)
+  await setGraph($, g => ({ ...g, changes: parseChanges(status.stdout), staged, conflicts }))
+  return status.stdout
+}
+
+// Asks Claude, in the session's chat, to resolve the files in conflict now; `from` the
+// operation that left them, when known.
+async function askClaudeToResolve($: EngineInterface, from?: string): Promise<void> {
+  const files = conflictedFiles(await readChanges($))
+  if (!files.length) {
+    $.ui.toast('No conflicted files to resolve')
+    return
+  }
+  const { active } = await read($, reposState)
+  await $.prompt.submit({ text: conflictPrompt({ files, from, repo: active }) })
+  $.ui.toast(conflictToast(files.length))
+}
+
 // Swaps the graph for a file's diff: its runs at once, the first in order that printed wins.
 async function openDiff($: EngineInterface, source: DiffSource, path: string): Promise<void> {
   // A comparison's file goes back to the comparison, any other to the graph.
@@ -1001,8 +1025,9 @@ function renderRow($: EngineInterface, ctx: Ctx, { commit, cells }: GraphRow) {
           {commit.subject}
         </Text>
       </Button>,
-      // How many of them are staged, beside it in red.
+      // How many of them are staged, and in conflict, beside it in red.
       ...(ctx.graph.staged ? [<Text color="error">{`Staged (${ctx.graph.staged})`}</Text>] : []),
+      ...(ctx.graph.conflicts ? [<Text color="error">{`Conflicts (${ctx.graph.conflicts})`}</Text>] : []),
     ], 2)
   const lane = laneColor(cells)
   const meta = metaOf(ctx, commit.author, commit.hash)
@@ -1538,13 +1563,7 @@ function renderDetail($: EngineInterface, ctx: Ctx, { commit, cells }: GraphRow)
 async function openUncommittedForm($: EngineInterface, form: View['uncommittedForm']): Promise<void> {
   // The commit lists the changes as they are now (the graph's may predate them, or this code),
   // every one picked to start with.
-  if (form === 'commit') {
-    const status = await git($, STATUS_ARGS)
-    if (status.exitCode === 0) {
-      const { staged } = parseStatus(status.stdout)
-      await setGraph($, g => ({ ...g, changes: parseChanges(status.stdout), staged }))
-    }
-  }
+  if (form === 'commit') await readChanges($)
   const all = ((await readGraph($)).changes ?? []).map(c => c.path)
   await setView($, v => ({ ...v, uncommittedForm: form, commitDraft: '', commitStep: 'files', commitFiles: all }))
 }
@@ -1556,7 +1575,9 @@ function uncommittedActions($: EngineInterface, ctx: Ctx): RenderChildren[] {
     key: `uncommitted-${id}`,
     entry: { label, isActive: ctx.view.uncommittedForm === id, onPress: () => openUncommittedForm($, id) },
   })
-  return entryList(ctx, 'uncommitted', [[item('commit', 'Commit changes…'), item('stash', 'Stash changes…'), item('reset', 'Reset changes…')]])
+  // With files in conflict, asking Claude to resolve them comes first.
+  const claude: ListItem = { id: 'claude', key: 'uncommitted-claude', entry: { label: '✨ Resolve conflicts with Claude', isActive: false, onPress: () => askClaudeToResolve($) } }
+  return entryList(ctx, 'uncommitted', [ctx.graph.conflicts ? [claude] : [], [item('commit', 'Commit changes…'), item('stash', 'Stash changes…'), item('reset', 'Reset changes…')]])
 }
 
 // The form an action opened: commit them all (the message written, or Claude's suggestion
@@ -1969,6 +1990,9 @@ function conflictRows($: EngineInterface, ctx: Ctx, conflict: FlowConflict) {
           Continue
         </Button>,
         confirmButton($, ctx, 'flow-abort', 'flow-abort', 'Abort', () => runFlow($, [{ args: resumeArgs(conflict, '--abort') }], 'Aborted', 'Aborting…')),
+        <Button key="conflict-claude" plain onPress={() => askClaudeToResolve($, conflictOrigin(conflict))}>
+          ✨ Ask Claude
+        </Button>,
       ],
       1,
     ),

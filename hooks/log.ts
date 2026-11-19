@@ -63,7 +63,7 @@ export function parseStatus(stdout: string): { head: string; branch: string; dir
     branch: branch === '(detached)' ? '' : branch,
     dirty: stdout.split('\n').filter(l => l !== '' && !l.startsWith('#')).length,
     staged: parseChanges(stdout).filter(c => c.isStaged).length,
-    conflicts: stdout.split('\n').filter(l => l.startsWith('u ')).length,
+    conflicts: conflictedFiles(stdout).length,
   }
 }
 
@@ -87,6 +87,9 @@ export function parseChanges(stdout: string): Change[] {
     return [{ path: fields.slice(8).join(' '), code, isStaged: x !== '.' }]
   })
 }
+
+// The files a merge, rebase or apply left in conflict (unmerged, `u` lines of the status).
+export const conflictedFiles = (stdout: string) => parseChanges(stdout).filter(c => c.code === 'U').map(c => c.path)
 
 // The checked-out branch's upstream remote and the commits it is ahead of and behind it, from
 // `git status --porcelain=v2 --branch`; null where it has no upstream (not published).
