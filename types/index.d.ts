@@ -39,6 +39,10 @@ export type Graph = {
   remotes: string[]
   // The local branch names: a remote branch with none of its name is gone here (merged, deleted).
   locals?: string[]
+  // The remote branches merged into a base (main, develop): drawn as gone.
+  merged?: string[]
+  // What `merged` was worked out from (the refs and the bases), to skip the query while unchanged.
+  mergedKey?: string
   // The checked-out branch against its upstream; null where it has none (not published).
   sync?: { remote: string; ahead: number; behind: number } | null
   hasMore: boolean

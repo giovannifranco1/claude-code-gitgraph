@@ -4,13 +4,13 @@ import type { ClientElements, Elements, EngineInterface, ProcessRunResult, Regis
 import type { Badge, BadgeKind, BadgeStyle, Cell, Changelog, Columns, CommitDetail, ConfigScope, FileStat, FlowConfig, FlowConflict, FlowInfo, FlowInitForm, FlowKind, FlowOptions, FlowTopic, FlowView, Graph, GraphRow, Ref, RepoSettings, Repos, Screen, View } from '../types'
 import { parseChangelog, versionOf } from './changelog'
 import { CLOSED, dismissModal, FLOW_CLOSED, hasModal } from './dismiss'
-import { badgeParts, badgesOf, branchOf, deadRemotes, diffBar, fitBadges } from './badges'
+import { badgeParts, badgesOf, branchOf, diffBar, fitBadges } from './badges'
 import { isBranchNameCandidate } from './detect'
 import { absTime, fitGraph, HASH_W, relTime, short, truncate, truncateMiddle } from './format'
 import { layout } from './lanes'
 import { clampTop, findByHash, isHashQuery, topOf, visibleRange, widestIn, windowAt, wrapRows } from './virtual'
-import { DETAIL_FORMAT, localsOf, LOG_FORMAT, parseDetail, parseLog, parseStatus, parseSync, remotesOf, UNCOMMITTED, withUncommitted } from './log'
-import { basesOf, defaultTagMessage, finishArgs, finishPushArgs, flowArgs, flowCliOf, nextVersion, parseFlowConfig, resumeArgs, topicFor, topicOf, typeOf } from './flow'
+import { DETAIL_FORMAT, localsOf, LOG_FORMAT, mergedArgs, parseMerged, REFS_ARGS, parseDetail, parseLog, parseStatus, parseSync, remotesOf, UNCOMMITTED, withUncommitted } from './log'
+import { basesOf, defaultTagMessage, finishArgs, mainOf, finishPushArgs, flowArgs, flowCliOf, nextVersion, parseFlowConfig, resumeArgs, topicFor, topicOf, typeOf } from './flow'
 import { BRANCH_REFS_ARGS, branchNamesOf, DEFAULT_FORM, initArgs, initFormError, initFormFor, staleBaseArgs, trimForm } from './flowinit'
 import { checkoutArgs, defaultPushRemotes, deleteBranchArgs, type MenuItem, menuFor, menuGroups, pushRuns, renameArgs } from './menu'
 import { drawPill, type PillProps, type PillSegment, shade } from './pilldraw'
@@ -27,6 +27,9 @@ const NETWORK_TIMEOUT_MS = 120_000
 const MAX_FILES = 20
 const PALETTE = ['#4fc1ff', '#c586c0', '#ce9178', '#4ec9b0', '#dcdcaa', '#f48771', '#b5cea8', '#d7ba7d']
 const BADGE_FG = '#1e1e1e'
+// Secondary text (author, hash, hints, a merge commit's text): a set gray, not `dimColor`, the
+// terminal's faint, which many themes barely draw.
+const MUTED = '#808080'
 const BADGE_BG: Partial<Record<BadgeKind, string>> = { tag: '#e2c08d', detached: '#f48771' }
 // A gone branch's pill, the `+N` pill and a remote's name in settings.
 const GRAY_BG = '#9d9d9d'
@@ -43,7 +46,6 @@ const BAR_W = 8
 const PILL_PAD = 3
 const EDGE_SAFETY = 1
 const STATUS_ARGS = ['status', '--porcelain=v2', '--branch']
-const REFS_ARGS = ['for-each-ref', '--format=%(objectname) %(refname)']
 const DOUBLE_CLICK_MS = 450
 const REFRESHED_MS = 1_500
 // Nerd Font glyphs where one is installed, plain Unicode otherwise.
@@ -109,8 +111,7 @@ const reposState = atom({ plugin: 'gitgraph', key: 'repos' } as const, { list: [
 let generation = 0
 // What a render derives from the graph, worked out once per graph version.
 // `branchColors`: each local branch's pill color (its tip's lane), which its remotes take too.
-// `dead`: the remotes merged into a base, worked out for the bases named (`deadFor`).
-type GraphCache = { version: number; graph: Graph; maxCells: number; indexOf: Map<string, number>; branchColors: Map<string, string>; dead?: { bases: string; set: Set<string> } }
+type GraphCache = { version: number; graph: Graph; maxCells: number; indexOf: Map<string, number>; branchColors: Map<string, string>; dead: Set<string> }
 let graphCache: GraphCache | null = null
 let signature = ''
 let busy = false
@@ -195,6 +196,7 @@ function cacheOf(version: number, graph: Graph): GraphCache {
     maxCells: graph.rows.reduce((n, r) => Math.max(n, r.cells.length), 1),
     indexOf: new Map(graph.rows.map((r, i) => [r.commit.hash, i])),
     branchColors: new Map(graph.rows.flatMap(r => r.commit.refs.flatMap(ref => (ref.kind === 'head' || ref.kind === 'branch' ? [[ref.name, laneColor(r.cells)] as const] : [])))),
+    dead: new Set(graph.merged ?? []),
   }
 }
 
@@ -215,14 +217,6 @@ const openPane = ($: EngineInterface, view: View) => $.ui.open({ id: PANE, title
 async function setGraph($: EngineInterface, change: (g: Graph) => Graph): Promise<void> {
   const graph = await update($, graphState, change)
   graphCache = cacheOf(await update($, versionState, n => n + 1), graph)
-}
-
-// The remotes merged into a base (drawn as gone), once per graph version and bases.
-function deadFor(cache: GraphCache, flow: FlowInfo | null): Set<string> {
-  const bases = basesOf(flow?.config)
-  const key = bases.join()
-  if (cache.dead?.bases !== key) cache.dead = { bases: key, set: deadRemotes(cache.graph.rows.map(r => r.commit), bases) }
-  return cache.dead.set
 }
 
 // A commit's badges as the pane draws them: remotes alone only with all branches on, merged ones gone.
@@ -257,6 +251,19 @@ async function load($: EngineInterface, known?: RepoState): Promise<void> {
     }
     const { head, branch, dirty, conflicts } = parseStatus(status.stdout)
     const remotes = remotesOf(refs.stdout)
+    const locals = localsOf(refs.stdout)
+    // The remotes merged into a base: needs the branches the refs name, so it runs after them,
+    // and only when the refs or the bases changed (a scope toggle or load more keeps them).
+    const bases = basesOf((await read($, flowState))?.config)
+    const mergedKey = `${bases.join()}\0${refs.stdout}`
+    const before = await read($, graphState)
+    let merged = before.mergedKey === mergedKey ? (before.merged ?? []) : null
+    if (merged === null) {
+      const query = mergedArgs(bases, locals)
+      const out = query ? await git($, query) : null
+      if (!isCurrent()) return
+      merged = out?.exitCode === 0 ? parseMerged(out.stdout, refs.stdout, bases) : []
+    }
     const commits = parseLog(log.exitCode === 0 ? log.stdout : '', remotes)
     const shown = withUncommitted(commits.slice(0, view.limit), head, dirty)
     const cells = layout(shown, PALETTE.length)
@@ -268,7 +275,9 @@ async function load($: EngineInterface, known?: RepoState): Promise<void> {
       branch,
       conflicts,
       remotes,
-      locals: localsOf(refs.stdout),
+      locals,
+      merged,
+      mergedKey,
       sync: parseSync(status.stdout),
       hasMore: commits.length > view.limit,
     }))
@@ -644,6 +653,8 @@ type Ctx = {
   columns: Columns
   branchColors: Map<string, string>
   dead: Set<string>
+  // The main branch's pill color, which tags take; absent while it is not loaded.
+  mainColor: string | undefined
 }
 
 // The dark shade of a pill's color: its remotes' segment (light text) and its icon.
@@ -655,10 +666,12 @@ const LIGHT_FG = '#f0f0f0'
 // shade of the pill color. Icons are in that dark shade.
 // A badge's color: a gone one (merged, or deleted here) gray; a remote branch the dark shade of
 // its local branch's color (its own lane's while that one is not loaded), as a local pill's
-// remote segment is; a tag or a detached HEAD its own; a branch its lane's.
-function pillBg({ branchColors }: Ctx, badge: Badge, lane: string): string {
+// remote segment is; a tag the main branch's (its own while main is not loaded); a detached
+// HEAD its own; a branch its lane's.
+function pillBg({ branchColors, mainColor }: Ctx, badge: Badge, lane: string): string {
   if (badge.isGone) return GRAY_BG
   if (badge.kind === 'remote') return shade(branchColors.get(branchOf(badge.label)) ?? lane, SHADE)
+  if (badge.kind === 'tag' && mainColor) return mainColor
   return BADGE_BG[badge.kind] ?? lane
 }
 
@@ -719,7 +732,7 @@ function line({ els: { Box } }: Ctx, children: RenderChildren, gap = 0, justify?
   )
 }
 
-const rule = (ctx: Ctx, width = ctx.cols, key?: string) => line(ctx, <ctx.els.Text dimColor>{'─'.repeat(Math.max(0, width))}</ctx.els.Text>, 0, undefined, key)
+const rule = (ctx: Ctx, width = ctx.cols, key?: string) => line(ctx, <ctx.els.Text color={MUTED}>{'─'.repeat(Math.max(0, width))}</ctx.els.Text>, 0, undefined, key)
 
 const localBranch = (refs: Ref[]) => refs.find(r => (r.kind === 'head' && r.name !== 'HEAD') || r.kind === 'branch')?.name
 const isCheckedOut = (refs: Ref[]) => refs.some(r => r.kind === 'head' && r.name !== 'HEAD')
@@ -732,10 +745,10 @@ function switchButton(ctx: Ctx, key: string, label: string, isOn: boolean, onPre
   // A Nerd Font icon is drawn two cells wide over the space after it: two spaces keep one.
   return (
     <Button key={key} plain onPress={onPress}>
-      <Text color={isOn ? 'success' : undefined} dimColor={!isOn}>
+      <Text color={isOn ? 'success' : MUTED}>
         {isOn ? icons.on : icons.off}
       </Text>
-      <Text dimColor={!isOn}>{' '.repeat(iconCells(ctx))}{label}</Text>
+      <Text color={isOn ? undefined : MUTED}>{' '.repeat(iconCells(ctx))}{label}</Text>
     </Button>
   )
 }
@@ -812,7 +825,7 @@ function renderHeader($: EngineInterface, ctx: Ctx) {
           // The branch goes inside the Button, as a dim Text child: a sibling of the Button on the row is not drawn.
           <Button key={`repo-option:${path}`} plain dimColor={path !== repos.active} onPress={() => selectRepo($, path)}>
             {label}
-            <Text dimColor>{branchColumn(label, repos.branches[path], cols)}</Text>
+            <Text color={MUTED}>{branchColumn(label, repos.branches[path], cols)}</Text>
           </Button>,
         ),
       )
@@ -830,14 +843,12 @@ function renderHeader($: EngineInterface, ctx: Ctx) {
   const graphHead = 'Graph'.padEnd(Math.max(graphWidth + 1, 'Graph '.length))
   if (cols >= 70)
     lines.push(
-      line(ctx, <Text dimColor>{`${graphHead}${'Description'.padEnd(Math.max(0, cols - EDGE_SAFETY - graphHead.length - meta.length))}${meta}`}</Text>),
+      line(ctx, <Text color={MUTED}>{`${graphHead}${'Description'.padEnd(Math.max(0, cols - EDGE_SAFETY - graphHead.length - meta.length))}${meta}`}</Text>),
     )
   lines.push(rule(ctx))
   return { node: <Box flexDirection="column">{lines}</Box>, height: lines.length }
 }
 
-// A merge commit's text, as Git Graph in VS Code mutes merges.
-const MERGE_GRAY = '#808080'
 
 function renderRow($: EngineInterface, ctx: Ctx, { commit, cells }: GraphRow) {
   const { els, view, cols, graphWidth } = ctx
@@ -867,7 +878,7 @@ function renderRow($: EngineInterface, ctx: Ctx, { commit, cells }: GraphRow) {
   const room = Math.max(0, cols - fixed - width)
   const isSelected = view.selected === commit.hash
   // A merge commit's text is gray: the Button dim too, in case a surface draws its children in its style.
-  const mergeColor = commit.parents.length > 1 ? MERGE_GRAY : undefined
+  const mergeColor = commit.parents.length > 1 ? MUTED : undefined
   // With `Client`, each pill is its own instance so a right click opens its menu.
   return (
     <Box height={1} overflow="hidden" flexDirection="row">
@@ -895,7 +906,7 @@ function renderRow($: EngineInterface, ctx: Ctx, { commit, cells }: GraphRow) {
         <Text backgroundColor={isSelected ? SELECTED_BG : undefined} weight={isSelected ? 'bold' : undefined} color={mergeColor}>
           {truncate(commit.subject, room).padEnd(room)}
         </Text>
-        <Text dimColor={!mergeColor} color={mergeColor}>
+        <Text color={MUTED}>
           {meta}
         </Text>
       </Button>
@@ -983,7 +994,7 @@ function pushParts($: EngineInterface, ctx: Ctx, badge: Badge, item: MenuItem): 
             Push to {chosen.join(', ')}
           </Button>
         ) : (
-          <Text dimColor>Select at least one remote</Text>
+          <Text color={MUTED}>Select at least one remote</Text>
         ),
         <Button key="push-cancel" plain dimColor onPress={() => setView($, v => ({ ...v, push: null }))}>
           cancel
@@ -997,7 +1008,7 @@ function pushParts($: EngineInterface, ctx: Ctx, badge: Badge, item: MenuItem): 
 // The push chooser under its menu item (off a docked terminal pane).
 function renderPushChooser($: EngineInterface, ctx: Ctx, badge: Badge, item: MenuItem) {
   const { remotes, actions } = pushParts($, ctx, badge, item)
-  return [line(ctx, <ctx.els.Text dimColor>Push {badge.label} to:</ctx.els.Text>), remotes, actions]
+  return [line(ctx, <ctx.els.Text color={MUTED}>Push {badge.label} to:</ctx.els.Text>), remotes, actions]
 }
 
 
@@ -1103,7 +1114,7 @@ type BarItem = { node: RenderChildren; width: number }
 
 const barText = (ctx: Ctx, text: string, color?: 'warning'): BarItem => ({
   node: (
-    <ctx.els.Text color={color} dimColor={!color}>
+    <ctx.els.Text color={color ?? MUTED}>
       {text}
     </ctx.els.Text>
   ),
@@ -1237,7 +1248,7 @@ function renderFiles(ctx: Ctx, files: FileStat[]) {
         <Text>
           {truncate(f.path, pathRoom).padEnd(pathRoom)}
           {f.adds === null ? (
-            <Text dimColor>{'bin'.padStart(12)}</Text>
+            <Text color={MUTED}>{'bin'.padStart(12)}</Text>
           ) : (
             <Text>
               <Text color={ADD_COLOR}>{`+${f.adds}`.padStart(6)}</Text>
@@ -1249,7 +1260,7 @@ function renderFiles(ctx: Ctx, files: FileStat[]) {
         </Text>,
       )
     }),
-    ...(files.length > MAX_FILES ? [line(ctx, <Text dimColor>… and {files.length - MAX_FILES} more files</Text>)] : []),
+    ...(files.length > MAX_FILES ? [line(ctx, <Text color={MUTED}>… and {files.length - MAX_FILES} more files</Text>)] : []),
   ]
 }
 
@@ -1326,12 +1337,12 @@ function renderDetail($: EngineInterface, ctx: Ctx, { commit, cells }: GraphRow)
     ),
   ]
   if (view.isActionsOpen && !view.running && !ctx.isPinned) rows.push(...commitActions($, ctx, commit), blank(ctx))
-  if (detail === null) rows.push(line(ctx, <Text dimColor>Loading details…</Text>))
+  if (detail === null) rows.push(line(ctx, <Text color={MUTED}>Loading details…</Text>))
   else {
     rows.push(
       line(
         ctx,
-        <Text dimColor wrap="truncate-end">
+        <Text color={MUTED} wrap="truncate-end">
           {detail.author} &lt;{detail.email}&gt; · {absTime(detail.time)} ({relTime(ctx.now, detail.time)}) · {detail.hash}
         </Text>,
       ),
@@ -1339,7 +1350,7 @@ function renderDetail($: EngineInterface, ctx: Ctx, { commit, cells }: GraphRow)
     rows.push(...refMenuRows($, ctx, commit.hash, badges))
     if (body.length && body[0] !== '') {
       rows.push(blank(ctx), ...body.slice(0, BODY_LINES).map(l => line(ctx, <Text wrap="truncate-end">{l}</Text>)))
-      if (body.length > BODY_LINES) rows.push(line(ctx, <Text dimColor>…</Text>))
+      if (body.length > BODY_LINES) rows.push(line(ctx, <Text color={MUTED}>…</Text>))
     }
     rows.push(blank(ctx), ...renderFiles(ctx, detail.files))
   }
@@ -1369,9 +1380,9 @@ function renderChangelog($: EngineInterface, ctx: Ctx, changelog: Changelog | nu
   const { Box, Text } = ctx.els
   const body =
     !changelog ? (
-      <Text dimColor>Loading…</Text>
+      <Text color={MUTED}>Loading…</Text>
     ) : changelog.versions.length === 0 ? (
-      <Text dimColor>Could not read the mod's CHANGELOG.md</Text>
+      <Text color={MUTED}>Could not read the mod's CHANGELOG.md</Text>
     ) : (
       changelog.versions.map(v => {
         const isInstalled = v.version === changelog.installed
@@ -1417,13 +1428,13 @@ function renderSettings($: EngineInterface, ctx: Ctx, settings: RepoSettings | n
     <Box flexDirection="column">
       {screenHeader($, ctx, 'settings', `${ctx.icons.settings} Repository settings`)}
       {settings === null ? (
-        <Text dimColor>Loading…</Text>
+        <Text color={MUTED}>Loading…</Text>
       ) : (
         <Box flexDirection="column" gap={1}>
           <Box flexDirection="column">
             <Text>
               <Text weight="bold">Columns</Text>
-              <Text dimColor> · every repository</Text>
+              <Text color={MUTED}> · every repository</Text>
             </Text>
             <Box flexDirection="row" gap={2}>
               {switchButton(ctx, 'cfg-col-author', 'author', ctx.columns.isAuthor, () => toggleColumn($, 'isAuthor'))}
@@ -1432,10 +1443,10 @@ function renderSettings($: EngineInterface, ctx: Ctx, settings: RepoSettings | n
           </Box>
           <Box flexDirection="column">
             <Text weight="bold">User</Text>
-            <Text dimColor>name   {both('name')}</Text>
-            <Text dimColor>email  {both('email')}</Text>
+            <Text color={MUTED}>name   {both('name')}</Text>
+            <Text color={MUTED}>email  {both('email')}</Text>
             <Box flexDirection="row" gap={2} marginTop={1}>
-              <Text dimColor>Save to:</Text>
+              <Text color={MUTED}>Save to:</Text>
               {scopeButton('local', 'this repository')}
               {scopeButton('global', 'global')}
             </Box>
@@ -1448,15 +1459,15 @@ function renderSettings($: EngineInterface, ctx: Ctx, settings: RepoSettings | n
           </Box>
           <Box flexDirection="column">
             <Text weight="bold">Remotes</Text>
-            {settings.remotes.length === 0 && <Text dimColor>No remotes.</Text>}
+            {settings.remotes.length === 0 && <Text color={MUTED}>No remotes.</Text>}
             {settings.remotes.map(r => (
               <Box flexDirection="column">
                 <Box height={1} overflow="hidden" flexDirection="row">
                   <Box flexShrink={0}>{renderPill(ctx, plainPill(ctx, r.name, GRAY_BG, true))}</Box>
-                  <Text dimColor>{truncateMiddle(r.fetchUrl, Math.max(10, cols - r.name.length - PILL_PAD))}</Text>
+                  <Text color={MUTED}>{truncateMiddle(r.fetchUrl, Math.max(10, cols - r.name.length - PILL_PAD))}</Text>
                 </Box>
                 {r.pushUrl && r.pushUrl !== r.fetchUrl && (
-                  <Text dimColor>{`  push: ${truncateMiddle(r.pushUrl, Math.max(10, cols - 8))}`}</Text>
+                  <Text color={MUTED}>{`  push: ${truncateMiddle(r.pushUrl, Math.max(10, cols - 8))}`}</Text>
                 )}
                 {!view.running && (
                   <Box flexDirection="row" gap={1} marginLeft={2}>
@@ -1507,7 +1518,7 @@ function renderSettings($: EngineInterface, ctx: Ctx, settings: RepoSettings | n
           {ctx.flow?.config && (
             <Box flexDirection="column">
               <Text weight="bold">Git Flow</Text>
-              <Text dimColor wrap="truncate-end">{flowSummary(ctx.flow.config)}</Text>
+              <Text color={MUTED} wrap="truncate-end">{flowSummary(ctx.flow.config)}</Text>
               {view.running ? null : view.flow.init ? (
                 <Box flexDirection="column">{init && [...init.fields, init.actions]}</Box>
               ) : (
@@ -1701,7 +1712,7 @@ function renderDialog(ctx: Ctx, key: string, dialog: Dialog, top: number, room: 
 // update (rebase or merge) and finish; or why git flow cannot be used here, and its set-up.
 function flowMenuRows($: EngineInterface, ctx: Ctx): RenderChildren[] {
   const { els: { Text, Button }, graph, flow, icons } = ctx
-  const say = (text: string, color?: 'warning') => line(ctx, <Text color={color} dimColor={!color}>{text}</Text>)
+  const say = (text: string, color?: 'warning') => line(ctx, <Text color={color ?? MUTED}>{text}</Text>)
   if (flow === null) return [say('git flow…')]
   if (flow.cli === 'none') return [say('git flow is not installed:', 'warning'), say(FLOW_INSTALL)]
   if (flow.cli === 'other') return [say('Git Flow actions need git-flow-next:', 'warning'), say(FLOW_INSTALL)]
@@ -1866,7 +1877,7 @@ async function renderPane($: EngineInterface, els: Ctx['els'], surface: string, 
   // Only the graph scrolls its own rows: any other screen (changelog, settings, a message)
   // lets the engine scroll, until the graph draws its window again below.
   ownScroll = null
-  if (graph.status === 'no-repo') return <Text dimColor>Not a git repository.</Text>
+  if (graph.status === 'no-repo') return <Text color={MUTED}>Not a git repository.</Text>
   if (graph.status === 'error') return <Text color="error">Could not read git: {graph.error ?? ''}</Text>
 
   const graphMax = Math.max(6, Math.min(40, Math.floor(cols / 3)))
@@ -1879,7 +1890,8 @@ async function renderPane($: EngineInterface, els: Ctx['els'], surface: string, 
     cols,
     graphWidth: Math.min(graphMax, cache.maxCells),
     branchColors: cache.branchColors,
-    dead: deadFor(cache, flow),
+    dead: cache.dead,
+    mainColor: cache.branchColors.get(mainOf(flow?.config, graph.locals ?? [])),
     now: Math.floor(Date.now() / 1000),
     isRound,
     icons: hasNerd ? ICONS.nerd : ICONS.plain,
@@ -1925,7 +1937,7 @@ async function renderPane($: EngineInterface, els: Ctx['els'], surface: string, 
       {row === selectedRow && detailBox?.node}
     </Box>
   ))
-  const empty = graph.rows.length === 0 && <Text dimColor>{graph.status === 'ready' ? 'No commits yet.' : 'Loading…'}</Text>
+  const empty = graph.rows.length === 0 && <Text color={MUTED}>{graph.status === 'ready' ? 'No commits yet.' : 'Loading…'}</Text>
 
   if (isPinned)
     return (
@@ -2023,10 +2035,10 @@ export const register: Register = (on, options) => {
     const [kind, hash = '', index = ''] = e.element.split(':')
     if (kind !== 'pill') return next(e)
     const button = (e.data as { button?: string } | null)?.button
-    const [cache, view, flow] = await Promise.all([readCache($), read($, viewState), read($, flowState)])
+    const [cache, view] = await Promise.all([readCache($), read($, viewState)])
     const { graph } = cache
     const row = graph.rows[cache.indexOf.get(hash) ?? -1]
-    const badge = row && rowBadges(row.commit.refs, graph, view, deadFor(cache, flow))[Number(index)]
+    const badge = row && rowBadges(row.commit.refs, graph, view, cache.dead)[Number(index)]
     const now = await $.clock.now()
     const isDouble = button === 'left' && lastPillClick.key === e.element && now - lastPillClick.at <= DOUBLE_CLICK_MS
     lastPillClick = button === 'left' && !isDouble ? { key: e.element, at: now } : { key: '', at: 0 }

@@ -1,4 +1,8 @@
 import type { Commit, CommitDetail, FileStat, Ref } from '../types'
+import { branchOf } from './badges'
+
+// Every ref with its commit, `<oid> <refname>` a line; the merged query reads the same format.
+export const REFS_ARGS = ['for-each-ref', '--format=%(objectname) %(refname)']
 
 const US = '\x1f'
 const RS = '\x1e'
@@ -75,6 +79,27 @@ export function localsOf(forEachRef: string): string[] {
 export function remotesOf(forEachRef: string): string[] {
   const names = [...forEachRef.matchAll(/ refs\/remotes\/([^/\n]+)\//g)].map(m => m[1] ?? '')
   return [...new Set(names)]
+}
+
+// The query for the remote branches merged into a base (`--merged`s are an OR), over the bases
+// that exist here (git refuses an unknown one); null with none.
+export function mergedArgs(bases: string[], locals: string[]): string[] | null {
+  const here = bases.filter(b => locals.includes(b))
+  return here.length ? [...REFS_ARGS, ...here.map(b => `--merged=refs/heads/${b}`), 'refs/remotes'] : null
+}
+
+// The dead remotes in that query's output (`<oid> refs/remotes/<remote>/<branch>`): not a base,
+// not `<remote>/HEAD`, and not on a base's tip (a branch just started is merged, not dead).
+// `refs` is the `for-each-ref` of every ref, for the bases' tips.
+export function parseMerged(stdout: string, refs: string, bases: string[]): string[] {
+  const isBase = (ref: string) => bases.some(b => ref === `refs/heads/${b}` || (ref.startsWith('refs/remotes/') && branchOf(ref.slice('refs/remotes/'.length)) === b))
+  const lines = (text: string) => text.split('\n').flatMap(l => { const at = l.indexOf(' '); return at > 0 ? [[l.slice(0, at), l.slice(at + 1)] as const] : [] })
+  const tips = new Set(lines(refs).filter(([, ref]) => isBase(ref)).map(([oid]) => oid))
+  return lines(stdout).flatMap(([oid, ref]) => {
+    const name = ref.replace(/^refs\/remotes\//, '')
+    const branch = branchOf(name)
+    return bases.includes(branch) || branch === 'HEAD' || tips.has(oid) ? [] : [name]
+  })
 }
 
 export function withUncommitted(commits: Commit[], head: string, dirty: number): Commit[] {
