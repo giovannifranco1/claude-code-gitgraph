@@ -1,8 +1,9 @@
 import type { ClientElements } from 'claude-code'
 
-// One stretch of a pill in its own colors: an icon, a name, remotes; `icon` drawn before
-// the text in a color of its own (the checked-out branch's pin).
-export type PillSegment = { text: string; bg: string; fg: string; isBold?: boolean; icon?: { text: string; fg: string } }
+// One stretch of a pill in its own colors: an icon, a name, remotes; `icon` drawn in a color
+// of its own, before the text (the checked-out branch's pin) or, `isAfter`, after it with a
+// gap when there is text (the worktree mark).
+export type PillSegment = { text: string; bg: string; fg: string; isBold?: boolean; icon?: { text: string; fg: string; isAfter?: boolean } }
 export type PillProps = { segments: PillSegment[]; isRound: boolean }
 
 // Nerd Font powerline caps: the rounded ends of a pill.
@@ -26,8 +27,9 @@ export function drawPill(Text: ClientElements['Text'], { segments, isRound }: Pi
   const body = segments.map((g, i) => (
     <Text backgroundColor={g.bg} color={g.fg} weight={g.isBold ? 'bold' : undefined}>
       {isRound && i === 0 ? '' : ' '}
-      {g.icon && <Text color={g.icon.fg}>{g.icon.text}</Text>}
+      {g.icon && !g.icon.isAfter && <Text color={g.icon.fg}>{g.icon.text}</Text>}
       {g.text}
+      {g.icon?.isAfter && <Text color={g.icon.fg}>{g.text ? `  ${g.icon.text}` : g.icon.text}</Text>}
       {isRound && i === last ? '' : ' '}
     </Text>
   ))

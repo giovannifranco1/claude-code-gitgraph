@@ -61,7 +61,7 @@ export function parseStatus(stdout: string): { head: string; branch: string; dir
   return {
     head: head === '(initial)' ? '' : head,
     branch: branch === '(detached)' ? '' : branch,
-    dirty: stdout.split('\n').filter(l => l !== '' && !l.startsWith('#')).length,
+    dirty: countChanges(stdout),
     staged: parseChanges(stdout).filter(c => c.isStaged).length,
     conflicts: conflictedFiles(stdout).length,
   }
@@ -87,6 +87,9 @@ export function parseChanges(stdout: string): Change[] {
     return [{ path: fields.slice(8).join(' '), code, isStaged: x !== '.' }]
   })
 }
+
+// How many files a status changed: its lines, headers (`#`) left out.
+export const countChanges = (stdout: string) => stdout.split('\n').filter(l => l.trim() !== '' && !l.startsWith('#')).length
 
 // The files a merge, rebase or apply left in conflict (unmerged, `u` lines of the status).
 export const conflictedFiles = (stdout: string) => parseChanges(stdout).filter(c => c.code === 'U').map(c => c.path)

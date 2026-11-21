@@ -2,12 +2,13 @@ import { expect, test } from 'claude-code/testing'
 
 import type { FlowConfig } from '../types'
 import { checkoutArgs, deleteBranchArgs, defaultPushRemotes, menuFor, menuGroups, pushRuns, renameArgs, resetArgs, splitRemote, stashArgs, stashRunArgs } from '../hooks/menu'
+import type { MenuItem } from '../hooks/menu'
 
 const ids = (items: { id: string }[]) => items.map(i => i.id)
 
 test('GG-12 a local branch gets the full branch menu', async () => {
   const items = menuFor({ kind: 'branch', label: 'feat', remotes: ['origin'] }, ['origin'])
-  expect(ids(items)).toEqual(['checkout', 'rename', 'push', 'merge', 'rebase', 'compare', 'delete', 'copy'])
+  expect(ids(items)).toEqual(['checkout', 'rename', 'push', 'merge', 'rebase', 'compare', 'worktree', 'delete', 'copy'])
   const by = Object.fromEntries(items.map(i => [i.id, i]))
   expect(by.checkout?.runs?.[0]).toEqual(['checkout', 'feat'])
   expect(by.push?.label).toBe('Push branch…')
@@ -61,7 +62,7 @@ test('GG-12 rename passes both names as their own arguments', async () => {
 
 test('GG-12 one push item whatever the remotes; it runs one push per chosen remote', async () => {
   const items = menuFor({ kind: 'branch', label: 'feat', remotes: ['github'] }, ['github', 'origin'])
-  expect(ids(items)).toEqual(['checkout', 'rename', 'push', 'merge', 'rebase', 'compare', 'delete', 'copy'])
+  expect(ids(items)).toEqual(['checkout', 'rename', 'push', 'merge', 'rebase', 'compare', 'worktree', 'delete', 'copy'])
   const push = items.find(i => i.id === 'push')!
   expect(pushRuns(push, ['origin', 'github'])).toEqual([
     ['push', '-u', 'origin', 'feat'],
@@ -87,7 +88,7 @@ test('GG-14 a double click checks out a local branch, tracks a remote one, and l
 
 test('GF-07 a git flow work branch menu leads with its flow actions; other refs do not get them', async () => {
   const config: FlowConfig = { types: [{ kind: 'feature', prefix: 'feature/', parent: 'develop', startpoint: 'develop', isTagged: false, strategy: 'rebase' }], bases: [], remote: 'origin', tagPrefix: '' }
-  expect(ids(menuFor({ kind: 'branch', label: 'feature/login', remotes: [] }, [], config))).toEqual(['flow-finish', 'flow-update', 'checkout', 'rename', 'merge', 'rebase', 'compare', 'delete', 'copy'])
+  expect(ids(menuFor({ kind: 'branch', label: 'feature/login', remotes: [] }, [], config))).toEqual(['flow-finish', 'flow-update', 'checkout', 'rename', 'merge', 'rebase', 'compare', 'worktree', 'delete', 'copy'])
   expect(ids(menuFor({ kind: 'head', label: 'feature/login', remotes: [] }, [], config)).slice(0, 2)).toEqual(['flow-finish', 'flow-update'])
   expect(ids(menuFor({ kind: 'remote', label: 'origin/feature/login', remotes: [] }, ['origin'], config))).not.toContain('flow-finish')
   expect(ids(menuFor({ kind: 'branch', label: 'feature/login', remotes: [] }, []))).not.toContain('flow-finish')
@@ -100,7 +101,7 @@ test('GG-12 a branch is deleted with -d, or -D when force is ticked', async () =
 
 test('GG-12 the menu is a list in groups: git flow, branch actions, rename and copy, then delete', async () => {
   const groups = (items: { id: string }[]) => menuGroups(items as never).map(ids)
-  expect(groups(menuFor({ kind: 'branch', label: 'feat', remotes: ['origin'] }, ['origin']))).toEqual([['checkout', 'push', 'merge', 'rebase', 'compare'], ['rename', 'copy'], ['delete']])
+  expect(groups(menuFor({ kind: 'branch', label: 'feat', remotes: ['origin'] }, ['origin']))).toEqual([['checkout', 'push', 'merge', 'rebase', 'compare', 'worktree'], ['rename', 'copy'], ['delete']])
   expect(groups(menuFor({ kind: 'head', label: 'main', remotes: [] }, ['up']))).toEqual([['push'], ['rename', 'copy']])
   expect(groups(menuFor({ kind: 'remote', label: 'origin/feat', remotes: [] }, ['origin']))).toEqual([['checkout', 'fetch', 'merge', 'compare'], ['copy'], ['delete']])
   expect(groups([{ id: 'flow-finish' }, { id: 'flow-update' }, { id: 'checkout' }, { id: 'copy' }])).toEqual([['flow-finish', 'flow-update'], ['checkout'], ['copy']])
@@ -120,4 +121,12 @@ test('SH-02 a stash is applied, popped or dropped by its name', async () => {
   expect(stashRunArgs('apply', 'stash@{1}')).toEqual(['stash', 'apply', 'stash@{1}'])
   expect(stashRunArgs('pop', 'stash@{0}')).toEqual(['stash', 'pop', 'stash@{0}'])
   expect(stashRunArgs('drop', 'stash@{2}')).toEqual(['stash', 'drop', 'stash@{2}'])
+})
+
+test('WT-02 a local branch offers a new worktree; one already open in a worktree shows it; the current branch neither', async () => {
+  const worktreeOf = (items: MenuItem[]) => items.find(i => i.id === 'worktree')
+  expect(worktreeOf(menuFor({ kind: 'branch', label: 'feat', remotes: [] }, []))).toEqual({ id: 'worktree', label: 'New worktree…', worktree: 'new' })
+  expect(worktreeOf(menuFor({ kind: 'branch', label: 'feat', remotes: [], worktree: true }, []))).toEqual({ id: 'worktree', label: 'Show worktree', worktree: 'show' })
+  expect(worktreeOf(menuFor({ kind: 'head', label: 'main', remotes: [] }, []))).toBeUndefined()
+  expect(worktreeOf(menuFor({ kind: 'remote', label: 'origin/feat', remotes: [] }, ['origin']))).toBeUndefined()
 })

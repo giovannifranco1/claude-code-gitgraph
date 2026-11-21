@@ -37,11 +37,18 @@ export function badgesOf(refs: Ref[], branches?: string[], hasRemotes = true, de
   return badges.sort((a, b) => ORDER.indexOf(a.kind) - ORDER.indexOf(b.kind))
 }
 
+// The local branches open in another worktree (branch → its folder) get their mark.
+export function withWorktrees(badges: Badge[], open: Record<string, string>): Badge[] {
+  // Most repos have no other worktree: each row's badges as they are.
+  if (Object.keys(open).length === 0) return badges
+  return badges.map(b => (b.kind === 'branch' && open[b.label] !== undefined ? { ...b, worktree: true } : b))
+}
+
 // The badge's parts: an icon before the name (`lead`: the checked-out branch, a tag, a
-// gone branch), the name, then its remotes and how far it is from its upstream (`origin ↑2 ↓1`).
+// branch open in another worktree, a gone branch), the name, then its remotes and how far it is from its upstream (`origin ↑2 ↓1`).
 export function badgeParts(badge: Badge): { lead: boolean; name: string; remotes: string } {
   const sync = syncText(badge)
-  return { lead: badge.kind === 'head' || badge.kind === 'tag' || badge.isGone === true, name: badge.label, remotes: [...badge.remotes, ...(sync ? [sync] : [])].join(' ') }
+  return { lead: badge.kind === 'head' || badge.kind === 'tag' || badge.worktree === true || badge.isGone === true, name: badge.label, remotes: [...badge.remotes, ...(sync ? [sync] : [])].join(' ') }
 }
 
 // `↑2 ↓1`: how far a branch is from its upstream, each side only when not 0; '' in step.

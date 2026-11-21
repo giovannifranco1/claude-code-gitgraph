@@ -13,6 +13,8 @@ export const CLOSED = {
   isAddingRemote: false,
   isActionsOpen: false,
   uncommittedForm: null,
+  worktreeForm: null,
+  worktreeRemoving: null,
 } satisfies Partial<View>
 
 // The git flow dialogs, closed when one opens another or a git flow action ends.

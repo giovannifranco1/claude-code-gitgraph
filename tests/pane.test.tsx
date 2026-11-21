@@ -65,6 +65,14 @@ type Fake = {
   store?: Map<string, unknown>
   // What `git stash list` prints (its format); none by default.
   stashes?: string
+  // The worktrees past the main one (`/repo` on main), as `git worktree list --porcelain` blocks.
+  worktrees?: string
+  // The worktrees' own status shows no change (the main one's keeps `src/a.ts`).
+  cleanTrees?: boolean
+  // `git check-ignore` finds the new worktree's folder not ignored.
+  notIgnored?: boolean
+  // The repo's worktree folder in its local config.
+  worktreeDir?: string
 }
 
 const FLOW_CONFIG = [
@@ -138,6 +146,7 @@ function answer(fake: Fake, raw: readonly string[], cwd = '.') {
     case 'log':
       return ok(logOf(fake))
     case 'status':
+      if (rest[0] === '--porcelain' && fake.cleanTrees && cwd !== '.' && cwd !== '/repo') return ok('')
       return ok(`# branch.oid ${fake.head ?? M}\n# branch.head ${fake.branch ?? 'main'}\n${fake.sync ?? ''}${fake.statusLines ?? '1 .M N... 100644 100644 100644 x y src/a.ts\n'}${fake.isConflicted ? 'u UU N... 100644 100644 100644 100644 a b c src/b.ts\n' : ''}`)
     case 'flow': {
       const cli = fake.flow ?? 'next'
@@ -150,6 +159,16 @@ function answer(fake: Fake, raw: readonly string[], cwd = '.') {
       }
       return ok()
     }
+    case 'worktree':
+      if (rest[0] === 'list') return ok(`worktree /repo\nHEAD ${fake.head ?? M}\nbranch refs/heads/${fake.branch ?? 'main'}\n\n${fake.worktrees ?? ''}`)
+      if (rest[0] === 'add') {
+        // `add <path> <branch>` or `add -b <new> <path> <commit>`: listed from then on
+        const [path, branch] = rest[1] === '-b' ? [rest[3], rest[2]] : [rest[1], rest[2]]
+        fake.worktrees = `${fake.worktrees ?? ''}worktree ${path}\nHEAD ${M}\nbranch refs/heads/${branch}\n\n`
+      }
+      return ok()
+    case 'check-ignore':
+      return fake.notIgnored ? { ...ok(), exitCode: 1 } : ok()
     case 'rev-list':
       return ok('0\t2\n')
     case 'diff':
@@ -170,13 +189,15 @@ function answer(fake: Fake, raw: readonly string[], cwd = '.') {
       return rest.includes(fake.failPush ?? '\0') ? fail('fatal: could not read Username') : ok()
     case 'config': {
       if (rest[0] === '--get-regexp') return fake.flowConfig === '' ? fail('') : ok(fake.flowConfig ?? FLOW_CONFIG)
-      const values: Record<string, string> = { '--local user.name': 'Gio Local', '--global user.name': 'Gio', '--global user.email': 'gio@x.io' }
+      const values: Record<string, string> = { '--local user.name': 'Gio Local', '--global user.name': 'Gio', '--global user.email': 'gio@x.io', ...(fake.worktreeDir && { '--local gitgraph.worktreeDir': fake.worktreeDir }) }
+      if (rest.includes('--get') && !values[`${rest[0]} ${rest[2]}`]) return { ...ok(), exitCode: 1 }
       return rest.includes('--get') ? ok(`${values[`${rest[0]} ${rest[2]}`] ?? ''}\n`) : ok()
     }
     case 'remote':
       if (rest.length === 0) return ok((fake.remotes ?? ['origin']).map(r => `${r}\n`).join(''))
       return rest[0] === '-v' ? ok((fake.remotes ?? ['origin']).map(r => `${r}\thttps://git.example/${r}.git (fetch)\n${r}\thttps://git.example/${r}.git (push)\n`).join('')) : ok()
     case 'rev-parse':
+      if (rest.includes('--git-path')) return ok('/repo/.git/info/exclude\n')
       return rest[2] === `${'dead'}^{commit}` ? fail('') : ok(`${M}\n`)
     case 'check-ref-format':
       return /^[a-z][a-z0-9./-]*$/.test(rest[1] ?? '') ? ok(`${rest[1]}\n`) : fail('fatal: not a valid branch name')
@@ -212,6 +233,7 @@ async function setup($: Engine, on: On, fake: Fake, copied: string[] = [], toast
     store.set(e.key, e.value)
     return { value: undefined }
   })
+  on('env.get', () => ({ value: '/home/dev' }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('tool.call', () => ({ result: {} }))
   on('command.run', () => ({ text: '' }))
@@ -646,6 +668,218 @@ test('CP-01 a branch menu compares the current branch with that branch', async (
   await ui.unmount()
 })
 
+const FEAT_TREE = `worktree /repo/.claude/worktrees/feat\nHEAD ${B}\nbranch refs/heads/feat\n\n`
+
+test('WT-01 a branch open in another worktree has the worktree icon in its badge, and its menu shows the worktree', async ($, on) => {
+  const fake = newFake({ worktrees: FEAT_TREE })
+  await setup($, on, fake)
+  const ui = await $.ui.mount(pane('terminal'))
+  // the name on the color; the icon last, on the dark shade (after the remotes when there are any)
+  const pill = (await ui.find({ type: 'Client', key: `pill:${B}:0` }))?.props.props as { segments: { text: string; bg: string; icon?: { text: string; fg: string; isAfter?: boolean } }[] }
+  expect(pill.segments.map(g => g.text)).toEqual(['feat', ''])
+  expect(pill.segments[1]?.icon).toEqual({ text: '\ue5fb', fg: pill.segments[0]?.bg, isAfter: true })
+  await ui.pointer({ type: 'down', x: 1, y: 0, button: 'right', in: `pill:${B}:0` })
+  expect((await ui.find({ type: 'Button', key: 'menu-worktree' }))?.text).toContain('Show worktree')
+  await ui.unmount()
+})
+
+const FEAT_PATH = '/repo/.claude/worktrees/feat'
+
+test('WT-01 WT-04 the worktrees screen lists each worktree; one copies its path; the main one has no remove', async ($, on) => {
+  const copied: string[] = []
+  const fake = newFake({ worktrees: FEAT_TREE })
+  await setup($, on, fake, copied)
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: 'worktrees' })
+  expect(await ui.find({ type: 'Text', text: /\.claude\/worktrees\/feat/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /main worktree/ })).toBeDefined()
+  // each worktree's changes, read in its own folder once the screen opens
+  expect(fake.calls.some((c, i) => c.join(' ') === 'git status --porcelain' && fake.cwds[i] === FEAT_PATH)).toBe(true)
+  expect(await ui.find({ type: 'Text', text: /1 changed/ })).toBeDefined()
+  await ui.press({ key: `worktree:${FEAT_PATH}` })
+  // nothing goes to the chat: the worktree is git's, and its path is copied
+  expect(await ui.find({ type: 'Button', key: 'worktree-open' })).toBeUndefined()
+  await ui.press({ key: 'worktree-copy' })
+  expect(copied).toContain(FEAT_PATH)
+  await ui.press({ key: 'worktree:/repo' })
+  expect(await ui.find({ type: 'Button', key: 'worktree-copy' })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'worktree-remove' })).toBeUndefined()
+  await ui.press({ key: 'worktrees-back' })
+  expect(await ui.find({ type: 'Button', key: M })).toBeDefined()
+  await ui.unmount()
+})
+
+test('WT-01 a branch menu shows the worktree it is open in', async ($, on) => {
+  await setup($, on, newFake({ worktrees: FEAT_TREE }))
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.pointer({ type: 'down', x: 1, y: 0, button: 'right', in: `pill:${B}:0` })
+  await ui.press({ key: 'menu-worktree' })
+  // the screen, that worktree's actions open
+  expect(await ui.find({ type: 'Button', key: 'worktree-copy' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('WT-03 removing a worktree with changes takes force; a clean one is removed on confirm; the branch stays', async ($, on) => {
+  const fake = newFake({ worktrees: FEAT_TREE })
+  await setup($, on, fake)
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: 'worktrees' })
+  await ui.press({ key: `worktree:${FEAT_PATH}` })
+  await ui.press({ key: 'worktree-remove' })
+  expect(await ui.find({ type: 'Text', text: /1 changed file will be lost/ })).toBeDefined()
+  // no remove without force
+  expect(await ui.find({ type: 'Button', key: 'worktree-remove-run' })).toBeUndefined()
+  await ui.press({ key: 'worktree-remove-force' })
+  await ui.press({ key: 'worktree-remove-run' })
+  expect(callOf(fake, ['worktree', 'remove', '--force', FEAT_PATH])).toBeGreaterThan(-1)
+  expect(fake.calls.some(c => c[1] === 'branch' && c[2] === '-D')).toBe(false)
+  await ui.unmount()
+})
+
+test('WT-03 a clean worktree is removed without force', async ($, on) => {
+  const fake = newFake({ worktrees: FEAT_TREE, cleanTrees: true })
+  await setup($, on, fake)
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: 'worktrees' })
+  await ui.press({ key: `worktree:${FEAT_PATH}` })
+  await ui.press({ key: 'worktree-remove' })
+  await ui.press({ key: 'worktree-remove-run' })
+  expect(callOf(fake, ['worktree', 'remove', FEAT_PATH])).toBeGreaterThan(-1)
+  await ui.unmount()
+})
+
+test('WT-02 a branch menu opens a new worktree on it in a dialog over the graph; once made, the worktrees screen shows it', async ($, on) => {
+  const fake = newFake()
+  await setup($, on, fake)
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.pointer({ type: 'down', x: 1, y: 0, button: 'right', in: `pill:${B}:0` })
+  await ui.press({ key: 'menu-worktree' })
+  // a dialog: the graph stays under it, no worktrees screen yet
+  expect(await ui.find({ type: 'Box', key: 'worktree-form-dialog' })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: M })).toBeDefined()
+  expect((await ui.find({ type: 'Input', key: 'worktree-slug' }))?.props.value).toBe('feat')
+  expect((await ui.find({ type: 'Input', key: 'worktree-path' }))?.props.value).toBe('.claude/worktrees/feat')
+  await ui.press({ key: 'worktree-create' })
+  expect(callOf(fake, ['worktree', 'add', '/repo/.claude/worktrees/feat', 'feat'])).toBeGreaterThan(-1)
+  expect(await ui.find({ type: 'Button', key: 'worktrees-back' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('WT-06 the worktrees screen has New worktree: a dialog over the list, on a branch typed (an existing one, or a new one off HEAD)', async ($, on) => {
+  const fake = newFake()
+  await setup($, on, fake)
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: 'worktrees' })
+  await ui.press({ key: 'worktree-new' })
+  expect(await ui.find({ type: 'Box', key: 'worktree-form-dialog' })).toBeDefined()
+  // the list stays under the dialog
+  expect(await ui.find({ type: 'Button', key: 'worktree:/repo' })).toBeDefined()
+  await ui.input({ key: 'worktree-branch', text: 'spike', kind: 'change' })
+  await ui.press({ key: 'worktree-create' })
+  expect(callOf(fake, ['worktree', 'add', '-b', 'spike', '/repo/.claude/worktrees/spike', 'HEAD'])).toBeGreaterThan(-1)
+  await ui.press({ key: 'worktree-new' })
+  await ui.input({ key: 'worktree-branch', text: 'feat', kind: 'change' })
+  await ui.press({ key: 'worktree-create' })
+  expect(callOf(fake, ['worktree', 'add', '/repo/.claude/worktrees/feat', 'feat'])).toBeGreaterThan(-1)
+  await ui.unmount()
+})
+
+test('WT-02 a commit opens a new worktree on a new branch; outside the repo it warns and creates on a second press', async ($, on) => {
+  const fake = newFake()
+  await setup($, on, fake)
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: B })
+  await ui.press({ key: 'detail-actions-toggle' })
+  await ui.press({ key: 'worktree-new' })
+  await ui.input({ key: 'worktree-branch', text: 'spike', kind: 'change' })
+  expect((await ui.find({ type: 'Input', key: 'worktree-path' }))?.props.value).toBe('.claude/worktrees/spike')
+  await ui.input({ key: 'worktree-path', text: '/elsewhere/spike', kind: 'change' })
+  expect(await ui.find({ type: 'Text', text: /Outside repo/ })).toBeDefined()
+  await ui.press({ key: 'worktree-create' })
+  expect(fake.calls.some(c => c[1] === 'worktree' && c[2] === 'add')).toBe(false)
+  expect((await ui.find({ type: 'Button', key: 'worktree-create' }))?.text).toContain('Confirm: create anyway?')
+  await ui.press({ key: 'worktree-create' })
+  expect(callOf(fake, ['worktree', 'add', '-b', 'spike', '/elsewhere/spike', B])).toBeGreaterThan(-1)
+  await ui.unmount()
+})
+
+test('WT-02 the path can be a folder already made: empty, git adds the worktree in it; with files, the form says so', async ($, on) => {
+  let entries: { name: string }[] = []
+  const fake = newFake()
+  on('fs.exists', () => ({ value: true }))
+  on('fs.list', () => ({ value: entries as never }))
+  await setup($, on, fake)
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.pointer({ type: 'down', x: 1, y: 0, button: 'right', in: `pill:${B}:0` })
+  await ui.press({ key: 'menu-worktree' })
+  await ui.input({ key: 'worktree-path', text: '.claude/worktrees/made', kind: 'change' })
+  entries = [{ name: 'notes.md' }]
+  await ui.press({ key: 'worktree-create' })
+  expect(fake.calls.some(c => c[1] === 'worktree' && c[2] === 'add')).toBe(false)
+  expect(await ui.find({ type: 'Text', text: /already exists and is not empty/ })).toBeDefined()
+  entries = []
+  await ui.press({ key: 'worktree-create' })
+  expect(callOf(fake, ['worktree', 'add', '/repo/.claude/worktrees/made', 'feat'])).toBeGreaterThan(-1)
+  await ui.unmount()
+})
+
+test('WT-02 the form can ask Claude to create the worktree instead, with the native git run', async ($, on) => {
+  const prompts: string[] = []
+  const toasts: string[] = []
+  const fake = newFake()
+  on('prompt.submit', (_, e) => {
+    prompts.push(e.text)
+    return { text: e.text }
+  })
+  await setup($, on, fake, [], toasts)
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.pointer({ type: 'down', x: 1, y: 0, button: 'right', in: `pill:${B}:0` })
+  await ui.press({ key: 'menu-worktree' })
+  await ui.press({ key: 'worktree-claude' })
+  expect(prompts[0]).toContain('git worktree add /repo/.claude/worktrees/feat feat')
+  // the pane runs nothing itself, and the form closes
+  expect(fake.calls.some(c => c[1] === 'worktree' && c[2] === 'add')).toBe(false)
+  expect(await ui.find({ type: 'Input', key: 'worktree-path' })).toBeUndefined()
+  expect(toasts).toContain('Asked Claude to create the worktree')
+  await ui.unmount()
+})
+
+test('WT-02 a worktree folder inside the repo that git does not ignore goes into .git/info/exclude first', async ($, on) => {
+  const writes: { path: string; text: string }[] = []
+  const fake = newFake({ notIgnored: true })
+  on('fs.read', (_, e) => (e.path.endsWith('info/exclude') ? { value: '# git ls-files --others --exclude-from=.git/info/exclude\n' } : { value: '' }))
+  on('fs.write', (_, e) => {
+    writes.push({ path: e.path, text: e.text })
+    return { value: undefined }
+  })
+  await setup($, on, fake)
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.pointer({ type: 'down', x: 1, y: 0, button: 'right', in: `pill:${B}:0` })
+  await ui.press({ key: 'menu-worktree' })
+  await ui.press({ key: 'worktree-create' })
+  expect(writes[0]?.path).toBe('/repo/.git/info/exclude')
+  expect(writes[0]?.text.endsWith('\n/.claude/worktrees/\n')).toBe(true)
+  expect(callOf(fake, ['worktree', 'add', '/repo/.claude/worktrees/feat', 'feat'])).toBeGreaterThan(-1)
+  await ui.unmount()
+})
+
+test('WT-05 the settings save the repo worktree folder, which a new worktree then goes in', async ($, on) => {
+  const fake = newFake({ worktreeDir: 'trees' })
+  await setup($, on, fake)
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: 'settings' })
+  expect((await ui.find({ type: 'Input', key: 'cfg-worktree-dir' }))?.props.value).toBe('trees')
+  await ui.input({ key: 'cfg-worktree-dir', text: '../worktrees' })
+  expect(callOf(fake, ['config', '--local', 'gitgraph.worktreeDir', '../worktrees'])).toBeGreaterThan(-1)
+  await ui.input({ key: 'cfg-worktree-dir', text: '' })
+  expect(callOf(fake, ['config', '--local', '--unset', 'gitgraph.worktreeDir'])).toBeGreaterThan(-1)
+  await ui.press({ key: 'settings-back' })
+  await ui.pointer({ type: 'down', x: 1, y: 0, button: 'right', in: `pill:${B}:0` })
+  await ui.press({ key: 'menu-worktree' })
+  expect((await ui.find({ type: 'Input', key: 'worktree-path' }))?.props.value).toBe('trees/feat')
+  await ui.unmount()
+})
+
 test('CM-01 the uncommitted changes commit with the message Claude suggests from the diff, shown whole, not edited', async ($, on) => {
   const toasts: string[] = []
   const asked: { model: string; prompt: string }[] = []
@@ -828,15 +1062,15 @@ test('GG-09 after a Bash call the pane reloads only if the repository changed', 
   expect(logCalls(fake).length).toBe(before + 1)
 })
 
-test('GG-09 a load runs git in one parallel batch of five processes, then the merged remotes query', async ($, on) => {
+test('GG-09 a load runs git in one parallel batch of six processes, then the merged remotes query', async ($, on) => {
   const fake = newFake()
   await setup($, on, fake)
   const flow = ['flow', 'config', 'tag', 'remote']
   const calls = gitCalls(fake).filter(c => !flow.includes(c[1] ?? ''))
-  // log, status, the refs, the branches' tracks and the stashes at once; then the merged remotes
-  expect(calls.slice(0, 5).map(c => c[1] ?? '').sort()).toEqual(['for-each-ref', 'for-each-ref', 'log', 'stash', 'status'])
-  expect(calls[5]).toContain('--merged=refs/heads/main')
-  expect(calls).toHaveLength(6)
+  // log, status, the refs, the branches' tracks, the stashes and the worktrees at once; then the merged remotes
+  expect(calls.slice(0, 6).map(c => c[1] ?? '').sort()).toEqual(['for-each-ref', 'for-each-ref', 'log', 'stash', 'status', 'worktree'])
+  expect(calls[6]).toContain('--merged=refs/heads/main')
+  expect(calls).toHaveLength(7)
   // a reload over the same refs and bases (the scope toggle) does not ask again
   const ui = await $.ui.mount(pane('terminal'))
   const asked = () => gitCalls(fake).filter(c => c.some(a => a.startsWith('--merged='))).length

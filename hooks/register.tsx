@@ -1,15 +1,16 @@
 import { atom, read, update } from 'claude-code'
 import type { ClientElements, Elements, EngineInterface, ProcessRunResult, Register, RenderChildren, RenderSurface } from 'claude-code'
 
-import type { Badge, BadgeKind, BadgeStyle, Cell, Change, Changelog, Columns, Compare, Comparison, CommitDetail, ConfigScope, Diff, DiffLine, DiffSource, FileStat, FlowConfig, FlowConflict, FlowInfo, FlowInitForm, FlowKind, FlowOptions, FlowTopic, FlowView, Graph, GraphRow, Ref, RepoSettings, Repos, Screen, View } from '../types'
+import type { Badge, BadgeKind, BadgeStyle, Cell, Change, Changelog, Columns, Compare, Comparison, CommitDetail, ConfigScope, Diff, DiffLine, DiffSource, FileStat, FlowConfig, FlowConflict, FlowInfo, FlowInitForm, FlowKind, FlowOptions, FlowTopic, FlowView, Graph, GraphRow, Ref, RepoSettings, Repos, Screen, View, Worktree, WorktreeForm } from '../types'
 import { parseChangelog, versionOf } from './changelog'
 import { diffKey, diffRuns, parseDiff, sourceLabel } from './diff'
 import { compareRuns, parseCount, rangeKey } from './compare'
 import { conflictOrigin, conflictPrompt, conflictToast } from './conflict'
 import { backOf, CLOSED, dismissModal, FLOW_CLOSED, hasModal } from './dismiss'
-import { badgeParts, badgesOf, branchOf, diffBar, fitBadges, plainPillWidth, syncText, withSync } from './badges'
+import { badgeParts, badgesOf, branchOf, diffBar, fitBadges, plainPillWidth, syncText, withSync, withWorktrees } from './badges'
+import { addArgs, branchWorktrees, countChanges, createPrompt, type FormOn, formTarget, currentWorktree, excludeEntry, formInput, formProblem, isInside, mainPath, newForm, parseWorktrees, relativeTo, removeArgs, withExclude, WORKTREE_ARGS, WORKTREE_DIR_KEY, worktreeDir, worktreeDirArgs, DEFAULT_WORKTREE_DIR } from './worktree'
 import { isBranchNameCandidate } from './detect'
-import { absTime, fitGraph, HASH_W, relTime, short, truncate, truncateMiddle } from './format'
+import { absTime, fitGraph, HASH_W, relTime, short, truncate, truncateMiddle, wrapWords } from './format'
 import { layout, NODES } from './lanes'
 import { clampTop, findCommit, isHashQuery, topOf, visibleRange, widestIn, windowAt, wrapRows } from './virtual'
 import { conflictedFiles, detailArgs, detailOf, isPseudoRow, isStashRow, localsOf, LOG_FORMAT, mergedArgs, parseChanges, parseMerged, parseNumstat, parseStashes, parseTracks, REFS_ARGS, STASH_ARGS, TRACK_ARGS, parseLog, parseStatus, parseSync, remotesOf, UNCOMMITTED, withStashes, withUncommitted } from './log'
@@ -75,10 +76,12 @@ const ICONS = {
     flow: '\uf126',
     // Material Design's ghost: Font Awesome's (\uf6e2) is not in Nerd Fonts 3.
     ghost: '\u{f02a0}',
+    // custom-folder_git_branch: a folder for a branch, a worktree.
+    worktree: '',
     // Octicons' git compare (nf-oct-git_compare): the commit marked for compare.
     compare: '',
   },
-  plain: { on: '◉', off: '○', fetch: '☁', refresh: '↻', settings: '⚙', search: '⌕', changelog: '☰', feature: '✦', bugfix: '✱', release: '◆', hotfix: '▲', actions: '⋯', head: '✔', tag: '◆', flow: '⑂', ghost: '◌', compare: '①' },
+  plain: { on: '◉', off: '○', fetch: '☁', refresh: '↻', settings: '⚙', search: '⌕', changelog: '☰', feature: '✦', bugfix: '✱', release: '◆', hotfix: '▲', actions: '⋯', head: '✔', tag: '◆', flow: '⑂', ghost: '◌', compare: '①', worktree: '⧉' },
 }
 // No git the pane runs opens an editor (merge, rebase or tag messages) or asks for a password.
 const GIT_ENV = { GIT_TERMINAL_PROMPT: '0', GIT_EDITOR: 'true', GIT_MERGE_AUTOEDIT: 'no' }
@@ -92,7 +95,7 @@ const NERD_FONT_CHECK = 'ls ~/Library/Fonts /Library/Fonts ~/.local/share/fonts 
 
 const DEFAULT_FLOW: FlowView = { starting: null, finishing: null, opts: { isNoFf: true, isPush: true, isKeep: true }, tagMessage: null, conflict: null, init: null, confirming: null, isMenuOpen: false }
 const EMPTY_GRAPH: Graph = { status: 'idle', rows: [], head: '', branch: '', conflicts: 0, remotes: [], hasMore: false }
-const DEFAULT_VIEW: View = { scope: 'all', limit: PAGE, selected: null, confirm: null, menu: null, isRenaming: false, isDeleting: false, isForce: false, push: null, running: null, screen: 'graph', configScope: 'local', editingRemote: null, isAddingRemote: false, remoteDraft: '', scrollTo: null, isSearching: false, search: '', commitDraft: '', isSuggesting: false, uncommittedForm: null, diff: null, compare: null, compareMark: null, commitStep: 'files', commitFiles: [], refresh: 'idle', isOpen: false, flow: DEFAULT_FLOW, isActionsOpen: false, notice: null }
+const DEFAULT_VIEW: View = { scope: 'all', limit: PAGE, selected: null, confirm: null, menu: null, isRenaming: false, isDeleting: false, isForce: false, push: null, running: null, screen: 'graph', configScope: 'local', editingRemote: null, isAddingRemote: false, remoteDraft: '', scrollTo: null, isSearching: false, search: '', commitDraft: '', isSuggesting: false, uncommittedForm: null, diff: null, compare: null, compareMark: null, worktreeSelected: null, worktreeRemoving: null, worktreeForm: null, commitStep: 'files', commitFiles: [], refresh: 'idle', isOpen: false, flow: DEFAULT_FLOW, isActionsOpen: false, notice: null }
 
 const graphState = atom({ plugin: 'gitgraph', key: 'graph' } as const, EMPTY_GRAPH)
 // Bumped with every graph write: renders read this small number and keep the graph
@@ -112,6 +115,8 @@ const scrollTopState = atom({ plugin: 'gitgraph', key: 'scrollTop' } as const, 0
 const settingsState = atom({ plugin: 'gitgraph', key: 'settings' } as const, null as RepoSettings | null)
 // The diff screen's lines, null until a run is done; while they are another file's, it waits.
 const diffState = atom({ plugin: 'gitgraph', key: 'diff' } as const, null as Diff | null)
+// The worktrees screen's changed-file counts by worktree (-1: unreadable), null while git runs.
+const worktreeChangesState = atom({ plugin: 'gitgraph', key: 'worktreeChanges' } as const, null as Record<string, number> | null)
 // The compare screen's answers, null until git is done; while they are another comparison's, it waits.
 const compareState = atom({ plugin: 'gitgraph', key: 'compare' } as const, null as Comparison | null)
 // Loaded when the pane opens and after git flow actions, not with every graph load.
@@ -236,7 +241,8 @@ async function setGraph($: EngineInterface, change: (g: Graph) => Graph): Promis
 
 // A commit's badges as the pane draws them: remotes alone only with all branches on, merged ones
 // gone, a local branch with how far it is from its upstream.
-const rowBadges = (refs: Ref[], graph: Graph, view: View, dead: Set<string>) => withSync(badgesOf(refs, graph.locals, view.scope === 'all', dead), graph.tracks ?? {})
+const rowBadges = (refs: Ref[], graph: Graph, view: View, dead: Set<string>) =>
+  withWorktrees(withSync(badgesOf(refs, graph.locals, view.scope === 'all', dead), graph.tracks ?? {}), graph.openBranches ?? {})
 
 async function readCache($: EngineInterface): Promise<GraphCache> {
   const version = await read($, versionState)
@@ -257,12 +263,13 @@ async function load($: EngineInterface, known?: RepoState): Promise<void> {
   try {
     // The stashes are rows of their own (STASH_ARGS): `--all` leaves `refs/stash` out, or the
     // latest would show as git's commits for it (its work, index and untracked files).
-    const [log, status, refs, track, stashes] = await Promise.all([
+    const [log, status, refs, track, stashes, trees] = await Promise.all([
       git($, ['log', ...(view.scope === 'all' ? ['--exclude=refs/stash', '--all'] : ['--branches', 'HEAD']), '--date-order', `-n${view.limit + 1}`, LOG_FORMAT]),
       known?.status ?? git($, STATUS_ARGS),
       known?.refs ?? git($, REFS_ARGS),
       git($, TRACK_ARGS),
       git($, STASH_ARGS),
+      git($, WORKTREE_ARGS),
     ])
     if (!isCurrent()) return
     if (status.exitCode !== 0) {
@@ -288,6 +295,8 @@ async function load($: EngineInterface, known?: RepoState): Promise<void> {
     const loaded = commits.slice(0, view.limit)
     const shown = withUncommitted(withStashes(loaded, stashes.exitCode === 0 ? parseStashes(stashes.stdout) : []), head, dirty)
     const cells = layout(shown, PALETTE.length)
+    const worktrees = trees.exitCode === 0 ? parseWorktrees(trees.stdout) : []
+    const worktree = currentWorktree(worktrees, head, branch)?.path ?? ''
     signature = signatureOf(status.stdout, refs.stdout)
     await setGraph($, (): Graph => ({
       status: 'ready',
@@ -303,6 +312,9 @@ async function load($: EngineInterface, known?: RepoState): Promise<void> {
       changes: parseChanges(status.stdout),
       staged,
       sync: parseSync(status.stdout),
+      worktrees,
+      worktree,
+      openBranches: branchWorktrees(worktrees, worktree),
       hasMore: commits.length > view.limit,
     }))
   } catch (err) {
@@ -690,6 +702,99 @@ async function openDiff($: EngineInterface, source: DiffSource, path: string): P
   await update($, diffState, () => ({ key, ...parseDiff(stdout) }))
 }
 
+// Swaps the graph for the worktrees screen (`select`: the worktree whose actions open), then
+// counts each worktree's changes in its own folder, all at once: only here, not on every load.
+async function openWorktrees($: EngineInterface, select: string | null = null, form: WorktreeForm | null = null): Promise<void> {
+  await Promise.all([
+    setView($, (v): View => ({ ...v, ...CLOSED, screen: 'worktrees', worktreeSelected: select, worktreeRemoving: null, worktreeForm: form })),
+    update($, worktreeChangesState, () => null),
+  ])
+  // The one the pane shows has its changes from the last load already.
+  const graph = await readGraph($)
+  const list = (graph.worktrees ?? []).filter(w => !w.isPrunable && w.path !== graph.worktree)
+  const outs = await Promise.all(list.map(w => gitIn($, w.path, ['status', '--porcelain'])))
+  const counts = Object.fromEntries(list.map((w, i) => [w.path, outs[i]?.exitCode === 0 ? countChanges(outs[i].stdout) : -1]))
+  await update($, worktreeChangesState, () => (graph.worktree ? { ...counts, [graph.worktree]: graph.changes?.length ?? 0 } : counts))
+}
+
+// Opens the new worktree form, a dialog over whatever the pane shows (the graph or the
+// worktrees screen), its folder the repo's (Settings) or Claude Code's `.claude/worktrees`.
+async function openWorktreeForm($: EngineInterface, target: FormOn): Promise<void> {
+  const [configured, home] = await Promise.all([git($, ['config', '--local', '--get', WORKTREE_DIR_KEY]), $.env.get('HOME')])
+  const form = newForm(target, worktreeDir(configured.exitCode === 0 ? configured.stdout : ''), home ?? '')
+  await setView($, (v): View => ({ ...v, ...CLOSED, worktreeForm: form }))
+}
+
+const setForm = ($: EngineInterface, change: (form: WorktreeForm) => WorktreeForm) =>
+  setView($, v => (v.worktreeForm ? { ...v, worktreeForm: change(v.worktreeForm), confirm: null } : v))
+
+// Whether a folder is there with something in it (git refuses to add a worktree into one).
+async function isTaken($: EngineInterface, path: string): Promise<boolean> {
+  try {
+    return (await $.fs.exists(path)) && (await $.fs.list(path)).length > 0
+  } catch {
+    return false
+  }
+}
+
+// Keeps a worktree inside the repo out of its status: its folder into `.git/info/exclude`
+// (local, never committed), unless git already ignores it. True when it was added.
+async function excludeFolder($: EngineInterface, main: string, path: string): Promise<boolean> {
+  if ((await git($, ['check-ignore', '-q', path])).exitCode === 0) return false
+  const file = (await git($, ['rev-parse', '--path-format=absolute', '--git-path', 'info/exclude'])).stdout.trim()
+  if (!file) return false
+  const text = await $.fs.read(file).then(t => (typeof t === 'string' ? t : ''), () => '')
+  const next = withExclude(text, excludeEntry(main, path))
+  if (next === null) return false
+  await $.fs.write(file, next)
+  return true
+}
+
+// Creates the form's worktree: a problem stops it; outside the repo it asks a second press;
+// a taken folder or a bad branch name is said in the form; inside the repo its folder is kept
+// out of the status first.
+async function createWorktree($: EngineInterface): Promise<void> {
+  const [view, graph] = await Promise.all([read($, viewState), readGraph($)])
+  const form = view.worktreeForm
+  if (!form) return
+  const main = mainPath(graph.worktrees)
+  const problem = formProblem(form, main)
+  const fail = (message: string) => setForm($, f => ({ ...f, error: message }))
+  if ('error' in problem) return void (await fail(problem.error))
+  if (problem.warning && view.confirm !== 'worktree-create') return void (await setView($, v => ({ ...v, confirm: 'worktree-create' })))
+  const { path } = problem
+  const target = formTarget(form, path, graph.locals ?? [])
+  const [ref, isTakenPath] = await Promise.all(['newBranch' in target ? git($, ['check-ref-format', '--branch', target.newBranch]) : null, isTaken($, path)])
+  if (ref && ref.exitCode !== 0) return void (await fail(`Not a valid branch name: ${form.newBranch}`))
+  if (isTakenPath) return void (await fail(`${path} already exists and is not empty`))
+  const isExcluded = isInside(main, path) && (await excludeFolder($, main, path))
+  await setView($, v => ({ ...v, worktreeForm: null, confirm: null }))
+  await runAction($, addArgs(target), `Created worktree ${relativeTo(main, path)}${isExcluded ? ` (${excludeEntry(main, path)} added to .git/info/exclude)` : ''}`)
+  // Made (the load after the run lists it): the worktrees screen, the new one's actions open.
+  if ((await readGraph($)).worktrees?.some(w => w.path === path)) await openWorktrees($, path)
+}
+
+// Asks Claude, in the chat, to create the form's worktree with git's own command instead of
+// running it here; a problem in the form stops it, as for Create.
+async function askClaudeToCreate($: EngineInterface): Promise<void> {
+  const [view, graph] = await Promise.all([read($, viewState), readGraph($)])
+  const form = view.worktreeForm
+  if (!form) return
+  const main = mainPath(graph.worktrees)
+  const problem = formProblem(form, main)
+  if ('error' in problem) return void (await setForm($, f => ({ ...f, error: problem.error })))
+  await setView($, v => ({ ...v, worktreeForm: null, confirm: null }))
+  await $.prompt.submit({ text: createPrompt(formTarget(form, problem.path, graph.locals ?? []), main) })
+  $.ui.toast('Asked Claude to create the worktree')
+}
+
+async function removeWorktree($: EngineInterface, path: string, isForce: boolean): Promise<void> {
+  const main = mainPath((await readGraph($)).worktrees)
+  await setView($, v => ({ ...v, worktreeRemoving: null, worktreeSelected: null }))
+  await runAction($, removeArgs(path, isForce), `Removed worktree ${relativeTo(main, path)}`)
+  if ((await read($, viewState)).screen === 'worktrees') await openWorktrees($)
+}
+
 const compareKey = ({ from, to }: Compare) => rangeKey(from, to)
 
 // Swaps the graph for a comparison of two points: their counts and files, read at once.
@@ -715,18 +820,27 @@ async function openChangelog($: EngineInterface): Promise<void> {
 
 async function loadSettings($: EngineInterface): Promise<void> {
   const get = async (scope: ConfigScope, key: string) => (await git($, ['config', `--${scope}`, '--get', key])).stdout.trim()
-  const [localName, localEmail, globalName, globalEmail, remotes] = await Promise.all([
+  const [localName, localEmail, globalName, globalEmail, remotes, worktreeDir] = await Promise.all([
     get('local', 'user.name'),
     get('local', 'user.email'),
     get('global', 'user.name'),
     get('global', 'user.email'),
     git($, ['remote', '-v']),
+    get('local', WORKTREE_DIR_KEY),
   ])
   await update($, settingsState, () => ({
     local: { name: localName, email: localEmail },
     global: { name: globalName, email: globalEmail },
     remotes: parseRemotes(remotes.stdout),
+    worktreeDir,
   }))
+}
+
+// Saves the folder new worktrees go in for this repo; empty goes back to the default.
+async function setWorktreeDir($: EngineInterface, value: string): Promise<void> {
+  const dir = value.trim()
+  if (!dir && !(await read($, settingsState))?.worktreeDir) return
+  await runAction($, worktreeDirArgs(dir), `Worktree folder: ${dir ? worktreeDir(dir) : `${DEFAULT_WORKTREE_DIR} (default)`}`)
 }
 
 async function setUser($: EngineInterface, scope: ConfigScope, key: 'name' | 'email', value: string): Promise<void> {
@@ -834,18 +948,25 @@ function pillBg({ branchColors, mainColor }: Ctx, badge: Badge, lane: string): s
 
 // A ref's pill. A tag, or a gone branch alone, is its icon on the color, then the name on its
 // dark shade; any other is its name on the color, then its remotes on the dark shade, the
-// checked-out branch (and a gone one with its remote: the ghost there) with an icon first.
+// checked-out branch (and a gone one with its remote: the ghost there) with an icon first;
+// a branch open in another worktree ends with its mark on the dark shade.
 function pillProps(ctx: Ctx, badge: Badge, lane: string): PillProps {
   const { isRound, icons } = ctx
   const { name, remotes } = badgeParts(badge)
   const bg = pillBg(ctx, badge, lane)
   const dark = shade(bg, SHADE)
   const isBold = badge.kind === 'head' || badge.kind === 'detached'
-  const icon = badge.kind === 'head' ? icons.head : badge.kind === 'tag' ? icons.tag : badge.isGone ? icons.ghost : ''
+  const icon = badge.kind === 'head' ? icons.head : badge.kind === 'tag' ? icons.tag : badge.worktree ? icons.worktree : badge.isGone ? icons.ghost : ''
+  // The icon inside the name's segment: the checked-out branch's check.
   const isPinned = badge.kind === 'head' || (badge.isGone === true && remotes !== '')
   const fg = badge.kind === 'remote' && !badge.isGone ? LIGHT_FG : BADGE_FG
-  const segments: PillSegment[] =
-    icon && !isPinned
+  const segments: PillSegment[] = badge.worktree
+    ? // the worktree mark last, on the dark shade in the pill's color, after the remotes
+      [
+        { text: name, bg, fg },
+        { text: remotes, bg: dark, fg: LIGHT_FG, icon: { text: icon, fg: bg, isAfter: true } },
+      ]
+    : icon && !isPinned
       ? [
           { text: '', bg, fg: BADGE_FG, icon: { text: icon, fg: dark } },
           { text: name, bg: dark, fg: LIGHT_FG },
@@ -963,6 +1084,9 @@ function renderHeader($: EngineInterface, ctx: Ctx) {
           </Button>
           <Button key="changelog" plain dimColor onPress={() => openChangelog($)}>
             {iconLabel(ctx, icons.changelog)}
+          </Button>
+          <Button key="worktrees" plain dimColor onPress={() => openWorktrees($)}>
+            {iconLabel(ctx, icons.worktree)}
           </Button>
           <Button key="fetch" plain dimColor onPress={() => runActions($, [['fetch', '--all']], 'Fetched remote(s) ✓', 'Fetching remote(s)…', true, true)}>
             {iconLabel(ctx, icons.fetch)}
@@ -1220,6 +1344,8 @@ function menuEntry($: EngineInterface, ctx: Ctx, badge: Badge, item: MenuItem): 
       isActive: view.isDeleting,
       onPress: () => setView($, v => ({ ...v, isDeleting: !v.isDeleting, isForce: false, isRenaming: false, push: null, confirm: null })),
     }
+  if (item.worktree === 'show') return { label: item.label, isActive: false, onPress: () => openWorktrees($, graph.openBranches?.[badge.label] ?? null) }
+  if (item.worktree === 'new') return { label: item.label, isActive: false, onPress: () => openWorktreeForm($, { kind: 'branch', branch: badge.label }) }
   if (item.compare !== undefined) {
     const to = item.compare
     return { label: item.label, isActive: false, onPress: () => openCompare($, { from: 'HEAD', to, fromLabel: headName(graph), toLabel: to }) }
@@ -1499,6 +1625,7 @@ function commitActions($: EngineInterface, ctx: Ctx, commit: GraphRow['commit'])
     [
       ...(isHere ? [] : [plain('compare-head', 'Compare with HEAD', () => openCompare($, { from: commit.hash, to: 'HEAD', fromLabel: short(commit.hash), toLabel: head }))]),
       // The marked commit's own actions take the mark off.
+      plain('worktree-new', 'New worktree here…', () => openWorktreeForm($, { kind: 'commit', hash: commit.hash })),
       plain('compare-mark', isMarked ? 'Unmark for compare' : 'Mark for compare', async () => {
         await setView($, v => ({ ...v, compareMark: isMarked ? null : commit.hash, isActionsOpen: false }))
         $.ui.toast(isMarked ? `Unmarked ${short(commit.hash)}` : `Marked ${short(commit.hash)} for compare`)
@@ -1774,6 +1901,126 @@ function screenHeader($: EngineInterface, ctx: Ctx, screen: Exclude<Screen, 'gra
   ]
 }
 
+// The worktrees screen: New worktree, then a row per worktree (the one the pane shows
+// marked), each opening its actions under it; the new worktree form floats over it.
+function renderWorktrees($: EngineInterface, ctx: Ctx, changes: Record<string, number> | null, scroll: PaneScroll) {
+  const { els: { Box, Text, Button }, graph, view, icons } = ctx
+  const list = graph.worktrees ?? []
+  const main = mainPath(list)
+  const rows = list.flatMap(w => {
+    const n = changes?.[w.path]
+    const info = [w.branch ?? `detached ${short(w.head)}`, n !== undefined && n > 0 ? `${n} changed` : '', w.isMain ? 'main worktree' : '', w.isLocked ? 'locked' : '', w.isPrunable ? 'prunable' : ''].filter(Boolean).join(' · ')
+    const toggle = () => setView($, v => ({ ...v, worktreeSelected: v.worktreeSelected === w.path ? null : w.path, worktreeRemoving: null, isForce: false }))
+    const row = line(
+      ctx,
+      <Button key={`worktree:${w.path}`} plain onPress={toggle}>
+        <Text wrap="truncate-end">
+          <Text weight={view.worktreeSelected === w.path ? 'bold' : undefined}>{`${w.path === graph.worktree ? '●' : ' '} ${relativeTo(main, w.path)}`}</Text>
+          <Text color={MUTED}>{`  ${info}`}</Text>
+        </Text>
+      </Button>,
+    )
+    return view.worktreeSelected === w.path ? [row, ...worktreeActions($, ctx, w, n ?? 0, main), blank(ctx)] : [row]
+  })
+  const header = screenHeader($, ctx, 'worktrees', `${icons.worktree} Worktrees`)
+  const create = line(
+    ctx,
+    [
+      <Button key="worktree-new" onPress={() => openWorktreeForm($, { kind: 'head' })}>
+        ＋ New worktree
+      </Button>,
+      <Text color={MUTED}>also from a branch's menu or a commit's actions</Text>,
+    ],
+    2,
+  )
+  const body = [...header, create, blank(ctx), ...rows]
+  const form = view.worktreeForm ? worktreeFormDialog($, ctx, view.worktreeForm, main) : null
+  // On a docked terminal pane the form floats over the list; elsewhere it opens above it.
+  if (ctx.isPinned && form)
+    return (
+      <Box flexDirection="column" height={scroll.bodyRows} overflow="hidden">
+        {body}
+        {renderDialog(ctx, 'worktree-form-dialog', form, 0, scroll.bodyRows)}
+      </Box>
+    )
+  return <Box flexDirection="column">{form ? [...header, framed(ctx, PALETTE[0] ?? MUTED, 0, dialogRows(ctx, form)).node, ...rows] : body}</Box>
+}
+
+// The new worktree form, as a dialog: what it is on, the branch (new at a commit; existing or
+// new from the screen), the name and the path; the problem or the warning, broken to the
+// dialog's width; create (create anyway, armed, when warned), ask Claude, cancel.
+function worktreeFormDialog($: EngineInterface, ctx: Ctx, form: WorktreeForm, main: string): Dialog {
+  const { els: { Text, Button }, Input, view } = ctx
+  const width = Math.min(COMMIT_DIALOG_W, ctx.cols - 2)
+  const title = form.kind === 'branch' ? `New worktree on ${form.branch}` : form.kind === 'commit' ? `New worktree at ${short(form.hash)}, on a new branch` : 'New worktree'
+  const cancel = closeButton(ctx, 'worktree-form-cancel', () => setView($, v => ({ ...v, worktreeForm: null, confirm: null })), 'cancel')
+  if (!Input || view.running) return { title, width, rows: [view.running ? renderRunning(ctx, 'worktree-form-spinner') : blank(ctx)], actions: line(ctx, cancel) }
+  const problem = formProblem(form, main)
+  const warning = 'warning' in problem ? problem.warning : undefined
+  const field = (key: string, label: string, name: 'newBranch' | 'slug' | 'path', value: string, placeholder: string) =>
+    line(ctx, <Input key={key} label={label} value={value} placeholder={placeholder} submitLabel="create" onInput={text => setForm($, f => formInput(f, name, text))} onSubmit={() => createWorktree($)} />)
+  const isArmed = view.confirm === 'worktree-create'
+  const message = form.error ? { text: form.error, color: 'error' as const } : warning ? { text: warning, color: 'warning' as const } : null
+  return {
+    title,
+    width,
+    rows: [
+      ...(form.kind !== 'branch' ? [field('worktree-branch', 'Branch', 'newBranch', form.newBranch, form.kind === 'head' ? 'existing or new branch' : 'branch-name')] : []),
+      field('worktree-slug', 'Name', 'slug', form.slug, 'worktree-name'),
+      field('worktree-path', 'Path', 'path', form.path, `${form.dir}/<name>`),
+      ...(message ? wrapWords(message.text, width - 4).map(l => line(ctx, <Text color={message.color}>{l}</Text>)) : []),
+    ],
+    actions: line(
+      ctx,
+      [
+        <Button key="worktree-create" variant="primary" onPress={() => createWorktree($)}>
+          {warning ? (isArmed ? 'Confirm: create anyway?' : 'Create anyway') : 'Create'}
+        </Button>,
+        <Button key="worktree-claude" plain onPress={() => askClaudeToCreate($)}>
+          ✨ Ask Claude
+        </Button>,
+        cancel,
+      ],
+      2,
+    ),
+  }
+}
+
+// A worktree's actions: copy its folder, remove it (not the main one); removing confirms, and
+// a worktree with changes takes force.
+function worktreeActions($: EngineInterface, ctx: Ctx, w: Worktree, changed: number, main: string): RenderChildren[] {
+  const { els: { Text, Button }, view } = ctx
+  if (view.running) return [renderRunning(ctx, 'worktree-spinner')]
+  if (view.worktreeRemoving === w.path) {
+    const isDirty = changed > 0
+    return [
+      line(ctx, isDirty ? <Text color="warning">{`${changed} changed ${changed === 1 ? 'file' : 'files'} will be lost`}</Text> : <Text color={MUTED}>The folder goes; the branch stays</Text>),
+      line(
+        ctx,
+        [
+          ...(isDirty ? [switchButton(ctx, 'worktree-remove-force', 'force (discards the changes)', view.isForce, () => setView($, v => ({ ...v, isForce: !v.isForce })))] : []),
+          ...(!isDirty || view.isForce
+            ? [
+                <Button key="worktree-remove-run" variant="primary" onPress={() => removeWorktree($, w.path, isDirty)}>
+                  Remove
+                </Button>,
+              ]
+            : [<Text color={MUTED}>Turn on force to remove it with its changes</Text>]),
+          closeButton(ctx, 'worktree-remove-cancel', () => setView($, v => ({ ...v, worktreeRemoving: null, isForce: false })), 'cancel'),
+        ],
+        2,
+      ),
+    ]
+  }
+  const item = (id: string, label: string, onPress: Entry['onPress']): ListItem => ({ id, key: `worktree-${id}`, entry: { label, isActive: false, onPress } })
+  return entryList(ctx, 'worktree', [
+    [
+      item('copy', 'Copy path', pe => copyText($, w.path, `Copied ${w.path}`, pe.surface)),
+      ...(w.isMain ? [] : [item('remove', 'Remove…', () => setView($, v => ({ ...v, worktreeRemoving: w.path, isForce: false })))]),
+    ],
+  ])
+}
+
 // The compare screen: what is compared, how far apart, and the files from one to the other
 // (each opens its diff between the two).
 function renderCompare($: EngineInterface, ctx: Ctx, compare: Compare | null, stored: Comparison | null) {
@@ -1896,6 +2143,13 @@ function renderSettings($: EngineInterface, ctx: Ctx, settings: RepoSettings | n
                 <Input key="cfg-name" label="Name" value={settings[view.configScope].name} submitLabel="save" onSubmit={value => setUser($, view.configScope, 'name', value)} />
                 <Input key="cfg-email" label="Email" value={settings[view.configScope].email} submitLabel="save" onSubmit={value => setUser($, view.configScope, 'email', value)} />
               </Box>
+            )}
+          </Box>
+          <Box flexDirection="column">
+            <Text weight="bold">Worktrees</Text>
+            <Text color={MUTED}>Where new worktrees go, in this repository (empty: {DEFAULT_WORKTREE_DIR})</Text>
+            {Input && !view.running && (
+              <Input key="cfg-worktree-dir" label="Worktree folder" value={settings.worktreeDir} placeholder={DEFAULT_WORKTREE_DIR} submitLabel="save" onSubmit={value => setWorktreeDir($, value)} />
             )}
           </Box>
           <Box flexDirection="column">
@@ -2275,6 +2529,7 @@ function noticeDialog($: EngineInterface, ctx: Ctx, notice: NonNullable<View['no
 function pinnedDialog($: EngineInterface, ctx: Ctx, menuRow: GraphRow | undefined, selectedRow: GraphRow | undefined): { key: string; dialog: Dialog } | null {
   const { view } = ctx
   if (view.notice) return { key: 'notice-dialog', dialog: noticeDialog($, ctx, view.notice) }
+  if (view.worktreeForm) return { key: 'worktree-form-dialog', dialog: worktreeFormDialog($, ctx, view.worktreeForm, mainPath(ctx.graph.worktrees)) }
   const flowBox = view.running ? null : flowDialog($, ctx)
   if (flowBox) return { key: 'flow-dialog', dialog: flowBox }
   if (menuRow && view.menu) return { key: 'menu-dialog', dialog: menuDialog($, ctx, menuRow, view.menu.badge) }
@@ -2362,6 +2617,7 @@ async function renderPane($: EngineInterface, els: Ctx['els'], surface: string, 
   if (view.screen === 'changelog') return renderChangelog($, base, await read($, changelogState))
   if (view.screen === 'diff') return renderDiff($, base, view.diff, await read($, diffState))
   if (view.screen === 'compare') return renderCompare($, base, view.compare, await read($, compareState))
+  if (view.screen === 'worktrees') return renderWorktrees($, base, await read($, worktreeChangesState), scroll)
   if (view.screen === 'settings') return renderSettings($, base, await read($, settingsState))
   // The graph column is as wide as the rows in the window need: laid out once to find the
   // window, then again at that width (a wide stretch far off no longer widens it all).
@@ -2419,6 +2675,8 @@ async function renderPane($: EngineInterface, els: Ctx['els'], surface: string, 
   return (
     <Box flexDirection="column">
       {header.node}
+      {/* Where no dialog floats, the new worktree form opens above the rows. */}
+      {view.worktreeForm && framed(ctx, PALETTE[0] ?? MUTED, 0, dialogRows(ctx, worktreeFormDialog($, ctx, view.worktreeForm, mainPath(graph.worktrees)))).node}
       {empty}
       {before > 0 && <Box key="space-before" height={before} flexShrink={0} />}
       {rows}
