@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { badgeParts, badgesOf, badgeWidth, diffBar, fitBadges, syncText, withSync } from '../hooks/badges'
+import { badgeParts, badgesOf, badgeWidth, diffBar, fitBadges, syncText, withSync, withWorktrees } from '../hooks/badges'
 import { parseRefs } from '../hooks/log'
 import { shade } from '../hooks/pilldraw'
 
@@ -142,4 +142,13 @@ test('BS-01 a published branch shows how far ahead and behind its upstream it is
   // the width counts it: ' feat ' 6 + ' origin ↑2 ↓1 ' 14
   expect(badgeWidth({ ...feat, ahead: 2, behind: 1 })).toBe(6 + 14)
   expect(withSync([feat, { kind: 'tag', label: 'v1', remotes: [] }], { feat: { ahead: 0, behind: 4 } })).toEqual([{ ...feat, behind: 4 }, { kind: 'tag', label: 'v1', remotes: [] }])
+})
+
+test('WT-01 a local branch open in another worktree gets an icon before its name', async () => {
+  const badges = withWorktrees(badgesOf(parseRefs('HEAD -> main, feature/login, origin/feature/login'), ['main', 'feature/login'], true), { 'feature/login': '/repo/.claude/worktrees/login' })
+  const login = badges.find(b => b.label === 'feature/login')
+  expect(login?.worktree).toBe(true)
+  expect(badges.find(b => b.label === 'main')?.worktree).toBeUndefined()
+  expect(badgeParts(login!).lead).toBe(true)
+  expect(badgeWidth(login!)).toBe(badgeWidth({ ...login!, worktree: undefined }) + 3)
 })

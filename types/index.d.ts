@@ -10,6 +10,25 @@ export type Commit = {
   subject: string
 }
 
+// A git worktree: its folder, its commit, its branch (null while detached), whether it is the
+// main one (the repository's own folder), locked, or prunable (its folder is gone).
+export type Worktree = { path: string; head: string; branch: string | null; isMain: boolean; isLocked: boolean; isPrunable: boolean }
+
+// The new worktree form: on a branch, or on a new branch at a commit; its name (slug) follows
+// the new branch and its path follows the name, each until typed by hand.
+// `head`: from the worktrees screen, on a branch typed (an existing one, or a new one off HEAD).
+export type WorktreeForm = ({ kind: 'branch'; branch: string } | { kind: 'commit'; hash: string } | { kind: 'head' }) & {
+  newBranch: string
+  slug: string
+  path: string
+  dir: string
+  // The home folder `~` stands for in the path (read when the form opens: the render reads it).
+  home: string
+  isSlugEdited: boolean
+  isPathEdited: boolean
+  error: string | null
+}
+
 // A stash of `git stash list`: its commit, the commit it was made on, when, `stash@{N}`, message.
 export type Stash = { hash: string; base: string; time: number; name: string; subject: string }
 
@@ -22,7 +41,8 @@ export type Track = { ahead: number; behind: number }
 // Added or untracked, Deleted, Renamed, Unmerged) and whether it is staged.
 export type Change = { path: string; from?: string; code: 'M' | 'A' | 'D' | 'R' | 'U'; isStaged: boolean }
 // `ahead`/`behind`: a local branch's Track, when not 0.
-export type Badge = { kind: BadgeKind; label: string; remotes: string[]; isGone?: true; ahead?: number; behind?: number }
+// `worktree`: a local branch open in another worktree.
+export type Badge = { kind: BadgeKind; label: string; remotes: string[]; isGone?: true; ahead?: number; behind?: number; worktree?: true }
 
 export type Cell = { ch: string; color: number }
 export type GraphRow = { commit: Commit; cells: Cell[] }
@@ -59,6 +79,12 @@ export type Graph = {
   mergedKey?: string
   // The checked-out branch against its upstream; null where it has none (not published).
   sync?: (Track & { remote: string }) | null
+  // The repo's worktrees (the main one first); derived from them at the load, so each row's
+  // badges need not work them out: the one the pane shows, and each branch open in another
+  // one, with where.
+  worktrees?: Worktree[]
+  worktree?: string
+  openBranches?: Record<string, string>
   hasMore: boolean
   error?: string
 }
@@ -66,7 +92,7 @@ export type Graph = {
 // The "all branches" switch: on, local and remote branches (`--all`); off (`head`, the name kept
 // for the stored view), the local branches alone (`--branches HEAD`).
 export type Scope = 'all' | 'head'
-export type Screen = 'graph' | 'settings' | 'changelog' | 'diff' | 'compare'
+export type Screen = 'graph' | 'settings' | 'changelog' | 'diff' | 'compare' | 'worktrees'
 
 // Two points of the graph compared: git refs or hashes, and how the screen names them.
 export type Compare = { from: string; to: string; fromLabel: string; toLabel: string }
@@ -119,6 +145,12 @@ export type View = {
   // What the compare screen compares, and the commit marked to compare another with.
   compare: Compare | null
   compareMark: string | null
+  // On the worktrees screen: the worktree whose actions are open, and the one being removed
+  // (its force is `isForce`).
+  worktreeSelected: string | null
+  worktreeRemoving: string | null
+  // The new worktree form on the worktrees screen.
+  worktreeForm: WorktreeForm | null
   // The commit's step (pick the files, then the message) and the files picked, by path.
   commitStep: 'files' | 'message'
   commitFiles: string[]
@@ -175,7 +207,8 @@ export type BadgeStyle = 'auto' | 'round' | 'square'
 export type ConfigScope = 'local' | 'global'
 export type RemoteInfo = { name: string; fetchUrl: string; pushUrl: string }
 export type UserConfig = { name: string; email: string }
-export type RepoSettings = { local: UserConfig; global: UserConfig; remotes: RemoteInfo[] }
+// `worktreeDir`: the folder new worktrees go in, from the local config ('' when unset: the default).
+export type RepoSettings = { local: UserConfig; global: UserConfig; remotes: RemoteInfo[]; worktreeDir: string }
 // The repos found in the session folder, by path relative to it (`.` is the folder), the one
 // shown, whether the repo dropdown is open, and the branch each repo is on (absent: unknown).
 export type Repos = { list: string[]; active: string; isPicking: boolean; branches: Record<string, string> }
@@ -185,6 +218,6 @@ export type Columns = { isAuthor: boolean; isHash: boolean }
 
 declare module 'claude-code' {
   interface PluginState {
-    gitgraph: { graph: Graph; view: Shaped<View>; detail: CommitDetail | null; isRound: boolean; settings: RepoSettings | null; hasNerdFont: boolean; graphVersion: number; scrollTop: number; columns: Columns; flow: FlowInfo | null; repos: Shaped<Repos>; changelog: Changelog | null; diff: Diff | null; compare: Comparison | null }
+    gitgraph: { graph: Graph; view: Shaped<View>; detail: CommitDetail | null; isRound: boolean; settings: RepoSettings | null; hasNerdFont: boolean; graphVersion: number; scrollTop: number; columns: Columns; flow: FlowInfo | null; repos: Shaped<Repos>; changelog: Changelog | null; diff: Diff | null; compare: Comparison | null; worktreeChanges: Record<string, number> | null }
   }
 }

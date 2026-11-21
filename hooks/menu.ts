@@ -17,6 +17,8 @@ export type MenuItem = {
   deleteBranch?: string
   // A branch to compare the current branch with.
   compare?: string
+  // A local branch's worktree: a new one on it, or the one it is open in.
+  worktree?: 'new' | 'show'
 }
 
 export const REMOTE = '<remote>'
@@ -98,6 +100,8 @@ export function menuFor(badge: Badge, remotes: string[], flow: FlowConfig | null
               act('merge', 'Merge into current branch', ['merge', name]),
               act('rebase', 'Rebase current branch on this', ['rebase', name]),
               { id: 'compare', label: 'Compare with current branch', compare: name },
+              // git refuses a second worktree on a branch already open in one
+              badge.worktree ? { id: 'worktree', label: 'Show worktree', worktree: 'show' as const } : { id: 'worktree', label: 'New worktree…', worktree: 'new' as const },
               { id: 'delete', label: 'Delete branch…', deleteBranch: name },
             ]),
         copy,

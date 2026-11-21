@@ -39,3 +39,18 @@ export function truncate(text: string, max: number): string {
   if (max <= 0) return ''
   return text.length <= max ? text : `${text.slice(0, max - 1)}…`
 }
+
+// A text in lines of at most `width` cells, broken between words (a longer word cut).
+export function wrapWords(text: string, width: number): string[] {
+  const lines: string[] = []
+  let current = ''
+  for (const word of text.split(/\s+/).filter(Boolean)) {
+    const next = current ? `${current} ${word}` : word
+    if (next.length <= width) current = next
+    else {
+      if (current) lines.push(current)
+      current = word.length > width ? word.slice(0, width) : word
+    }
+  }
+  return current ? [...lines, current] : lines
+}
