@@ -1,4 +1,4 @@
-import type { Change, Commit, CommitDetail, FileStat, Ref, Stash, Track } from '../types'
+import type { Change, Commit, CommitDetail, FileStat, Merged, Ref, Stash, Track } from '../types'
 import { branchOf } from './badges'
 
 // Every ref with its commit, `<oid> <refname>` a line: what the poll compares, and the format the
@@ -121,18 +121,39 @@ export function mergedArgs(bases: string[], locals: string[]): string[] | null {
   return here.length ? [...REFS_ARGS, ...here.map(b => `--merged=refs/heads/${b}`), 'refs/remotes'] : null
 }
 
-// The dead remotes in that query's output (`<oid> refs/remotes/<remote>/<branch>`): not a base,
-// not `<remote>/HEAD`, and not on a base's tip (a branch just started is merged, not dead).
-// `refs` is the `for-each-ref` of every ref, for the bases' tips.
-export function parseMerged(stdout: string, refs: string, bases: string[]): string[] {
+// The merged remotes in that query's output (`<oid> refs/remotes/<remote>/<branch>`), by name to
+// their tip: not a base, not `<remote>/HEAD`; and the bases' tips (local and remote), from `refs`,
+// the `for-each-ref` of every ref. Which of them are dead is deadOf's call, over the loaded rows.
+export function parseMerged(stdout: string, refs: string, bases: string[]): Merged {
   const isBase = (ref: string) => bases.some(b => ref === `refs/heads/${b}` || (ref.startsWith('refs/remotes/') && branchOf(ref.slice('refs/remotes/'.length)) === b))
   const lines = (text: string) => text.split('\n').flatMap(l => { const at = l.indexOf(' '); return at > 0 ? [[l.slice(0, at), l.slice(at + 1)] as const] : [] })
-  const tips = new Set(lines(refs).filter(([, ref]) => isBase(ref)).map(([oid]) => oid))
-  return lines(stdout).flatMap(([oid, ref]) => {
+  const tips = [...new Set(lines(refs).filter(([, ref]) => isBase(ref)).map(([oid]) => oid))]
+  const remotes = Object.fromEntries(lines(stdout).flatMap(([oid, ref]) => {
     const name = ref.replace(/^refs\/remotes\//, '')
     const branch = branchOf(name)
-    return bases.includes(branch) || branch === 'HEAD' || tips.has(oid) ? [] : [name]
-  })
+    return bases.includes(branch) || branch === 'HEAD' ? [] : [[name, oid] as const]
+  }))
+  return { remotes, tips }
+}
+
+// Adds to `line` the loaded commits from `start` down its first parents, stopping at one already
+// there or not loaded.
+export function firstParentLine(byHash: Map<string, Commit>, start: string, line: Set<string>): Set<string> {
+  for (let at: string | undefined = start; at && byHash.has(at) && !line.has(at); at = byHash.get(at)?.parents[0]) line.add(at)
+  return line
+}
+
+// The merged remotes that are dead: finished into a base, their tip off every base's first-parent
+// line. One started on a base and pushed with no commit of its own sits on that line: merged
+// (its tip is in the base), but not finished, so not dead, however far the base has moved on.
+// A finish (git flow, --no-ff) leaves the tip a second parent of the base's merge commit, off the
+// line. The line is walked over the loaded rows: a tip past them has no row to draw on anyway.
+export function deadOf(merged: Merged | undefined, rows: Commit[]): Set<string> {
+  if (!merged || Object.keys(merged.remotes).length === 0) return new Set()
+  const byHash = new Map(rows.map(c => [c.hash, c]))
+  const line = new Set<string>()
+  for (const tip of merged.tips) firstParentLine(byHash, tip, line)
+  return new Set(Object.entries(merged.remotes).flatMap(([name, oid]) => (line.has(oid) ? [] : [name])))
 }
 
 // How far each local branch is ahead of and behind its upstream, from TRACK_ARGS: only the

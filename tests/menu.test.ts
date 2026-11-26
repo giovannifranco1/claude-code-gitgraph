@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import type { FlowConfig } from '../types'
-import { checkoutArgs, deleteBranchArgs, defaultPushRemotes, menuFor, menuGroups, pushRuns, renameArgs, resetArgs, splitRemote, stashArgs, stashRunArgs } from '../hooks/menu'
+import { checkoutArgs, deleteBranchArgs, deleteBranchSteps, defaultPushRemotes, menuFor, menuGroups, pushRuns, renameArgs, resetArgs, splitRemote, stashArgs, stashRunArgs } from '../hooks/menu'
 import type { MenuItem } from '../hooks/menu'
 
 const ids = (items: { id: string }[]) => items.map(i => i.id)
@@ -17,7 +17,19 @@ test('GG-12 a local branch gets the full branch menu', async () => {
   expect(by.rebase?.runs?.[0]).toEqual(['rebase', 'feat'])
   expect(by.delete?.label).toBe('Delete branch…')
   expect(by.delete?.deleteBranch).toBe('feat')
+  expect(by.delete?.deleteRemotes).toEqual(['origin'])
   expect(by.copy?.copy).toBe('feat')
+})
+
+test('GG-12 a branch delete runs here first, then, asked, on each remote holding it', async () => {
+  const argsOf = (steps: { args: string[] }[]) => steps.map(s => s.args)
+  expect(argsOf(deleteBranchSteps('feat', false, []))).toEqual([['branch', '-d', 'feat']])
+  expect(deleteBranchSteps('feat', true, ['origin']).map(s => [s.failed, s.isNetwork])).toEqual([['Deleting feat failed', undefined], ['Deleting feat on origin failed', true]])
+  expect(argsOf(deleteBranchSteps('feat', true, ['origin', 'github']))).toEqual([
+    ['branch', '-D', 'feat'],
+    ['push', 'origin', '--delete', 'feat'],
+    ['push', 'github', '--delete', 'feat'],
+  ])
 })
 
 test('GG-12 the checked-out branch cannot be checked out, merged, rebased or deleted', async () => {

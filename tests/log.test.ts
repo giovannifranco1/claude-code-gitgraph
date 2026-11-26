@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import type { Commit } from '../types'
-import { conflictedFiles, detailArgs, detailOf, isPseudoRow, localsOf, mergedArgs, parseChanges, parseDetail, parseMerged, parseStashes, parseTracks, REFS_ARGS, STASH_ARGS, TRACK_ARGS, parseSync, parseLog, parseRefs, parseStatus, remotesOf, UNCOMMITTED, withStashes, withUncommitted } from '../hooks/log'
+import { conflictedFiles, deadOf, detailArgs, detailOf, isPseudoRow, localsOf, mergedArgs, parseChanges, parseDetail, parseMerged, parseStashes, parseTracks, REFS_ARGS, STASH_ARGS, TRACK_ARGS, parseSync, parseLog, parseRefs, parseStatus, remotesOf, UNCOMMITTED, withStashes, withUncommitted } from '../hooks/log'
 
 const US = '\x1f'
 const RS = '\x1e'
@@ -113,13 +113,26 @@ test('GG-24 merged remotes come from git, into any base that exists here', async
   expect(mergedArgs(['main'], ['trunk'])).toBeNull()
 })
 
-test('GG-24 a merged remote is dead; not a base, origin/HEAD, or one on a base tip (a branch just started)', async () => {
+test('GG-24 the merged remotes, by name to their tip, leave out the bases and origin/HEAD; the bases\' tips come along', async () => {
   const refs = 'd1 refs/heads/develop\nm1 refs/heads/main\nd1 refs/remotes/origin/develop\n'
   const merged = 'a1 refs/remotes/origin/feature/a\nd1 refs/remotes/origin/feature/new\nd1 refs/remotes/origin/develop\nm1 refs/remotes/origin/HEAD\nm1 refs/remotes/origin/main\n'
-  expect(parseMerged(merged, refs, ['main', 'develop'])).toEqual(['origin/feature/a'])
-  expect(parseMerged('', refs, ['main'])).toEqual([])
-  // a remote branch merely ending in a base's name is not a base: its tip is no base tip
-  expect(parseMerged('m1 refs/remotes/origin/feature/main\n', 'm1 refs/remotes/origin/feature/main\nz9 refs/heads/main\n', ['main'])).toEqual(['origin/feature/main'])
+  expect(parseMerged(merged, refs, ['main', 'develop'])).toEqual({ remotes: { 'origin/feature/a': 'a1', 'origin/feature/new': 'd1' }, tips: ['d1', 'm1'] })
+  expect(parseMerged('', refs, ['main'])).toEqual({ remotes: {}, tips: ['m1'] })
+  // a remote branch merely ending in a base's name is not a base, nor is its tip a base tip
+  expect(parseMerged('m1 refs/remotes/origin/feature/main\n', 'm1 refs/remotes/origin/feature/main\nz9 refs/heads/main\n', ['main'])).toEqual({ remotes: { 'origin/feature/main': 'm1' }, tips: ['z9'] })
+})
+
+test('GG-24 a merged remote is dead only when finished: its tip off every base\'s first-parent line', async () => {
+  const c = (hash: string, ...parents: string[]): Commit => ({ hash, parents, refs: [], author: '', time: 0, subject: '' })
+  // develop: d3 (merge of feature/a's a1) <- d2 <- d1; main: m1 (merge of develop's d2) <- d0
+  const rows = [c('d3', 'd2', 'a1'), c('a1', 'd1'), c('m1', 'd0', 'd2'), c('d2', 'd1'), c('d1', 'd0'), c('d0')]
+  const merged = { remotes: { 'origin/feature/a': 'a1', 'origin/feature/new': 'd1', 'origin/feature/now': 'd3', 'origin/feature/rel': 'd2' }, tips: ['d3', 'm1'] }
+  // feature/a was finished into develop; feature/new started at d1 and never got a commit of its
+  // own: develop moved on past it, but it is not done; the one on develop's tip, neither; and one
+  // on a develop commit a release merged into main is on develop's line, so not dead either
+  expect([...deadOf(merged, rows)]).toEqual(['origin/feature/a'])
+  expect(deadOf(undefined, rows).size).toBe(0)
+  expect(deadOf({ remotes: {}, tips: ['d3'] }, rows).size).toBe(0)
 })
 
 test('BS-01 each local branch is ahead of and behind its upstream, read on a load apart from the refs', async () => {

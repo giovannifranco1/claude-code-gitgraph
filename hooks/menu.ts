@@ -13,8 +13,10 @@ export type MenuItem = {
   pushArgs?: string[]
   // A git flow action on a work branch (./flow.ts), run with the flow's environment.
   flow?: { action: 'finish' | 'update'; topic: FlowTopic }
-  // A local branch's delete, which asks whether to force it.
+  // A local branch's delete, which asks whether to force it, and the remotes holding a
+  // branch of its name (asked whether to delete it there too).
   deleteBranch?: string
+  deleteRemotes?: string[]
   // A branch to compare the current branch with.
   compare?: string
   // A local branch's worktree: a new one on it, or the one it is open in.
@@ -46,8 +48,8 @@ export const STASH_DONE: Record<StashVerb, string> = { apply: 'Applied', pop: 'P
 export type ResetMode = 'mixed' | 'hard'
 export const resetArgs = (mode: ResetMode) => ['reset', ...(mode === 'hard' ? ['--hard'] : [])]
 
-// `-D` deletes a branch whose work is merged nowhere; `-d` refuses to.
-export const deleteBranchArgs = (name: string, isForce: boolean) => ['branch', isForce ? '-D' : '-d', name]
+// The branch delete lives with the other steps (a classic finish deletes its branch too).
+export { deleteBranchArgs, deleteBranchSteps } from './flow'
 
 const act = (id: string, label: string, args: string[], isNetwork = false): MenuItem => ({
   id,
@@ -102,7 +104,7 @@ export function menuFor(badge: Badge, remotes: string[], flow: FlowConfig | null
               { id: 'compare', label: 'Compare with current branch', compare: name },
               // git refuses a second worktree on a branch already open in one
               badge.worktree ? { id: 'worktree', label: 'Show worktree', worktree: 'show' as const } : { id: 'worktree', label: 'New worktree…', worktree: 'new' as const },
-              { id: 'delete', label: 'Delete branch…', deleteBranch: name },
+              { id: 'delete', label: 'Delete branch…', deleteBranch: name, deleteRemotes: badge.remotes },
             ]),
         copy,
       ]

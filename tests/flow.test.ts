@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
-import type { FlowConfig } from '../types'
-import { defaultTagMessage, finishArgs, finishPushArgs, flowArgs, flowCliOf, flowMenuFor, mainOf, nextVersion, parseFlowConfig, resumeArgs, topicOf, updateLabel } from '../hooks/flow'
+import type { FlowConfig, FlowConflict } from '../types'
+import { defaultTagMessage, finishArgs, finishSteps, unmergedArgs, flowArgs, flowCliOf, flowMenuFor, mainOf, nextVersion, parseFlowConfig, resumeArgs, resumeStep, topicOf, updateLabel } from '../hooks/flow'
 
 // What `git config --get-regexp ^gitflow\.` prints after `git flow init -d` (git-flow-next 1.1).
 const NEXT_CONFIG = `gitflow.version 1.0
@@ -103,10 +103,56 @@ test('GF-05 the tag message is the version alone, as the tag is named', async ()
   expect(defaultTagMessage({ kind: 'hotfix', name: '1.0.2', branch: 'hotfix/1.0.2' })).toBe('1.0.2')
 })
 
-test('GF-05 the push after finish sends the parent and the bases that follow it, with the tags', async () => {
-  expect(finishPushArgs({ kind: 'feature', name: 'x', branch: 'feature/x' }, config())).toEqual(['push', '--follow-tags', 'origin', 'develop'])
-  expect(finishPushArgs({ kind: 'release', name: '1.2.0', branch: 'release/1.2.0' }, config())).toEqual(['push', '--follow-tags', 'origin', 'main', 'develop'])
-  expect(finishPushArgs({ kind: 'hotfix', name: '1.0.2', branch: 'hotfix/1.0.2' }, config())).toEqual(['push', '--follow-tags', 'origin', 'main', 'develop'])
+const HERE = { unmerged: ['feature/y'], isOnRemote: true, canPush: true }
+const argsOf = (steps: { args: string[] }[]) => steps.map(s => s.args)
+
+test('GF-05 a feature finishes through git flow alone, then the push sends its parent with the tags', async () => {
+  const feature = { kind: 'feature', name: 'x', branch: 'feature/x' } as const
+  const steps = finishSteps(feature, config(), ON, null, HERE)
+  expect(argsOf(steps)).toEqual([finishArgs(feature, config(), ON, null), ['push', '--follow-tags', 'origin', 'develop']])
+  expect(steps[0]?.stops).toEqual({ op: 'finish', topic: feature })
+  expect(argsOf(finishSteps(feature, config(), ON, null, { ...HERE, canPush: false }))).toEqual([finishArgs(feature, config(), ON, null)])
+})
+
+test('GF-05 a hotfix or release finishes as classic git flow: into main by git flow, then the branch itself merged into develop, not main', async () => {
+  const hotfix = { kind: 'hotfix', name: '1.0.2', branch: 'hotfix/1.0.2' } as const
+  const off = ['-c', 'gitflow.branch.develop.autoupdate=false']
+  const steps = finishSteps(hotfix, config(), { ...ON, isKeep: false }, null, HERE)
+  expect(argsOf(steps)).toEqual([
+    // git flow keeps the branch for the merge, and leaves develop alone
+    ['flow', 'hotfix', 'finish', '1.0.2', '--no-ff', '--keep', '-m', '1.0.2'],
+    ['checkout', 'develop'],
+    ['merge', '--no-ff', '-m', "Merge branch 'hotfix/1.0.2' into develop", 'hotfix/1.0.2'],
+    ['push', '--follow-tags', 'origin', 'main', 'develop'],
+    ['branch', '-d', 'hotfix/1.0.2'],
+    ['push', 'origin', '--delete', 'hotfix/1.0.2'],
+  ])
+  expect(steps[0]?.config).toEqual(off)
+  expect(steps[0]?.stops).toEqual({ op: 'finish', topic: hotfix, config: off })
+  expect(steps[2]?.stops).toEqual({ op: 'merge', topic: hotfix, into: 'develop' })
+  expect(steps.slice(1, 3).every(s => s.isFlow)).toBe(true)
+  // kept: no delete; off the remote: no remote delete; --ff where asked
+  const release = { kind: 'release', name: '1.2.0', branch: 'release/1.2.0' } as const
+  expect(argsOf(finishSteps(release, config(), { ...ON, isNoFf: false }, null, { ...HERE, isOnRemote: false })).slice(2)).toEqual([
+    ['merge', '--ff', '-m', "Merge branch 'release/1.2.0' into develop", 'release/1.2.0'],
+    ['push', '--follow-tags', 'origin', 'main', 'develop'],
+  ])
+  expect(argsOf(finishSteps(hotfix, config(), { ...ON, isKeep: false }, null, { ...HERE, isOnRemote: false, canPush: false })).slice(3)).toEqual([['branch', '-d', 'hotfix/1.0.2']])
+})
+
+test('GF-05 a hotfix with a release open goes into the release, not develop: the release takes it there', async () => {
+  // open: a local branch git has not merged into main (a finished one kept is merged)
+  expect(unmergedArgs('main')).toEqual(['for-each-ref', '--format=%(refname:short)', '--no-merged=refs/heads/main', 'refs/heads'])
+  const hotfix = { kind: 'hotfix', name: '1.0.2', branch: 'hotfix/1.0.2' } as const
+  const steps = argsOf(finishSteps(hotfix, config(), ON, null, { ...HERE, unmerged: ['feature/y', 'release/1.1.0'] }))
+  expect(steps.slice(1)).toEqual([
+    ['checkout', 'release/1.1.0'],
+    ['merge', '--no-ff', '-m', "Merge branch 'hotfix/1.0.2' into release/1.1.0", 'hotfix/1.0.2'],
+    ['push', '--follow-tags', 'origin', 'main', 'release/1.1.0'],
+  ])
+  // a release finishing does not merge into another release
+  const release = { kind: 'release', name: '1.2.0', branch: 'release/1.2.0' } as const
+  expect(argsOf(finishSteps(release, config(), ON, null, { ...HERE, unmerged: ['release/1.2.0'] }))[1]).toEqual(['checkout', 'develop'])
 })
 
 test('GF-04 update names the branch; the label follows the strategy', async () => {
@@ -122,6 +168,13 @@ test('GF-06 a stopped finish continues or aborts through git flow; a stopped upd
   expect(resumeArgs({ op: 'finish', topic }, '--abort')).toEqual(['flow', 'feature', 'finish', '--abort', 'x'])
   expect(resumeArgs({ op: 'rebase', topic }, '--continue')).toEqual(['rebase', '--continue'])
   expect(resumeArgs({ op: 'merge', topic }, '--abort')).toEqual(['merge', '--abort'])
+  // a classic finish goes on with the settings its git flow ran with; its merge into a base, through git
+  const off = ['-c', 'gitflow.branch.develop.autoupdate=false']
+  const finish: FlowConflict = { op: 'finish', topic, config: off, then: [{ args: ['push'] }] }
+  expect(resumeStep(finish, '--continue')).toEqual({ args: ['flow', 'feature', 'finish', '--continue', 'x'], config: off, isFlow: true, stops: { op: 'finish', topic, config: off } })
+  expect(resumeStep(finish, '--abort').stops).toBeUndefined()
+  expect(resumeStep({ op: 'merge', topic, into: 'develop' }, '--continue')).toMatchObject({ args: ['merge', '--continue'], isFlow: true })
+  expect(resumeStep({ op: 'rebase', topic }, '--continue').isFlow).toBe(false)
 })
 
 test('GF-07 a work branch menu leads with finish and update of that branch; no publish (Push branch… does it)', async () => {
@@ -154,7 +207,7 @@ test('GF-02 a git flow AVH config is read as git-flow-next reads it', async () =
     ['release', 'release/', 'main', 'develop', true, 'merge'],
     ['hotfix', 'hotfix/', 'main', 'main', true, 'rebase'],
   ])
-  expect(finishPushArgs({ kind: 'release', name: '1.1.0', branch: 'release/1.1.0' }, c)).toEqual(['push', '--follow-tags', 'origin', 'main', 'develop'])
+  expect(argsOf(finishSteps({ kind: 'release', name: '1.1.0', branch: 'release/1.1.0' }, c, ON, null, HERE)).at(-1)).toEqual(['push', '--follow-tags', 'origin', 'main', 'develop'])
 })
 
 test('GF-02 a config with no work type is not set up', async () => {
