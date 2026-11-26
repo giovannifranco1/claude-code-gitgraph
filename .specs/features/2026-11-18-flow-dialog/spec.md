@@ -78,6 +78,7 @@ Como dev usando o painel, quero que iniciar, finalizar, fazer rebase/merge ou pu
 
 ### GG-24 — Branch só no remote com fantasma (pedido do dev)
 - Uma branch que só existe no remote (já mergeada e apagada aqui) aparece como a tag: `[fantasma][origin/feature/x]`, o ícone (Nerd Font `\u{f02a0}`, Material Design; o `\uf6e2` do Font Awesome não existe no Nerd Fonts 3; sem Nerd Font `◌`) num segmento cinza no tom escuro dele, o nome no segmento escuro.
+- Uma branch remota mergeada numa base também aparece morta, mas só quando foi finalizada: o tip dela fica fora da linha de primeiro pai de toda base (o `finish` do git flow faz merge `--no-ff`, e o tip vira segundo pai do merge). Uma branch criada numa base e enviada sem commit próprio fica na linha da base: está contida nela, mas não morreu, por mais que a base ande (pedido do dev, 2026-11-26). Um merge fast-forward também deixa o tip na linha, então essa branch não aparece morta.
 
 ## Fora do escopo
 - Init/Reconfigure do Git Flow e Continue/Abort de conflito continuam no rodapé.

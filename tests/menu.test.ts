@@ -1,13 +1,14 @@
 import { expect, test } from 'claude-code/testing'
 
 import type { FlowConfig } from '../types'
-import { checkoutArgs, deleteBranchArgs, defaultPushRemotes, menuFor, menuGroups, pushRuns, renameArgs, splitRemote, stashArgs } from '../hooks/menu'
+import { checkoutArgs, deleteBranchArgs, deleteBranchSteps, defaultPushRemotes, menuFor, menuGroups, pushRuns, renameArgs, resetArgs, splitRemote, stashArgs, stashRunArgs } from '../hooks/menu'
+import type { MenuItem } from '../hooks/menu'
 
 const ids = (items: { id: string }[]) => items.map(i => i.id)
 
 test('GG-12 a local branch gets the full branch menu', async () => {
   const items = menuFor({ kind: 'branch', label: 'feat', remotes: ['origin'] }, ['origin'])
-  expect(ids(items)).toEqual(['checkout', 'rename', 'push', 'merge', 'rebase', 'delete', 'copy'])
+  expect(ids(items)).toEqual(['checkout', 'rename', 'push', 'merge', 'rebase', 'compare', 'worktree', 'delete', 'copy'])
   const by = Object.fromEntries(items.map(i => [i.id, i]))
   expect(by.checkout?.runs?.[0]).toEqual(['checkout', 'feat'])
   expect(by.push?.label).toBe('Push branch…')
@@ -16,7 +17,19 @@ test('GG-12 a local branch gets the full branch menu', async () => {
   expect(by.rebase?.runs?.[0]).toEqual(['rebase', 'feat'])
   expect(by.delete?.label).toBe('Delete branch…')
   expect(by.delete?.deleteBranch).toBe('feat')
+  expect(by.delete?.deleteRemotes).toEqual(['origin'])
   expect(by.copy?.copy).toBe('feat')
+})
+
+test('GG-12 a branch delete runs here first, then, asked, on each remote holding it', async () => {
+  const argsOf = (steps: { args: string[] }[]) => steps.map(s => s.args)
+  expect(argsOf(deleteBranchSteps('feat', false, []))).toEqual([['branch', '-d', 'feat']])
+  expect(deleteBranchSteps('feat', true, ['origin']).map(s => [s.failed, s.isNetwork])).toEqual([['Deleting feat failed', undefined], ['Deleting feat on origin failed', true]])
+  expect(argsOf(deleteBranchSteps('feat', true, ['origin', 'github']))).toEqual([
+    ['branch', '-D', 'feat'],
+    ['push', 'origin', '--delete', 'feat'],
+    ['push', 'github', '--delete', 'feat'],
+  ])
 })
 
 test('GG-12 the checked-out branch cannot be checked out, merged, rebased or deleted', async () => {
@@ -30,7 +43,7 @@ test('GG-12 without remotes there is nothing to push to', async () => {
 
 test('GG-12 a remote branch can be tracked, fetched, merged and deleted remotely', async () => {
   const items = menuFor({ kind: 'remote', label: 'my/remote/fix/x', remotes: [] }, ['origin', 'my/remote'])
-  expect(ids(items)).toEqual(['checkout', 'fetch', 'merge', 'delete', 'copy'])
+  expect(ids(items)).toEqual(['checkout', 'fetch', 'merge', 'compare', 'delete', 'copy'])
   const by = Object.fromEntries(items.map(i => [i.id, i]))
   expect(by.checkout?.runs?.[0]).toEqual(['switch', '--track', 'my/remote/fix/x'])
   expect(by.fetch?.runs?.[0]).toEqual(['fetch', 'my/remote', 'fix/x'])
@@ -61,7 +74,7 @@ test('GG-12 rename passes both names as their own arguments', async () => {
 
 test('GG-12 one push item whatever the remotes; it runs one push per chosen remote', async () => {
   const items = menuFor({ kind: 'branch', label: 'feat', remotes: ['github'] }, ['github', 'origin'])
-  expect(ids(items)).toEqual(['checkout', 'rename', 'push', 'merge', 'rebase', 'delete', 'copy'])
+  expect(ids(items)).toEqual(['checkout', 'rename', 'push', 'merge', 'rebase', 'compare', 'worktree', 'delete', 'copy'])
   const push = items.find(i => i.id === 'push')!
   expect(pushRuns(push, ['origin', 'github'])).toEqual([
     ['push', '-u', 'origin', 'feat'],
@@ -87,7 +100,7 @@ test('GG-14 a double click checks out a local branch, tracks a remote one, and l
 
 test('GF-07 a git flow work branch menu leads with its flow actions; other refs do not get them', async () => {
   const config: FlowConfig = { types: [{ kind: 'feature', prefix: 'feature/', parent: 'develop', startpoint: 'develop', isTagged: false, strategy: 'rebase' }], bases: [], remote: 'origin', tagPrefix: '' }
-  expect(ids(menuFor({ kind: 'branch', label: 'feature/login', remotes: [] }, [], config))).toEqual(['flow-finish', 'flow-update', 'checkout', 'rename', 'merge', 'rebase', 'delete', 'copy'])
+  expect(ids(menuFor({ kind: 'branch', label: 'feature/login', remotes: [] }, [], config))).toEqual(['flow-finish', 'flow-update', 'checkout', 'rename', 'merge', 'rebase', 'compare', 'worktree', 'delete', 'copy'])
   expect(ids(menuFor({ kind: 'head', label: 'feature/login', remotes: [] }, [], config)).slice(0, 2)).toEqual(['flow-finish', 'flow-update'])
   expect(ids(menuFor({ kind: 'remote', label: 'origin/feature/login', remotes: [] }, ['origin'], config))).not.toContain('flow-finish')
   expect(ids(menuFor({ kind: 'branch', label: 'feature/login', remotes: [] }, []))).not.toContain('flow-finish')
@@ -100,13 +113,32 @@ test('GG-12 a branch is deleted with -d, or -D when force is ticked', async () =
 
 test('GG-12 the menu is a list in groups: git flow, branch actions, rename and copy, then delete', async () => {
   const groups = (items: { id: string }[]) => menuGroups(items as never).map(ids)
-  expect(groups(menuFor({ kind: 'branch', label: 'feat', remotes: ['origin'] }, ['origin']))).toEqual([['checkout', 'push', 'merge', 'rebase'], ['rename', 'copy'], ['delete']])
+  expect(groups(menuFor({ kind: 'branch', label: 'feat', remotes: ['origin'] }, ['origin']))).toEqual([['checkout', 'push', 'merge', 'rebase', 'compare', 'worktree'], ['rename', 'copy'], ['delete']])
   expect(groups(menuFor({ kind: 'head', label: 'main', remotes: [] }, ['up']))).toEqual([['push'], ['rename', 'copy']])
-  expect(groups(menuFor({ kind: 'remote', label: 'origin/feat', remotes: [] }, ['origin']))).toEqual([['checkout', 'fetch', 'merge'], ['copy'], ['delete']])
+  expect(groups(menuFor({ kind: 'remote', label: 'origin/feat', remotes: [] }, ['origin']))).toEqual([['checkout', 'fetch', 'merge', 'compare'], ['copy'], ['delete']])
   expect(groups([{ id: 'flow-finish' }, { id: 'flow-update' }, { id: 'checkout' }, { id: 'copy' }])).toEqual([['flow-finish', 'flow-update'], ['checkout'], ['copy']])
 })
 
 test('ST-01 a stash takes untracked files too, and the message only when there is one', async () => {
   expect(stashArgs(' wip ')).toEqual(['stash', 'push', '--include-untracked', '-m', 'wip'])
   expect(stashArgs('  ')).toEqual(['stash', 'push', '--include-untracked'])
+})
+
+test('RS-01 a mixed reset unstages the changes, a hard one discards them; neither cleans untracked files', async () => {
+  expect(resetArgs('mixed')).toEqual(['reset'])
+  expect(resetArgs('hard')).toEqual(['reset', '--hard'])
+})
+
+test('SH-02 a stash is applied, popped or dropped by its name', async () => {
+  expect(stashRunArgs('apply', 'stash@{1}')).toEqual(['stash', 'apply', 'stash@{1}'])
+  expect(stashRunArgs('pop', 'stash@{0}')).toEqual(['stash', 'pop', 'stash@{0}'])
+  expect(stashRunArgs('drop', 'stash@{2}')).toEqual(['stash', 'drop', 'stash@{2}'])
+})
+
+test('WT-02 a local branch offers a new worktree; one already open in a worktree shows it; the current branch neither', async () => {
+  const worktreeOf = (items: MenuItem[]) => items.find(i => i.id === 'worktree')
+  expect(worktreeOf(menuFor({ kind: 'branch', label: 'feat', remotes: [] }, []))).toEqual({ id: 'worktree', label: 'New worktree…', worktree: 'new' })
+  expect(worktreeOf(menuFor({ kind: 'branch', label: 'feat', remotes: [], worktree: true }, []))).toEqual({ id: 'worktree', label: 'Show worktree', worktree: 'show' })
+  expect(worktreeOf(menuFor({ kind: 'head', label: 'main', remotes: [] }, []))).toBeUndefined()
+  expect(worktreeOf(menuFor({ kind: 'remote', label: 'origin/feat', remotes: [] }, ['origin']))).toBeUndefined()
 })

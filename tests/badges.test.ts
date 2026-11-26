@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { badgeParts, badgesOf, badgeWidth, diffBar, fitBadges, syncText, withSync } from '../hooks/badges'
+import { badgeParts, badgesOf, badgeWidth, diffBar, fitBadges, syncText, withSync, withWorktrees } from '../hooks/badges'
 import { parseRefs } from '../hooks/log'
 import { shade } from '../hooks/pilldraw'
 
@@ -24,7 +24,8 @@ test('GG-04 remote-only branches and a detached HEAD get badges of their own', a
 
 test('GG-04 a badge is as wide as its padded text', async () => {
   expect(badgeWidth({ kind: 'branch', label: 'feat', remotes: [] })).toBe(' feat '.length)
-  expect(badgeWidth({ kind: 'head', label: 'main', remotes: ['origin'] })).toBe(' \uf058  main '.length + ' origin '.length)
+  // the checked-out branch's hollow dot sits before the pill: `○ `
+  expect(badgeWidth({ kind: 'head', label: 'main', remotes: ['origin'] })).toBe('○ '.length + ' main '.length + ' origin '.length)
   expect(badgeWidth({ kind: 'tag', label: 'v1', remotes: [] })).toBe(' \uf02b '.length + ' v1 '.length)
 })
 
@@ -55,11 +56,11 @@ test('GG-11 a pill that does not fit is shortened before it is counted away', as
   const long = { kind: 'branch' as const, label: 'feature/long-name', remotes: [] }
   // ' feature/lon… ' + gap = 15
   expect(fitBadges([long], 15)).toEqual({ shown: [{ ...long, label: 'feature/lon…' }], hidden: 0, width: 15 })
-  // a name too short to cut drops its remote segment: ' ✔ ' + ' main ' + gap = 10
+  // a name too short to cut drops its remote segment: '○ ' + ' main ' + gap = 9
   expect(fitBadges([{ kind: 'head', label: 'main', remotes: ['origin'] }], 12)).toEqual({
     shown: [{ kind: 'head', label: 'main', remotes: [] }],
     hidden: 0,
-    width: 10,
+    width: 9,
   })
   // under six letters of name it is not worth a pill
   expect(fitBadges([long], 9)).toEqual({ shown: [], hidden: 1, width: 5 })
@@ -67,30 +68,32 @@ test('GG-11 a pill that does not fit is shortened before it is counted away', as
 
 test('GG-04 a long branch keeps its remote segment, the name cut first, so a pushed branch still shows its remote', async () => {
   const hotfix = { kind: 'head' as const, label: 'hotfix/0.1.4', remotes: ['github'] }
-  // ' ✔ ' + ' hotfix/0.1.4 ' + ' github ' + gap = 26
+  // '○ ' + ' hotfix/0.1.4 ' + ' github ' + gap = 25
   expect(fitBadges([hotfix], 26).shown).toEqual([hotfix])
-  expect(fitBadges([hotfix], 21)).toEqual({ shown: [{ ...hotfix, label: 'hotfix…' }], hidden: 0, width: 21 })
+  expect(fitBadges([hotfix], 21)).toEqual({ shown: [{ ...hotfix, label: 'hotfix/…' }], hidden: 0, width: 21 })
   // below six letters with the remote, the bare name is cut instead
-  expect(fitBadges([hotfix], 16)).toEqual({ shown: [{ kind: 'head', label: 'hotfix/0.…', remotes: [] }], hidden: 0, width: 16 })
+  expect(fitBadges([hotfix], 16)).toEqual({ shown: [{ kind: 'head', label: 'hotfix/0.1…', remotes: [] }], hidden: 0, width: 16 })
 })
 
 test('GG-04 the remotes are a segment of their own after the name', async () => {
   expect(badgeParts({ kind: 'branch', label: 'feat', remotes: ['origin', 'up'] })).toEqual({ lead: false, name: 'feat', remotes: 'origin up' })
   expect(badgeParts({ kind: 'branch', label: 'feat', remotes: [] }).remotes).toBe('')
-  // the checked-out branch and a tag lead with an icon segment
-  expect(badgeParts({ kind: 'head', label: 'main', remotes: [] }).lead).toBe(true)
+  // a tag leads with an icon segment; the checked-out branch has its mark outside the pill
+  expect(badgeParts({ kind: 'head', label: 'main', remotes: [] }).lead).toBe(false)
+  // merged, it gets the ghost inside too: mark 2 + ghost 3
+  expect(badgeWidth({ kind: 'head', label: 'main', remotes: [], isGone: true })).toBe(2 + 3 + ' main '.length)
   expect(badgeParts({ kind: 'tag', label: '0.1.4', remotes: [] })).toEqual({ lead: true, name: '0.1.4', remotes: '' })
 })
 
 test('GG-11 the first pill takes the whole column before it is cut; the others keep room for the subject', async () => {
   const long = { kind: 'head' as const, label: 'feature/phren-research', remotes: ['github'] }
   const tag = { kind: 'tag' as const, label: 'v1', remotes: [] }
-  // ' ✔ ' + ' feature/phren-research ' + ' github ' + gap = 36: whole within a 40-wide column, past a 20 budget
-  expect(fitBadges([long], 20, 40)).toEqual({ shown: [long], hidden: 0, width: 36 })
+  // '○ ' + ' feature/phren-research ' + ' github ' + gap = 35: whole within a 40-wide column, past a 20 budget
+  expect(fitBadges([long], 20, 40)).toEqual({ shown: [long], hidden: 0, width: 35 })
   // the next pill gets what the subject budget leaves: none here, so +1 (5 wide, in the column too)
-  expect(fitBadges([long, tag], 20, 41)).toEqual({ shown: [long], hidden: 1, width: 36 + 5 })
-  // without a column given, the budget is the same for all
-  expect(fitBadges([long], 20)).toEqual({ shown: [{ ...long, label: 'feature/phren…', remotes: [] }], hidden: 0, width: 20 })
+  expect(fitBadges([long, tag], 20, 41)).toEqual({ shown: [long], hidden: 1, width: 35 + 5 })
+  // without a column given, the budget is the same for all: the name cut, the remote kept
+  expect(fitBadges([long], 20)).toEqual({ shown: [{ ...long, label: 'featur…' }], hidden: 0, width: 20 })
 })
 
 test('GG-04 the remote segment is a dark shade of the pill color', async () => {
@@ -142,4 +145,23 @@ test('BS-01 a published branch shows how far ahead and behind its upstream it is
   // the width counts it: ' feat ' 6 + ' origin ↑2 ↓1 ' 14
   expect(badgeWidth({ ...feat, ahead: 2, behind: 1 })).toBe(6 + 14)
   expect(withSync([feat, { kind: 'tag', label: 'v1', remotes: [] }], { feat: { ahead: 0, behind: 4 } })).toEqual([{ ...feat, behind: 4 }, { kind: 'tag', label: 'v1', remotes: [] }])
+})
+
+test('WT-01 a local branch open in another worktree gets an icon before its name', async () => {
+  const badges = withWorktrees(badgesOf(parseRefs('HEAD -> main, feature/login, origin/feature/login'), ['main', 'feature/login'], true), { 'feature/login': '/repo/.claude/worktrees/login' })
+  const login = badges.find(b => b.label === 'feature/login')
+  expect(login?.worktree).toBe(true)
+  expect(badges.find(b => b.label === 'main')?.worktree).toBeUndefined()
+  expect(badgeParts(login!).lead).toBe(true)
+  expect(badgeWidth(login!)).toBe(badgeWidth({ ...login!, worktree: undefined }) + 3)
+})
+
+test('WE-03 a branch whose worktree environment is up gets the up mark, two cells wider; down or unasked, none', async () => {
+  const badges = badgesOf(parseRefs('feature/login, feature/pay'), ['feature/login', 'feature/pay'], true)
+  const open = { 'feature/login': '/r/wt/login', 'feature/pay': '/r/wt/pay' }
+  const [login, pay] = withWorktrees(badges, open, { '/r/wt/login': 'up', '/r/wt/pay': 'down' })
+  expect(login?.isUp).toBe(true)
+  expect(pay?.isUp).toBeUndefined()
+  expect(badgeWidth(login!)).toBe(badgeWidth({ ...login!, isUp: undefined }) + 2)
+  expect(withWorktrees(badges, open).every(b => b.isUp === undefined)).toBe(true)
 })

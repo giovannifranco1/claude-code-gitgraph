@@ -1,4 +1,4 @@
-import type { FlowBase, FlowCli, FlowConfig, FlowConflict, FlowKind, FlowOptions, FlowTopic, FlowType } from '../types'
+import type { FlowBase, FlowCli, FlowConfig, FlowConflict, FlowKind, FlowOptions, FlowStep, FlowTopic, FlowType } from '../types'
 import type { MenuItem } from './menu'
 
 // The base branches a merge goes into: git flow's, else the usual names (as `git flow init` offers).
@@ -103,17 +103,70 @@ export function finishArgs(topic: FlowTopic, config: FlowConfig, opts: FlowOptio
   return args
 }
 
-// What a finish merged into: the type's parent and the bases kept up to date from it
-// (a release lands on main, then develop follows main).
-export function finishPushArgs(topic: FlowTopic, config: FlowConfig): string[] {
+// `-D` deletes a branch whose work is merged nowhere; `-d` refuses to.
+export const deleteBranchArgs = (name: string, isForce: boolean) => ['branch', isForce ? '-D' : '-d', name]
+
+// A branch's delete, here and then on each remote given: run in order, stopping at the first
+// failure (a local branch git keeps leaves its remotes as they are).
+export const deleteBranchSteps = (name: string, isForce: boolean, remotes: string[]): FlowStep[] => [
+  { args: deleteBranchArgs(name, isForce), failed: `Deleting ${name} failed` },
+  ...remotes.map((r): FlowStep => ({ args: ['push', r, '--delete', name], isNetwork: true, failed: `Deleting ${name} on ${r} failed` })),
+]
+
+// What the repo knows when a finish starts: the local branches not yet merged into the type's
+// parent (an open release: one finished and kept is merged, so not open), whether the remote has
+// the work branch (to delete it there), and whether the finish pushes.
+export type FinishHere = { unmerged: string[]; isOnRemote: boolean; canPush: boolean }
+
+// The query for those branches: the local ones git has not merged into `parent`.
+export const unmergedArgs = (parent: string) => ['for-each-ref', '--format=%(refname:short)', `--no-merged=refs/heads/${parent}`, 'refs/heads']
+
+// A finish, as classic git flow does it. The branch goes into its type's parent, through git
+// flow (with the tag); where bases follow that parent (develop follows main), the branch itself
+// is merged into them too, as `Merge branch 'hotfix/x' into develop`, where git-flow-next would
+// merge the parent into them instead; a hotfix goes into an open release in place of develop,
+// and the release takes it to develop when it finishes. git flow runs with those bases'
+// autoupdate off, keeping the branch for those merges; the branch is deleted (here and on the
+// remote) after the push, unless kept. With no base following (a feature), git flow alone.
+export function finishSteps(topic: FlowTopic, config: FlowConfig, opts: FlowOptions, tagMessage: string | null, here: FinishHere): FlowStep[] {
   const parent = typeOf(config, topic.kind)?.parent ?? ''
   const followers = config.bases.filter(b => b.parent === parent && b.isAutoUpdate).map(b => b.name)
-  return ['push', '--follow-tags', config.remote, parent, ...followers]
+  const release = typeOf(config, 'release')
+  const open = topic.kind === 'hotfix' && release ? here.unmerged.find(b => b.startsWith(release.prefix) && b.length > release.prefix.length) : undefined
+  const targets = followers.length && open ? [open] : followers
+  const off = followers.flatMap(b => ['-c', `gitflow.branch.${b}.autoupdate=false`])
+  const push: FlowStep[] = here.canPush
+    ? [{ args: ['push', '--follow-tags', config.remote, parent, ...targets], isNetwork: true, failed: `Finished ${topic.branch}, but the push to ${config.remote} failed` }]
+    : []
+  if (!targets.length) return [{ args: finishArgs(topic, config, opts, tagMessage), isNetwork: true, stops: { op: 'finish', topic } }, ...push]
+  return [
+    { args: finishArgs(topic, config, { ...opts, isKeep: true }, tagMessage), config: off, isNetwork: true, stops: { op: 'finish', topic, config: off } },
+    ...targets.flatMap((into): FlowStep[] => [
+      { args: ['checkout', into], isFlow: true, failed: `Finished ${topic.branch} into ${parent}, but checking out ${into} failed` },
+      {
+        args: ['merge', opts.isNoFf ? '--no-ff' : '--ff', '-m', `Merge branch '${topic.branch}' into ${into}`, topic.branch],
+        isFlow: true,
+        failed: `Finished ${topic.branch} into ${parent}, but the merge into ${into} stopped`,
+        stops: { op: 'merge', topic, into },
+      },
+    ]),
+    ...push,
+    ...(opts.isKeep ? [] : deleteBranchSteps(topic.branch, false, here.isOnRemote ? [config.remote] : [])),
+  ]
 }
 
-// A stopped finish goes on through git flow; a stopped update through git's own merge or rebase.
+// A stopped finish goes on through git flow (with the `-c` settings it ran with, see
+// resumeStep); a stopped update, or a classic finish's merge into a base, through git's own
+// merge or rebase.
 export const resumeArgs = ({ op, topic }: FlowConflict, flag: '--continue' | '--abort') =>
   op === 'finish' ? ['flow', topic.kind, 'finish', flag, topic.name] : [op, flag]
+
+// The step that goes on with a stopped one, or aborts it: a finish's own git (its git flow, its
+// merge into a base) runs as git flow is run; continuing, it may stop again.
+export function resumeStep(conflict: FlowConflict, flag: '--continue' | '--abort'): FlowStep {
+  const { then: _then, ...stops } = conflict
+  return { args: resumeArgs(conflict, flag), config: conflict.config, isFlow: conflict.op === 'finish' || conflict.into !== undefined, ...(flag === '--continue' && { stops }) }
+}
 
 // The git flow items a work branch's menu leads with; none for other branches.
 export function flowMenuFor(branch: string, config: FlowConfig | null): MenuItem[] {

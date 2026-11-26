@@ -41,6 +41,10 @@ test('GG-03 each lane keeps its color and a freed column gets a new one', async 
   expect(colorsOf(rows[1])).toEqual([1])
 })
 
+test('SH-01 a stash is a diamond on a lane off its base commit', async () => {
+  expect(draw(layout([c('a', 'b'), c('stash@{0}', 'b'), c('b')]))).toEqual(['●', '│ ◇', '●─╯'])
+})
+
 test('GG-07 the uncommitted pseudo-commit is a hollow dot', async () => {
   expect(draw(layout([c(UNCOMMITTED, 'h'), c('h')]))).toEqual(['○', '●'])
 })
@@ -58,4 +62,26 @@ test('LC-01 a new lane never takes the color of a lane still open, even past the
     expect(branch).not.toBe(main)
     expect(branch).toBeLessThan(8)
   }
+})
+
+test('GG-03 the checked-out line keeps the first lane; a base moved on past it goes to the second and joins it below', async () => {
+  // develop's d2 is newer than the checked-out f1, both off d1
+  const commits = [c('d2', 'd1'), c('f1', 'd1'), c('d1', 'd0'), c('d0')]
+  expect(draw(layout(commits))).toEqual(['●', '│ ●', '●─╯', '●'])
+  expect(draw(layout(commits, 8, 'f1'))).toEqual(['  ●', '● │', '●─╯', '●'])
+  // the uncommitted changes sit on the line too
+  expect(draw(layout([c('d2', 'd1'), c(UNCOMMITTED, 'f1'), c('f1', 'd1'), c('d1')], 8, 'f1'))).toEqual(['  ●', '○ │', '● │', '●─╯'])
+  // HEAD on top, or none here: as before
+  expect(draw(layout(commits, 8, 'd2'))).toEqual(['●', '│ ●', '●─╯', '●'])
+  expect(draw(layout(commits, 8, 'gone'))).toEqual(['●', '│ ●', '●─╯', '●'])
+})
+
+test('GG-03 a parent that is the line\'s next commit goes straight to the first lane; an older one waits for the commits above it', async () => {
+  // develop's d2 merges the checked-out f1: f1 is next on the line
+  expect(draw(layout([c('d2', 'd1', 'f1'), c('f1', 'd1'), c('d1')], 8, 'f1'))).toEqual(['╭─●', '● │', '●─╯'])
+  // a branch off the checked-out tip
+  expect(draw(layout([c('x1', 'f2'), c('f2', 'f1'), c('f1')], 8, 'f2'))).toEqual(['╭─●', '●', '●'])
+  // d3 merges a1, and b1 is checked out: d1, d3's line's parent, is not next (b1 is), so it waits
+  const rows = layout([c('d3', 'd2', 'a1'), c('a1', 'd1'), c('b1', 'd1'), c('d2', 'd1'), c('d1', 'd0'), c('d0')], 8, 'b1')
+  expect(draw(rows)).toEqual(['  ●─╮', '  │ ●', '● │ │', '│ ● │', '●─┴─╯', '●'])
 })

@@ -1,4 +1,4 @@
-import type { Badge, BadgeKind, Ref, Track } from '../types'
+import type { Badge, BadgeKind, EnvStatus, Ref, Track } from '../types'
 
 const ORDER: BadgeKind[] = ['head', 'detached', 'branch', 'remote', 'tag']
 
@@ -37,11 +37,22 @@ export function badgesOf(refs: Ref[], branches?: string[], hasRemotes = true, de
   return badges.sort((a, b) => ORDER.indexOf(a.kind) - ORDER.indexOf(b.kind))
 }
 
+// The local branches open in another worktree (branch → its folder) get their mark, and, with
+// that worktree's environment up (`status`, by folder), the up mark.
+export function withWorktrees(badges: Badge[], open: Record<string, string>, status: Record<string, EnvStatus> = {}): Badge[] {
+  // Most repos have no other worktree: each row's badges as they are.
+  if (Object.keys(open).length === 0) return badges
+  return badges.map(b => {
+    const path = b.kind === 'branch' ? open[b.label] : undefined
+    return path === undefined ? b : { ...b, worktree: true, ...(status[path] === 'up' && { isUp: true as const }) }
+  })
+}
+
 // The badge's parts: an icon before the name (`lead`: the checked-out branch, a tag, a
-// gone branch), the name, then its remotes and how far it is from its upstream (`origin ↑2 ↓1`).
+// branch open in another worktree, a gone branch), the name, then its remotes and how far it is from its upstream (`origin ↑2 ↓1`).
 export function badgeParts(badge: Badge): { lead: boolean; name: string; remotes: string } {
   const sync = syncText(badge)
-  return { lead: badge.kind === 'head' || badge.kind === 'tag' || badge.isGone === true, name: badge.label, remotes: [...badge.remotes, ...(sync ? [sync] : [])].join(' ') }
+  return { lead: badge.kind === 'tag' || badge.worktree === true || badge.isGone === true, name: badge.label, remotes: [...badge.remotes, ...(sync ? [sync] : [])].join(' ') }
 }
 
 // `↑2 ↓1`: how far a branch is from its upstream, each side only when not 0; '' in step.
@@ -57,10 +68,10 @@ export function withSync(badges: Badge[], tracks: Record<string, Track>): Badge[
 
 // Each segment is its text with a cell each side (round caps take the outer two); an icon
 // takes 3 more: a tag's or a remote-only branch's ` ◆ ` segment, or the check and two spaces
-// before a checked-out name.
+// before a gone name; the checked-out branch's `○ ` before the pill 2; the up mark 2 more (` ●`).
 export function badgeWidth(badge: Badge): number {
   const { lead, name, remotes } = badgeParts(badge)
-  return (lead ? 3 : 0) + name.length + 2 + (remotes ? remotes.length + 2 : 0)
+  return (badge.kind === 'head' ? 2 : 0) + (lead ? 3 : 0) + (badge.isUp ? 2 : 0) + name.length + 2 + (remotes ? remotes.length + 2 : 0)
 }
 
 // Six letters and an ellipsis: shorter than that a pill no longer names its ref.
@@ -89,8 +100,11 @@ const MAX_BRANCH_PILLS = 2
 // where needed; the rest counted for a `+N` pill. The first may take the whole `column` (the
 // subject then gets less) before it is cut: a branch shows its full name. `width` is what they
 // take, the `+N` pill and every gap included.
+// A pill of one plain segment (`+N`, a stash's name) and its gap, in cells.
+export const plainPillWidth = (text: string) => text.length + 3
+
 export function fitBadges(badges: Badge[], max: number, column = max): { shown: Badge[]; hidden: number; width: number } {
-  const plus = (n: number) => (n > 0 ? `+${n}`.length + 3 : 0)
+  const plus = (n: number) => (n > 0 ? plainPillWidth(`+${n}`) : 0)
   const shown: Badge[] = []
   let used = 0
   const isTag = (b: Badge) => b.kind === 'tag'

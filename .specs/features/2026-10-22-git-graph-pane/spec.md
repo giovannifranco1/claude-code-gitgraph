@@ -17,6 +17,7 @@ Como dev usando o Claude Code, quero um painel lateral com o grafo de commits do
 - QUANDO um commit tem 2+ pais (merge) ENTÃO a linha mostra a ligação horizontal até a lane do pai extra (`─╮`).
 - QUANDO duas lanes convergem no mesmo commit (fork) ENTÃO a lane que termina mostra `─╯` ligando à lane do commit.
 - Cada lane mantém a mesma cor do início ao fim; cores ciclam numa paleta fixa.
+- A linha do checkout (primeiro pai a partir do HEAD, com as Uncommitted changes) fica sempre na primeira lane, de cima a baixo, como no Git Graph do VS Code; as outras lanes começam na segunda e se juntam a ela no commit em que convergem. Com o HEAD no topo, nada muda (pedido do dev, 2026-11-26).
 - QUANDO há mais lanes do que cabe na largura ENTÃO o grafo é truncado com `…`.
 
 ### GG-04 — Linha do commit
