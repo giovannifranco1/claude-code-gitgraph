@@ -108,11 +108,12 @@ export function localsOf(forEachRef: string): string[] {
   return [...forEachRef.matchAll(/ refs\/heads\/(.+)$/gm)].map(m => m[1] ?? '')
 }
 
-// Remote names, read from `git for-each-ref` lines (`<oid> refs/remotes/<remote>/<branch>`).
-export function remotesOf(forEachRef: string): string[] {
-  const names = [...forEachRef.matchAll(/ refs\/remotes\/([^/\n]+)\//g)].map(m => m[1] ?? '')
-  return [...new Set(names)]
-}
+// The remotes the repository has, as `git remote` lists them: one just added has no
+// remote-tracking ref yet, but is there to push to.
+export const REMOTE_ARGS = ['remote']
+
+// Remote names, one per line of REMOTE_ARGS.
+export const remotesOf = (stdout: string): string[] => stdout.split('\n').filter(Boolean)
 
 // The query for the remote branches merged into a base (`--merged`s are an OR), over the bases
 // that exist here (git refuses an unknown one); null with none.

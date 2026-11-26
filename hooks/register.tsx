@@ -14,7 +14,7 @@ import { isBranchNameCandidate } from './detect'
 import { absTime, fitGraph, HASH_W, relTime, short, truncate, truncateMiddle, wrapWords } from './format'
 import { layout, NODES } from './lanes'
 import { clampTop, findCommit, isHashQuery, topOf, visibleRange, widestIn, windowAt, wrapRows } from './virtual'
-import { conflictedFiles, deadOf, detailArgs, detailOf, isPseudoRow, isStashRow, localsOf, LOG_FORMAT, mergedArgs, parseChanges, parseMerged, parseNumstat, parseStashes, parseTracks, REFS_ARGS, STASH_ARGS, TRACK_ARGS, parseLog, parseStatus, parseSync, remotesOf, UNCOMMITTED, withStashes, withUncommitted } from './log'
+import { conflictedFiles, deadOf, detailArgs, detailOf, isPseudoRow, isStashRow, localsOf, LOG_FORMAT, mergedArgs, parseChanges, parseMerged, parseNumstat, parseStashes, parseTracks, REFS_ARGS, REMOTE_ARGS, STASH_ARGS, TRACK_ARGS, parseLog, parseStatus, parseSync, remotesOf, UNCOMMITTED, withStashes, withUncommitted } from './log'
 import { basesOf, defaultTagMessage, finishSteps, mainOf, unmergedArgs, flowArgs, flowCliOf, nextVersion, parseFlowConfig, resumeStep, topicFor, topicOf, typeOf } from './flow'
 import { BRANCH_REFS_ARGS, branchNamesOf, DEFAULT_FORM, initArgs, initFormError, initFormFor, staleBaseArgs, trimForm } from './flowinit'
 import { cleanMessage, COMMIT_SYSTEM, commitPrompt, commitRuns, contextArgs, newFiles } from './commit'
@@ -213,8 +213,8 @@ async function selectRepo($: EngineInterface, path: string): Promise<void> {
   if (path !== before) await showRepo($)
 }
 
-// What changes when commits, refs, HEAD or the working tree change.
-const signatureOf = (status: string, refs: string) => `${status}\0${refs}`
+// What changes when commits, refs, HEAD, the working tree or the remotes change.
+const signatureOf = (status: string, refs: string, remotes: string) => `${status}\0${refs}\0${remotes}`
 
 function cacheOf(version: number, graph: Graph): GraphCache {
   return {
@@ -263,9 +263,9 @@ async function readCache($: EngineInterface): Promise<GraphCache> {
 
 const readGraph = async ($: EngineInterface) => (await readCache($)).graph
 
-type RepoState = { status: ProcessRunResult; refs: ProcessRunResult }
+type RepoState = { status: ProcessRunResult; refs: ProcessRunResult; remotes: ProcessRunResult }
 
-// `known` is a status and refs a caller has just read (the poll), so they are not run twice.
+// `known` is a status, refs and remotes a caller has just read (the poll), so they are not run twice.
 async function load($: EngineInterface, known?: RepoState): Promise<void> {
   const gen = ++generation
   const isCurrent = () => gen === generation
@@ -278,10 +278,11 @@ async function load($: EngineInterface, known?: RepoState): Promise<void> {
     // moves); read again below only when it did.
     const knownMain = mainPath((await read($, graphState)).worktrees)
     const contractPath = (main: string) => `${main}/${CONTRACT_FILE}`
-    const [log, status, refs, track, stashes, trees, knownText] = await Promise.all([
+    const [log, status, refs, remoteList, track, stashes, trees, knownText] = await Promise.all([
       git($, ['log', ...(view.scope === 'all' ? ['--exclude=refs/stash', '--all'] : ['--branches', 'HEAD']), '--date-order', `-n${view.limit + 1}`, LOG_FORMAT]),
       known?.status ?? git($, STATUS_ARGS),
       known?.refs ?? git($, REFS_ARGS),
+      known?.remotes ?? git($, REMOTE_ARGS),
       git($, TRACK_ARGS),
       git($, STASH_ARGS),
       git($, WORKTREE_ARGS),
@@ -293,7 +294,7 @@ async function load($: EngineInterface, known?: RepoState): Promise<void> {
       return
     }
     const { head, branch, dirty, staged, conflicts } = parseStatus(status.stdout)
-    const remotes = remotesOf(refs.stdout)
+    const remotes = remotesOf(remoteList.stdout)
     const locals = localsOf(refs.stdout)
     // The remotes merged into a base: needs the branches the refs name, so it runs after them,
     // and only when the refs or the bases changed (a scope toggle or load more keeps them).
@@ -318,7 +319,7 @@ async function load($: EngineInterface, known?: RepoState): Promise<void> {
     const text = main === knownMain ? knownText : main ? await readTextFile($, contractPath(main)) : null
     if (!isCurrent()) return
     const { contract, problem: contractProblem } = parseContract(text)
-    signature = signatureOf(status.stdout, refs.stdout)
+    signature = signatureOf(status.stdout, refs.stdout, remoteList.stdout)
     await setGraph($, (g): Graph => ({
       status: 'ready',
       rows: shown.map((commit, i) => ({ commit, cells: cells[i] ?? [] })),
@@ -356,9 +357,9 @@ async function poll($: EngineInterface): Promise<void> {
   busy = true
   let known: RepoState
   try {
-    const [status, refs] = await Promise.all([git($, STATUS_ARGS), git($, REFS_ARGS)])
-    if (signatureOf(status.stdout, refs.stdout) === signature) return
-    known = { status, refs }
+    const [status, refs, remotes] = await Promise.all([git($, STATUS_ARGS), git($, REFS_ARGS), git($, REMOTE_ARGS)])
+    if (signatureOf(status.stdout, refs.stdout, remotes.stdout) === signature) return
+    known = { status, refs, remotes }
   } finally {
     busy = false
   }
@@ -604,13 +605,13 @@ async function loadFlow($: EngineInterface): Promise<void> {
     known && known.cli !== 'none' ? undefined : git($, ['flow', 'version']),
     git($, ['config', '--get-regexp', '^gitflow\\.']),
     git($, ['tag', '--list']),
-    git($, ['remote']),
+    git($, REMOTE_ARGS),
   ])
   const cli = version ? flowCliOf(version.exitCode, version.stdout) : (known?.cli ?? 'none')
   const tagList = tags.stdout.split('\n').filter(Boolean)
   await update($, flowState, () => ({
     cli,
-    config: cli === 'none' ? null : parseFlowConfig(config.stdout, remotes.stdout.split('\n').filter(Boolean)),
+    config: cli === 'none' ? null : parseFlowConfig(config.stdout, remotesOf(remotes.stdout)),
     next: { release: nextVersion(tagList, 'release'), hotfix: nextVersion(tagList, 'hotfix') },
   }))
 }
