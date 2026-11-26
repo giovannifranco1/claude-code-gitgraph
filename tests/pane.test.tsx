@@ -30,6 +30,8 @@ type Fake = {
   // The commit HEAD is on (M by default), as after a reset.
   head?: string
   remotes?: string[]
+  // The remotes with refs fetched or pushed (`remotes` by default): one just added has none.
+  refRemotes?: string[]
   failPush?: string
   failFetch?: boolean
   clock?: ReturnType<typeof mock.clock>
@@ -153,7 +155,7 @@ function answer(fake: Fake, raw: readonly string[], cwd = '.') {
       if (rest.some(a => a.startsWith('--merged='))) return ok(fake.merged ?? '')
       if (rest.some(a => a.startsWith('--no-merged='))) return ok(fake.unmerged ?? '')
       if (rest[0]?.startsWith('--format=%(refname:short)')) return ok(`main\t\nfeat\t${fake.featTrack ?? ''}\n`)
-      return ok(`${M} refs/heads/main\n${B} refs/heads/feat\n${(fake.remotes ?? ['origin']).map(r => `${M} refs/remotes/${r}/main\n`).join('')}rev${fake.rev} refs/heads/moving\n`)
+      return ok(`${M} refs/heads/main\n${B} refs/heads/feat\n${(fake.refRemotes ?? fake.remotes ?? ['origin']).map(r => `${M} refs/remotes/${r}/main\n`).join('')}rev${fake.rev} refs/heads/moving\n`)
     case 'log':
       return ok(logOf(fake))
     case 'status':
@@ -1986,6 +1988,33 @@ test('GF-08 the branch menu has no publish: Push branch… publishes a branch', 
   expect(await ui.find({ key: 'menu-flow-update' })).toBeDefined()
   expect(await ui.find({ key: 'menu-push' })).toBeDefined()
   await ui.unmount()
+})
+
+test('RM-01 a remote just added, with no refs fetched or pushed yet, offers Push branch…', async ($, on) => {
+  await setup($, on, newFake({ refRemotes: [] }))
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.pointer({ type: 'down', x: 1, y: 0, button: 'right', in: `pill:${M}:0` })
+  expect(await ui.find({ key: 'menu-push' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('RM-01 a remote added outside the pane reloads it on the next poll: Push branch… shows up', async ($, on) => {
+  const fake = newFake({ remotes: [] })
+  await setup($, on, fake)
+  const pushItem = async () => {
+    const ui = await $.ui.mount(pane('terminal'))
+    await ui.pointer({ type: 'down', x: 1, y: 0, button: 'right', in: `pill:${M}:0` })
+    const item = await ui.find({ key: 'menu-push' })
+    // a second right-click shuts the menu
+    await ui.pointer({ type: 'down', x: 1, y: 0, button: 'right', in: `pill:${M}:0` })
+    await ui.unmount()
+    return item
+  }
+  expect(await pushItem()).toBeUndefined()
+  fake.remotes = ['origin']
+  fake.refRemotes = []
+  await fake.clock?.advance(5_000)
+  expect(await pushItem()).toBeDefined()
 })
 
 test('GF-01 on a work branch its type row in the Git Flow dialog has start, rebase and finish as words', async ($, on) => {

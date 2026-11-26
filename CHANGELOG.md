@@ -4,6 +4,12 @@ Mudanças do Git Graph (`gitgraph`) por versão, no formato [Keep a Changelog](h
 
 ## [Unreleased]
 
+## [1.9.2] - 2026-11-26
+
+### Corrigido
+
+- Remote recém-adicionado: um remote sem nada buscado ou enviado ainda (o `origin` de um repositório novo no GitHub) não aparecia para o painel, que tirava os remotes dos refs `refs/remotes/…`, então o menu da branch ficava sem **Push branch…** (e a tag sem **Push tag…**) até o primeiro push pelo terminal. Agora os remotes vêm do `git remote`, e um remote adicionado pelo terminal aparece no próximo poll.
+
 ## [1.9.1] - 2026-11-26
 
 ### Corrigido
