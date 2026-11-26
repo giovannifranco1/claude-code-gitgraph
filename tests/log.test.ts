@@ -135,6 +135,26 @@ test('GG-24 a merged remote is dead only when finished: its tip off every base\'
   expect(deadOf({ remotes: {}, tips: ['d3'] }, rows).size).toBe(0)
 })
 
+test('GG-24 a release finished with develop fast-forwarded to it is dead: main\'s merge names it', async () => {
+  const c = (hash: string, subject: string, ...parents: string[]): Commit => ({ hash, parents, refs: [], author: '', time: 0, subject })
+  // release/0.3.0 (r2 <- r1) off develop's d1; the finish merged it into main (m1) and
+  // fast-forwarded develop to r2, then merged main back (d4): r2 sits on develop's line
+  const rows = [
+    c('d4', "Merge branch 'main' into develop", 'r2', 'm1'),
+    c('m1', "Merge branch 'release/0.3.0'", 'm0', 'r2'),
+    c('r2', 'fix', 'r1'), c('r1', 'bump', 'd1'), c('d1', 'feat', 'm0'), c('m0', 'init'),
+  ]
+  const tips = ['d4', 'm1']
+  expect([...deadOf({ remotes: { 'origin/release/0.3.0': 'r2' }, tips }, rows)]).toEqual(['origin/release/0.3.0'])
+  // the other forms git and GitHub name the merged branch with
+  for (const subject of ["Merge branch 'release/0.3.0' into main", "Merge remote-tracking branch 'origin/release/0.3.0'", 'Merge pull request #7 from acme/release/0.3.0']) {
+    const named = rows.map(r => (r.hash === 'm1' ? { ...r, subject } : r))
+    expect([...deadOf({ remotes: { 'origin/release/0.3.0': 'r2' }, tips }, named)]).toEqual(['origin/release/0.3.0'])
+  }
+  // another branch on that commit is not the one main's merge names: not dead
+  expect(deadOf({ remotes: { 'origin/homolog': 'r2', 'origin/release/0.3': 'r2' }, tips }, rows).size).toBe(0)
+})
+
 test('BS-01 each local branch is ahead of and behind its upstream, read on a load apart from the refs', async () => {
   const track = ['feat\tahead 2, behind 1', 'main\t', 'fix\tbehind 3', 'old\tgone', ''].join('\n')
   expect(parseTracks(track)).toEqual({ feat: { ahead: 2, behind: 1 }, fix: { ahead: 0, behind: 3 } })

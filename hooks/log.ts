@@ -143,17 +143,37 @@ export function firstParentLine(byHash: Map<string, Commit>, start: string, line
   return line
 }
 
+// The branch a merge commit's subject names, as git (`Merge branch 'x'`, `Merge remote-tracking
+// branch 'origin/x'`) and GitHub (`Merge pull request #1 from owner/x`) write it.
+export function mergedBranchOf(subject: string): string | undefined {
+  return /^Merge (?:remote-tracking )?branch '([^']+)'/.exec(subject)?.[1] ?? /^Merge pull request #\d+ from [^/\s]+\/(\S+)/.exec(subject)?.[1]
+}
+
 // The merged remotes that are dead: finished into a base, their tip off every base's first-parent
 // line. One started on a base and pushed with no commit of its own sits on that line: merged
 // (its tip is in the base), but not finished, so not dead, however far the base has moved on.
 // A finish (git flow, --no-ff) leaves the tip a second parent of the base's merge commit, off the
-// line. The line is walked over the loaded rows: a tip past them has no row to draw on anyway.
+// line. Unless another base was fast-forwarded to it (a release finished into a develop that had
+// not moved): then the tip is on that line, and dead only as the merged side of a merge on a
+// base's line that names it. The line is walked over the loaded rows: a tip past them has no row
+// to draw on anyway.
 export function deadOf(merged: Merged | undefined, rows: Commit[]): Set<string> {
   if (!merged || Object.keys(merged.remotes).length === 0) return new Set()
   const byHash = new Map(rows.map(c => [c.hash, c]))
   const line = new Set<string>()
   for (const tip of merged.tips) firstParentLine(byHash, tip, line)
-  return new Set(Object.entries(merged.remotes).flatMap(([name, oid]) => (line.has(oid) ? [] : [name])))
+  const remotes = Object.entries(merged.remotes)
+  // Each merge on the line, as `<merged tip>\0<branch it names>`: read only when a remote is on it.
+  const finished = new Set<string>()
+  if (remotes.some(([, oid]) => line.has(oid))) {
+    for (const hash of line) {
+      const commit = byHash.get(hash)
+      const named = commit && commit.parents.length > 1 && mergedBranchOf(commit.subject)
+      if (named) for (const parent of commit.parents.slice(1)) finished.add(`${parent}\0${named}`)
+    }
+  }
+  const isFinished = (name: string, oid: string) => finished.has(`${oid}\0${name}`) || finished.has(`${oid}\0${branchOf(name)}`)
+  return new Set(remotes.filter(([name, oid]) => !line.has(oid) || isFinished(name, oid)).map(([name]) => name))
 }
 
 // How far each local branch is ahead of and behind its upstream, from TRACK_ARGS: only the

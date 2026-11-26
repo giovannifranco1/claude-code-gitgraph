@@ -4,6 +4,12 @@ Mudanças do Git Graph (`gitgraph`) por versão, no formato [Keep a Changelog](h
 
 ## [Unreleased]
 
+## [1.9.1] - 2026-11-26
+
+### Corrigido
+
+- Branch morta: uma release finalizada com `--no-ff` na main e fast-forward na develop (que não tinha andado desde que ela abriu) seguia viva no grafo, porque o tip dela caía na linha de primeiro pai da develop. Agora uma branch mergeada também é morta quando é o lado mergeado de um merge na linha de uma base cuja mensagem a nomeia (`Merge branch 'release/x'`, `Merge remote-tracking branch 'origin/x'`, `Merge pull request #n from owner/x`); outra branch no mesmo commit (uma `homolog`, por exemplo) continua viva.
+
 ## [1.9.0] - 2026-11-26
 
 ### Adicionado
