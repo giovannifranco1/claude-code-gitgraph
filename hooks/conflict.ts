@@ -3,8 +3,9 @@ import type { FlowConflict } from '../types'
 
 // The git flow operation that stopped on a conflict, as the request names it: an update rebases
 // the branch on its base, or merges its base in, as the repo's git flow config says.
-export function conflictOrigin({ op, topic }: FlowConflict): string {
+export function conflictOrigin({ op, topic, into }: FlowConflict): string {
   if (op === 'finish') return `git flow finish of ${topic.branch}`
+  if (into) return `merging ${topic.branch} into ${into} (git flow finish)`
   return op === 'rebase' ? `rebasing ${topic.branch} on its base (git flow update)` : `merging its base into ${topic.branch} (git flow update)`
 }
 

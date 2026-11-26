@@ -80,7 +80,9 @@ export function resolvePath(main: string, home: string, input: string): string {
 
 export const isInside = (main: string, path: string) => path === main || path.startsWith(`${main}/`)
 
-const basename = (path: string) => path.slice(path.lastIndexOf('/') + 1)
+// A path's last part, and the folder holding it.
+export const basename = (path: string) => path.slice(path.lastIndexOf('/') + 1)
+export const parentOf = (path: string) => path.slice(0, path.lastIndexOf('/'))
 
 // For git a worktree works anywhere; outside the main worktree's folder the session (and, with
 // a gitgraph.json, the project's environment) does not reach it. Null inside.
@@ -93,7 +95,7 @@ export function pathWarning(main: string, path: string, hasContract = false): st
 // The `.git/info/exclude` line that keeps a worktree inside the repo out of its status: the
 // folder holding it, from the repo root.
 export function excludeEntry(main: string, path: string): string {
-  const parent = path.slice(0, path.lastIndexOf('/'))
+  const parent = parentOf(path)
   return parent === main ? `/${basename(path)}/` : `/${parent.slice(main.length + 1)}/`
 }
 
@@ -103,7 +105,10 @@ export function withExclude(text: string, entry: string): string | null {
   return `${text}${text && !text.endsWith('\n') ? '\n' : ''}${entry}\n`
 }
 
-export function addArgs(target: { path: string; branch: string } | { path: string; newBranch: string; commit: string }): string[] {
+// What a new worktree is on: a branch that exists, or a new branch at a commit.
+export type WorktreeTarget = { path: string; branch: string } | { path: string; newBranch: string; commit: string }
+
+export function addArgs(target: WorktreeTarget): string[] {
   return 'branch' in target ? ['worktree', 'add', target.path, target.branch] : ['worktree', 'add', '-b', target.newBranch, target.path, target.commit]
 }
 
@@ -146,7 +151,7 @@ export const worktreeDirArgs = (value: string) => {
 
 // What asking Claude to create the form's worktree says: the native git run, and, inside the
 // repo, keeping its folder out of the main worktree's status first.
-export function createPrompt(target: Parameters<typeof addArgs>[0], main: string): string {
+export function createPrompt(target: WorktreeTarget, main: string): string {
   const exclude = isInside(main, target.path)
     ? ` Before it, if git does not ignore that folder, add \`${excludeEntry(main, target.path)}\` to .git/info/exclude, so the worktree stays out of the main worktree's status.`
     : ''
@@ -155,7 +160,7 @@ export function createPrompt(target: Parameters<typeof addArgs>[0], main: string
 
 // What the form adds: on its branch; at a commit, on the new branch; from the screen, on the
 // branch typed when it exists locally, else on a new one off HEAD.
-export function formTarget(form: WorktreeForm, path: string, locals: string[]): Parameters<typeof addArgs>[0] {
+export function formTarget(form: WorktreeForm, path: string, locals: string[]): WorktreeTarget {
   if (form.kind === 'branch') return { path, branch: form.branch }
   const name = form.newBranch.trim()
   if (form.kind === 'head' && locals.includes(name)) return { path, branch: name }

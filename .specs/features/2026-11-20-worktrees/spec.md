@@ -8,7 +8,7 @@ Três partes, entregáveis em fases: **WT** (worktree básica, qualquer repo), *
 
 - [x] O painel lê `git worktree list --porcelain` no load e mostra as worktrees do repo (caminho, branch ou HEAD destacado, se está suja), numa lista acessível pelo header.
 - [x] Uma branch aberta numa worktree (que não a atual) tem um indicador no badge dela; o menu da branch diz em qual worktree ela está.
-- [x] A worktree principal aparece marcada como principal e não pode ser removida.
+- [x] A worktree principal (a pasta do próprio repositório) não aparece na lista, que mostra só as worktrees criadas à parte (pedido do dev, 2026-11-22); sem nenhuma, diz "No worktrees yet". Ela não pode ser removida.
 
 ## WT-02 — Criar uma worktree
 
@@ -46,19 +46,24 @@ Três partes, entregáveis em fases: **WT** (worktree básica, qualquer repo), *
 
 ## WE-01 — O contrato de ambiente
 
-- [ ] O painel lê o `gitgraph.json` da raiz da worktree principal (versionado no repo) e usa a seção `worktrees`.
-- [ ] A seção declara: `version`, `dir` (onde ficam as worktrees) e comandos opcionais `new`, `remove`, `up`, `down`, `logs`, `check`, `status` e `links`, com `{slug}` e `{path}` como placeholders. Os comandos chamam o script do projeto (ex.: `./worktree.sh up {slug}`); o nome do script é do projeto.
-- [ ] `version` mais nova que a que o gitgraph entende: aviso no painel, modo avançado desligado, básico segue.
-- [ ] Contrato inválido (JSON quebrado, campo de tipo errado, comando sem placeholder obrigatório) aparece como erro no painel; o modo avançado fica desligado, o básico segue.
+- [x] O painel lê o `gitgraph.json` da raiz da worktree principal (versionado no repo) e usa a seção `worktrees`.
+- [x] A seção declara: `version`, `dir` (onde ficam as worktrees) e comandos opcionais `new`, `remove`, `up`, `down`, `logs`, `check`, `status` e `links`, com `{slug}` e `{path}` como placeholders (e `{branch}`/`{base}` no `new`, pedido do nano-worktree; um placeholder vazio sai do comando). Os comandos chamam o script do projeto (ex.: `./worktree.sh up {slug}`); o nome do script é do projeto.
+- [x] `version` mais nova que a que o gitgraph entende: aviso no painel, modo avançado desligado, básico segue.
+- [x] Contrato inválido (JSON quebrado, campo de tipo errado, comando sem placeholder obrigatório) aparece como erro no painel; o modo avançado fica desligado, o básico segue.
 
 ## WE-02 — Ações de ambiente
 
-- [ ] Cada worktree ganha as ações que o contrato declara: **Up**, **Down**, **Logs**, **Check**, e os **links** (abrir no browser).
-- [ ] Com `new` (e `remove`) declarados, **New worktree…** e **Remove…** do gitgraph chamam esses comandos em vez do `git worktree add/remove` direto: o gitgraph, o `/nano-worktree new` e a linha de comando criam e removem worktrees do mesmo jeito (mesmo caminho, mesmo preparo de ambiente).
-- [ ] Cada comando roda no diretório da worktree principal, com o slug no lugar do placeholder; o painel mostra o spinner e, em falha, a saída do comando (como as ações do git hoje).
-- [ ] `status` (se declarado) diz se a worktree está no ar; o painel mostra no ar / parada / desconhecido.
-- [ ] `check` mostra ✓ ou o problema que os guards acharam, por worktree.
-- [ ] Nenhum comando do contrato roda sozinho, exceto `status` no load.
+- [x] Cada worktree ganha as ações que o contrato declara: **Up**, **Down**, **Logs**, **Check**, e os **links** (abrir no browser).
+- [x] Com `new` (e `remove`) declarados, **New worktree…** e **Remove…** do gitgraph chamam esses comandos em vez do `git worktree add/remove` direto: o gitgraph, o `/nano-worktree new` e a linha de comando criam e removem worktrees do mesmo jeito (mesmo caminho, mesmo preparo de ambiente).
+- [x] Cada comando roda no diretório da worktree principal, com o slug no lugar do placeholder; o painel mostra o spinner e, em falha, a saída do comando (como as ações do git hoje).
+- [x] `status` (se declarado) diz se a worktree está no ar; o painel mostra no ar / parada / desconhecido.
+- [x] `check` mostra ✓ ou o problema que os guards acharam, por worktree.
+- [x] Nenhum comando do contrato roda sozinho, exceto `status`: ao abrir a tela Worktrees, depois de Up/Down e num load quando o último status tem mais de 30 s (WE-03), sem segurar o load.
+
+## WE-03 — Ambiente no ar no badge do grafo
+
+- [x] No grafo, o badge de uma branch aberta noutra worktree ganha um `●` verde depois da marca de worktree quando o ambiente dela está `up`. Parado ou desconhecido: nada (parado é o normal, não erro; sem vermelho).
+- [x] O status é o último conhecido, guardado entre loads; um load pergunta de novo quando ele tem mais de 30 s. Sem contrato ou sem `status` declarado, o badge fica igual ao do WT-01.
 
 ## WS-01 — Skill de setup do ambiente (projeto separado: `~/www/nano-worktree`)
 

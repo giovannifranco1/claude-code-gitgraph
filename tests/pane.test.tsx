@@ -39,6 +39,8 @@ type Fake = {
   flowConfig?: string
   branch?: string
   conflictOn?: string
+  // `for-each-ref --no-merged`: the local branches not in the finish's parent
+  unmerged?: string
   isConflicted?: boolean
   // Each pane open's `closeOnEscape`, in order.
   opens?: (true | undefined)[]
@@ -73,6 +75,9 @@ type Fake = {
   notIgnored?: boolean
   // The repo's worktree folder in its local config.
   worktreeDir?: string
+  // What the contract's script answers, by its command (`./worktree.sh <command> …`); ok and
+  // silent when not set.
+  script?: Record<string, { exitCode?: number; stdout?: string; stderr?: string }>
 }
 
 const FLOW_CONFIG = [
@@ -130,6 +135,11 @@ function answer(fake: Fake, raw: readonly string[], cwd = '.') {
   const [, verb, ...rest] = argv
   if (argv[0] === 'find') return ok(fake.repos ?? '')
   if (argv[0] === 'sh') return fake.hasNoNerdFont ? { ...ok(), exitCode: 1 } : ok()
+  if (argv[0] === 'open') return ok()
+  if (argv[0] === './worktree.sh') {
+    const out = fake.script?.[argv[1] ?? '']
+    return { ...ok(out?.stdout ?? ''), exitCode: out?.exitCode ?? 0, stderr: out?.stderr ?? '' }
+  }
   // `isRepo: false` is the session folder only: the repos found below it are repos.
   if (!fake.isRepo && cwd === '.') return fail('fatal: not a git repository')
   switch (verb) {
@@ -141,6 +151,7 @@ function answer(fake: Fake, raw: readonly string[], cwd = '.') {
       if (rest[0]?.startsWith('--format=%(upstream')) return ok(`${fake.upstreams?.[cwd] ?? ''}\0\n`)
       if (rest[0] === '--format=%(refname)') return ok(fake.branchRefs ?? 'refs/heads/main\nrefs/heads/feat\n')
       if (rest.some(a => a.startsWith('--merged='))) return ok(fake.merged ?? '')
+      if (rest.some(a => a.startsWith('--no-merged='))) return ok(fake.unmerged ?? '')
       if (rest[0]?.startsWith('--format=%(refname:short)')) return ok(`main\t\nfeat\t${fake.featTrack ?? ''}\n`)
       return ok(`${M} refs/heads/main\n${B} refs/heads/feat\n${(fake.remotes ?? ['origin']).map(r => `${M} refs/remotes/${r}/main\n`).join('')}rev${fake.rev} refs/heads/moving\n`)
     case 'log':
@@ -159,6 +170,14 @@ function answer(fake: Fake, raw: readonly string[], cwd = '.') {
       }
       return ok()
     }
+    case 'merge':
+      // a merge into a base (a classic finish) stops on a conflict when asked; --continue clears it
+      if (rest.includes('--continue') || rest.includes('--abort')) fake.isConflicted = false
+      else if (fake.conflictOn === 'merge') {
+        fake.isConflicted = true
+        return fail('CONFLICT (content): Merge conflict in src/b.ts')
+      }
+      return ok()
     case 'worktree':
       if (rest[0] === 'list') return ok(`worktree /repo\nHEAD ${fake.head ?? M}\nbranch refs/heads/${fake.branch ?? 'main'}\n\n${fake.worktrees ?? ''}`)
       if (rest[0] === 'add') {
@@ -224,7 +243,7 @@ async function setup($: Engine, on: On, fake: Fake, copied: string[] = [], toast
   })
   on('process.run', async (_, e) => {
     fake.envs.push({ ...(e.init?.env ?? {}) })
-    if (fake.hold && (e.argv.includes('push') || e.argv.includes('fetch'))) await fake.hold
+    if (fake.hold && (e.argv.includes('push') || e.argv.includes('fetch') || e.argv.join(' ').startsWith('./worktree.sh check'))) await fake.hold
     return { value: answer(fake, e.argv, e.init?.cwd) }
   })
   const store = (fake.store ??= new Map())
@@ -268,11 +287,12 @@ test('GG-01 /gitgraph opens the pane and draws commits, refs and the graph', asy
     const ui = await $.ui.mount(pane(surface))
     expect((await ui.find({ type: 'Text', text: /Merge feat/ }))?.text).toContain('Merge feat')
     const head = await ui.find({ type: 'Client', key: `pill:${M}:0` })
-    // the checked-out branch: a pin before its name, in its own color; then its remote
-    const segments = (head?.props.props as { segments: { text: string; bg: string; isBold?: boolean; icon?: { text: string; fg: string } }[] }).segments
-    expect(segments.map(g => `${g.icon?.text ?? ''}${g.text}`)).toEqual(['\uf058  main', 'origin'])
-    // in the dark shade of the lane, as the remote's segment
-    expect(segments[0]?.icon?.fg).toBe(segments[1]?.bg)
+    // the checked-out branch: a hollow dot before the pill, outside it, in the pill's color;
+    // inside, its name, then its remote
+    const props = head?.props.props as { mark?: { text: string; fg: string }; segments: { text: string; bg: string; isBold?: boolean; icon?: { text: string; fg: string } }[] }
+    const segments = props.segments
+    expect(segments.map(g => `${g.icon?.text ?? ''}${g.text}`)).toEqual(['main', 'origin'])
+    expect(props.mark).toEqual({ text: '○', fg: segments[0]?.bg })
     expect(segments[0]?.isBold).toBe(true)
     // a tag: its icon on the tag color (the icon in its dark shade), then the version on that shade
     const tag = (await ui.find({ type: 'Client', key: `pill:${B}:1` }))?.props.props as { segments: { text: string; bg: string; icon?: { text: string; fg: string } }[] }
@@ -354,13 +374,14 @@ test('DM-01 secondary text is a set gray, never dimColor (faint, which many term
   await ui.unmount()
 })
 
-test('GG-24 the checked-out branch, merged, keeps its check: gray, the check where the ghost would be', async ($, on) => {
+test('GG-24 the checked-out branch, merged, keeps its dot before the pill; gray, with the ghost by its name', async ($, on) => {
   // feat checked out, merged into main (by M), its remote with it
   await setup($, on, newFake({ featRefs: 'HEAD -> feat, origin/feat', branch: 'feat', merged: `${B} refs/remotes/origin/feat\n` }))
   const ui = await $.ui.mount(pane('terminal'))
   const props = (await ui.find({ type: 'Client', key: `pill:${B}:0` }))?.props.props as { segments: { text: string; bg: string; icon?: { text: string } }[] }
   expect(props.segments.map(g => g.text)).toEqual(['  feat', 'origin'])
-  expect(props.segments[0]?.icon?.text).toMatch(/^(✔|\u{f058})$/u)
+  expect(props.segments[0]?.icon?.text).toMatch(/^(◌|\u{f02a0})$/u)
+  expect((props as { mark?: { text: string } }).mark?.text).toBe('○')
   expect(props.segments[0]?.bg).toBe('#9d9d9d')
   await ui.unmount()
 })
@@ -685,14 +706,14 @@ test('WT-01 a branch open in another worktree has the worktree icon in its badge
 
 const FEAT_PATH = '/repo/.claude/worktrees/feat'
 
-test('WT-01 WT-04 the worktrees screen lists each worktree; one copies its path; the main one has no remove', async ($, on) => {
+test('WT-01 WT-04 the worktrees screen lists each worktree but the main one (the repo folder); one copies its path', async ($, on) => {
   const copied: string[] = []
   const fake = newFake({ worktrees: FEAT_TREE })
   await setup($, on, fake, copied)
   const ui = await $.ui.mount(pane('terminal'))
   await ui.press({ key: 'worktrees' })
   expect(await ui.find({ type: 'Text', text: /\.claude\/worktrees\/feat/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /main worktree/ })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'worktree:/repo' })).toBeUndefined()
   // each worktree's changes, read in its own folder once the screen opens
   expect(fake.calls.some((c, i) => c.join(' ') === 'git status --porcelain' && fake.cwds[i] === FEAT_PATH)).toBe(true)
   expect(await ui.find({ type: 'Text', text: /1 changed/ })).toBeDefined()
@@ -701,9 +722,6 @@ test('WT-01 WT-04 the worktrees screen lists each worktree; one copies its path;
   expect(await ui.find({ type: 'Button', key: 'worktree-open' })).toBeUndefined()
   await ui.press({ key: 'worktree-copy' })
   expect(copied).toContain(FEAT_PATH)
-  await ui.press({ key: 'worktree:/repo' })
-  expect(await ui.find({ type: 'Button', key: 'worktree-copy' })).toBeDefined()
-  expect(await ui.find({ type: 'Button', key: 'worktree-remove' })).toBeUndefined()
   await ui.press({ key: 'worktrees-back' })
   expect(await ui.find({ type: 'Button', key: M })).toBeDefined()
   await ui.unmount()
@@ -772,8 +790,8 @@ test('WT-06 the worktrees screen has New worktree: a dialog over the list, on a 
   await ui.press({ key: 'worktrees' })
   await ui.press({ key: 'worktree-new' })
   expect(await ui.find({ type: 'Box', key: 'worktree-form-dialog' })).toBeDefined()
-  // the list stays under the dialog
-  expect(await ui.find({ type: 'Button', key: 'worktree:/repo' })).toBeDefined()
+  // the list stays under the dialog (none made yet: it says so)
+  expect(await ui.find({ type: 'Text', text: /No worktrees yet/ })).toBeDefined()
   await ui.input({ key: 'worktree-branch', text: 'spike', kind: 'change' })
   await ui.press({ key: 'worktree-create' })
   expect(callOf(fake, ['worktree', 'add', '-b', 'spike', '/repo/.claude/worktrees/spike', 'HEAD'])).toBeGreaterThan(-1)
@@ -1190,8 +1208,8 @@ test('GG-11 pills are rounded with a Nerd Font and fall back to text pills witho
   expect((await ui.find({ type: 'Client', key: `pill:${M}:0` }))?.props.props).toMatchObject({ isRound: true })
   await ui.unmount()
   const vs = await $.ui.mount(pane('vscode'))
-  // the graph's main badge (the header's has no remote)
-  expect((await vs.findAll({ type: 'Text', text: /\uf058 +main/ })).some(t => t.text.includes('origin'))).toBe(true)
+  // the graph's main badge, its dot before the pill (the header's has no remote)
+  expect((await vs.findAll({ type: 'Text', text: /○ .? ?main/u })).some(t => t.text.includes('origin'))).toBe(true)
   expect(await vs.find({ type: 'Text', text: /v0\.1/ })).toBeDefined()
   expect(await vs.find({ type: 'Text', text: /^\ue0b4/ })).toBeDefined()
   await vs.unmount()
@@ -1773,6 +1791,68 @@ test('GF-05 a release finish carries its tag message; a failed push says the fin
   await ui.unmount()
 })
 
+test('GF-05 a hotfix finishes as classic git flow: git flow into main, leaving develop alone, then the hotfix merged into develop', async ($, on) => {
+  const fake = newFake({ branch: 'hotfix/1.0.1' })
+  await setup($, on, fake)
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: 'flow-open' })
+  await ui.press({ key: 'flow-finish' })
+  await ui.press({ key: 'flow-opt-keep' })
+  await ui.press({ key: 'flow-finish-run' })
+  const finish = callOf(fake, ['flow', 'hotfix', 'finish', '1.0.1', '--no-ff', '--keep', '-m', '1.0.1'])
+  expect(finish).toBeGreaterThan(-1)
+  expect(fake.configs).toContain('flow: gitflow.branch.develop.autoupdate=false')
+  const order = [
+    ['checkout', 'develop'],
+    ['merge', '--no-ff', '-m', "Merge branch 'hotfix/1.0.1' into develop", 'hotfix/1.0.1'],
+    ['push', '--follow-tags', 'origin', 'main', 'develop'],
+    ['branch', '-d', 'hotfix/1.0.1'],
+  ].map(a => callOf(fake, a))
+  expect(order.every((at, i) => at > (order[i - 1] ?? finish))).toBe(true)
+  // the merge into develop runs as git flow is run, repo hooks off
+  expect(fake.configs.some(c => c.startsWith('merge: core.hooksPath='))).toBe(true)
+  await ui.unmount()
+})
+
+test('GF-05 a hotfix goes into the release still open; a release finished and kept (merged into main) is not open', async ($, on) => {
+  const fake = newFake({ branch: 'hotfix/1.0.1', unmerged: 'hotfix/1.0.1\nrelease/1.1.0\n' })
+  await setup($, on, fake)
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: 'flow-open' })
+  await ui.press({ key: 'flow-finish' })
+  await ui.press({ key: 'flow-finish-run' })
+  expect(callOf(fake, ['for-each-ref', '--format=%(refname:short)', '--no-merged=refs/heads/main', 'refs/heads'])).toBeGreaterThan(-1)
+  expect(callOf(fake, ['merge', '--no-ff', '-m', "Merge branch 'hotfix/1.0.1' into release/1.1.0", 'hotfix/1.0.1'])).toBeGreaterThan(-1)
+  expect(callOf(fake, ['checkout', 'develop'])).toBe(-1)
+  await ui.unmount()
+})
+
+test('GF-06 a classic finish stopped merging into develop names that merge; continue finishes it, then pushes and deletes', async ($, on) => {
+  const prompts: string[] = []
+  on('prompt.submit', (_, e) => {
+    prompts.push(e.text)
+    return { text: e.text }
+  })
+  const fake = newFake({ branch: 'hotfix/1.0.1', conflictOn: 'merge' })
+  await setup($, on, fake)
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: 'flow-open' })
+  await ui.press({ key: 'flow-finish' })
+  await ui.press({ key: 'flow-opt-keep' })
+  await ui.press({ key: 'flow-finish-run' })
+  expect(await ui.find({ type: 'Text', text: 'Conflict in merge of hotfix/1.0.1 into develop: resolve the files, then' })).toBeDefined()
+  expect(fake.calls.some(c => c[1] === 'push')).toBe(false)
+  await ui.press({ key: 'conflict-claude' })
+  expect(prompts[0]).toContain('left by merging hotfix/1.0.1 into develop (git flow finish)')
+  await ui.press({ key: 'flow-continue' })
+  const cont = callOf(fake, ['merge', '--continue'])
+  expect(cont).toBeGreaterThan(-1)
+  expect(callOf(fake, ['push', '--follow-tags', 'origin', 'main', 'develop'])).toBeGreaterThan(cont)
+  expect(callOf(fake, ['branch', '-d', 'hotfix/1.0.1'])).toBeGreaterThan(cont)
+  expect(await ui.find({ type: 'Text', text: /Conflict/ })).toBeUndefined()
+  await ui.unmount()
+})
+
 test('GF-05 a failed finish does not push', async ($, on) => {
   const fake = newFake({ branch: 'feature/login', conflictOn: 'finish' })
   await setup($, on, fake)
@@ -1938,6 +2018,38 @@ test('GG-12 off a docked terminal pane Delete branch asks with force off; it run
   await ui.unmount()
 })
 
+test('GG-12 Delete branch can delete it on its remote too: off by default, then after the local one', async ($, on) => {
+  const fake = newFake({ featRefs: 'feat, origin/feat' })
+  await setup($, on, fake)
+  const ui = await $.ui.mount(pane('desktop'))
+  await ui.pointer({ type: 'down', x: 1, y: 0, button: 'right', in: `pill:${B}:0` })
+  await ui.press({ key: 'menu-delete' })
+  expect((await ui.find({ type: 'Button', key: 'menu-opt-remote' }))?.text).toContain('also on origin')
+  // off: the local branch alone
+  await ui.press({ key: 'menu-delete-run' })
+  await ui.press({ key: 'menu-delete-run' })
+  expect(callOf(fake, ['branch', '-d', 'feat'])).toBeGreaterThan(-1)
+  expect(callOf(fake, ['push', 'origin', '--delete', 'feat'])).toBe(-1)
+  // on: the local one, then the remote's
+  await ui.pointer({ type: 'down', x: 1, y: 0, button: 'right', in: `pill:${B}:0` })
+  await ui.press({ key: 'menu-delete' })
+  expect((await ui.find({ type: 'Button', key: 'menu-opt-remote' }))?.text).toContain('')
+  await ui.press({ key: 'menu-opt-remote' })
+  await ui.press({ key: 'menu-delete-run' })
+  await ui.press({ key: 'menu-delete-run' })
+  expect(callOf(fake, ['push', 'origin', '--delete', 'feat'])).toBeGreaterThan(callOf(fake, ['branch', '-d', 'feat']))
+  await ui.unmount()
+})
+
+test('GG-12 a branch without a remote has no remote switch on its delete', async ($, on) => {
+  await setup($, on, newFake())
+  const ui = await $.ui.mount(pane('desktop'))
+  await ui.pointer({ type: 'down', x: 1, y: 0, button: 'right', in: `pill:${B}:0` })
+  await ui.press({ key: 'menu-delete' })
+  expect(await ui.find({ type: 'Button', key: 'menu-opt-remote' })).toBeUndefined()
+  await ui.unmount()
+})
+
 test('GG-12 on a narrow pane the menu list keeps every item, Delete branch and Copy name too', async ($, on) => {
   await setup($, on, newFake({ headRefs: 'HEAD -> main, feature/login' }))
   const ui = await $.ui.mount(pane('terminal', 70))
@@ -2006,12 +2118,12 @@ test('MR-04 each picker option shows the branch its repo is on in a right column
   await ui.unmount()
 })
 
-test('HD-01 the header shows the checked-out branch as its badge in the graph: the check, no branch glyph', async ($, on) => {
+test('HD-01 the header shows the checked-out branch as its badge in the graph: the hollow dot, no branch glyph', async ($, on) => {
   await setup($, on, newFake())
   const ui = await $.ui.mount(pane('terminal'))
   const texts = (await ui.findAll({ type: 'Text' })).map(t => t.text)
   expect(texts.some(t => t.includes('⎇'))).toBe(false)
-  expect(texts.some(t => /^(✔|\u{f058})  main/u.test(t))).toBe(true)
+  expect(texts.some(t => /^○ .?main/u.test(t))).toBe(true)
   await ui.unmount()
 })
 
@@ -2329,5 +2441,180 @@ test('GG-25 while a fetch runs the dialog shows its spinner and label; dismissed
   release()
   await pressing
   expect(toasts.at(-1)).toBe('Fetched remote(s) ✓')
+  await ui.unmount()
+})
+
+const CONTRACT = JSON.stringify({
+  worktrees: {
+    version: 1,
+    dir: '.claude/worktrees',
+    new: './worktree.sh new {slug} {branch} {base}',
+    remove: './worktree.sh remove {slug}',
+    up: './worktree.sh up {slug}',
+    down: './worktree.sh down {slug}',
+    check: './worktree.sh check {slug}',
+    status: './worktree.sh status {slug}',
+    links: ['https://{slug}.app.test'],
+  },
+})
+
+// Where a command other than git ran, in order; -1 when it did not.
+const runOf = (fake: Fake, argv: string[]) => fake.calls.findIndex(c => c.join(' ') === argv.join(' '))
+
+// The main worktree's gitgraph.json; none elsewhere.
+const withContract = (on: On, text: string) => on('fs.read', (_, e) => (e.path === '/repo/gitgraph.json' ? { value: text } : { deny: 'ENOENT' }))
+
+test('WE-01 a wrong contract is said on the worktrees screen; the worktrees go on without it', async ($, on) => {
+  withContract(on, '{"worktrees":{"version":2}}')
+  const fake = newFake({ worktrees: FEAT_TREE })
+  await setup($, on, fake)
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: 'worktrees' })
+  expect(await ui.find({ type: 'Text', text: /update gitgraph/ })).toBeDefined()
+  await ui.press({ key: `worktree:${FEAT_PATH}` })
+  expect(await ui.find({ type: 'Button', key: 'worktree-up' })).toBeUndefined()
+  expect(await ui.find({ type: 'Button', key: 'worktree-copy' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('WE-02 with a contract a worktree shows its status and opens its link, brings it up, and checks it', async ($, on) => {
+  withContract(on, CONTRACT)
+  const fake = newFake({ worktrees: FEAT_TREE, script: { status: { stdout: 'up\n' }, check: { exitCode: 1, stdout: '✓ db isolated\n✗ redis: same prefix\n' } } })
+  await setup($, on, fake)
+  const ui = await $.ui.mount(pane('terminal'))
+  const statuses = () => fake.calls.filter(c => c[0] === './worktree.sh' && c[1] === 'status').length
+  const atLoad = statuses()
+  await ui.press({ key: 'worktrees' })
+  // the status, asked unasked on open, in the main worktree; only for worktrees in the folder
+  expect(runOf(fake, ['./worktree.sh', 'status', 'feat'])).toBeGreaterThan(-1)
+  expect(fake.cwds[runOf(fake, ['./worktree.sh', 'status', 'feat'])]).toBe('/repo')
+  expect(statuses()).toBe(atLoad + 1)
+  expect(await ui.find({ type: 'Text', text: /● up/ })).toBeDefined()
+  await ui.press({ key: `worktree:${FEAT_PATH}` })
+  expect((await ui.find({ type: 'Button', key: 'worktree-link-0' }))?.text).toContain('feat.app.test')
+  await ui.press({ key: 'worktree-link-0' })
+  expect(runOf(fake, ['open', 'https://feat.app.test'])).toBeGreaterThan(-1)
+  await ui.press({ key: 'worktree-up' })
+  expect(runOf(fake, ['./worktree.sh', 'up', 'feat'])).toBeGreaterThan(-1)
+  // its actions stay open after the run, and its status is asked again
+  expect(statuses()).toBe(atLoad + 2)
+  await ui.press({ key: 'worktree-check' })
+  expect(runOf(fake, ['./worktree.sh', 'check', 'feat'])).toBeGreaterThan(-1)
+  // exit 1 is a check that found problems: its lines show, under the worktree
+  expect(await ui.find({ type: 'Text', text: /✓ db isolated/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /✗ redis: same prefix/ })).toBeDefined()
+  // Hide check takes the lines away without running it again; Check runs it again
+  const checks = () => fake.calls.filter(c => c[0] === './worktree.sh' && c[1] === 'check').length
+  await ui.press({ key: 'worktree-check-hide' })
+  expect(await ui.find({ type: 'Text', text: /✓ db isolated/ })).toBeUndefined()
+  expect(checks()).toBe(1)
+  await ui.press({ key: 'worktree-check' })
+  expect(checks()).toBe(2)
+  await ui.unmount()
+})
+
+test('WE-03 a branch whose worktree environment is up has a green dot after its worktree mark', async ($, on) => {
+  withContract(on, CONTRACT)
+  const fake = newFake({ worktrees: FEAT_TREE, script: { status: { stdout: 'up\n' } } })
+  await setup($, on, fake)
+  const ui = await $.ui.mount(pane('terminal'))
+  // the load asks the status (not waited for), so the graph shows it after any later render
+  expect(runOf(fake, ['./worktree.sh', 'status', 'feat'])).toBeGreaterThan(-1)
+  await ui.press({ key: 'worktrees' })
+  await ui.press({ key: 'worktrees-back' })
+  const pill = (await ui.find({ type: 'Client', key: `pill:${B}:0` }))?.props.props as { segments: { icon?: { dot?: string } }[] }
+  expect(pill.segments[1]?.icon?.dot).toBe('success')
+  await ui.unmount()
+})
+
+test('WE-03 a branch whose worktree environment is down has no dot', async ($, on) => {
+  withContract(on, CONTRACT)
+  const fake = newFake({ worktrees: FEAT_TREE, script: { status: { stdout: 'down\n' } } })
+  await setup($, on, fake)
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: 'worktrees' })
+  await ui.press({ key: 'worktrees-back' })
+  const pill = (await ui.find({ type: 'Client', key: `pill:${B}:0` }))?.props.props as { segments: { icon?: { dot?: string } }[] }
+  expect(pill.segments[1]?.icon?.dot).toBeUndefined()
+  await ui.unmount()
+})
+
+test('WE-02 while a worktree runs its check, its spinner shows under it alone; another worktree says to wait', async ($, on) => {
+  withContract(on, CONTRACT)
+  let release = () => {}
+  const SPIKE_PATH = '/repo/.claude/worktrees/spike'
+  const fake = newFake({ worktrees: `${FEAT_TREE}worktree ${SPIKE_PATH}\nHEAD ${B}\nbranch refs/heads/spike\n\n`, hold: new Promise<void>(r => (release = r)) })
+  await setup($, on, fake)
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: 'worktrees' })
+  await ui.press({ key: `worktree:${FEAT_PATH}` })
+  const checking = ui.press({ key: 'worktree-check' })
+  for (let i = 0; i < 20 && !(await ui.find({ type: 'Text', text: /Checking feat/ })); i++) await Promise.resolve()
+  expect(await ui.find({ type: 'Client', key: 'worktree-spinner' })).toBeDefined()
+  await ui.press({ key: `worktree:${SPIKE_PATH}` })
+  expect(await ui.find({ type: 'Client', key: 'worktree-spinner' })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /Checking feat… Its actions come back/ })).toBeDefined()
+  release()
+  await checking
+  expect(await ui.find({ type: 'Button', key: 'worktree-check' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('WE-02 a failed up shows the script output', async ($, on) => {
+  withContract(on, CONTRACT)
+  const toasts: string[] = []
+  const fake = newFake({ worktrees: FEAT_TREE, script: { up: { exitCode: 1, stderr: '\u001b[31mvite did not answer\u001b[0m\n' } } })
+  await setup($, on, fake, [], toasts)
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: 'worktrees' })
+  await ui.press({ key: `worktree:${FEAT_PATH}` })
+  await ui.press({ key: 'worktree-up' })
+  expect(toasts.at(-1)).toBe('up failed: vite did not answer')
+  await ui.unmount()
+})
+
+test('WE-02 with the contract new and remove, the script creates and removes worktrees', async ($, on) => {
+  withContract(on, CONTRACT)
+  const fake = newFake({ worktrees: FEAT_TREE, cleanTrees: true })
+  await setup($, on, fake)
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: 'worktrees' })
+  await ui.press({ key: 'worktree-new' })
+  // the script puts it in its folder: no path to type
+  expect(await ui.find({ type: 'Input', key: 'worktree-path' })).toBeUndefined()
+  await ui.input({ key: 'worktree-branch', text: 'spike', kind: 'change' })
+  await ui.press({ key: 'worktree-create' })
+  expect(runOf(fake, ['./worktree.sh', 'new', 'spike', 'spike', 'HEAD'])).toBeGreaterThan(-1)
+  expect(fake.calls.some(c => c[1] === 'worktree' && c[2] === 'add')).toBe(false)
+  await ui.press({ key: `worktree:${FEAT_PATH}` })
+  await ui.press({ key: 'worktree-remove' })
+  await ui.press({ key: 'worktree-remove-run' })
+  expect(runOf(fake, ['./worktree.sh', 'remove', 'feat'])).toBeGreaterThan(-1)
+  expect(fake.calls.some(c => c[1] === 'worktree' && c[2] === 'remove')).toBe(false)
+  await ui.unmount()
+})
+
+test('WE-02 logs follow the script output under the worktree until it ends; Stop takes them away', async ($, on) => {
+  withContract(on, JSON.stringify({ worktrees: { version: 1, logs: './worktree.sh logs {slug}' } }))
+  const spawned: string[][] = []
+  on('process.spawn', async function* (_, e) {
+    spawned.push([...e.argv])
+    yield { stream: 'stdout' as const, text: 'vite ready\nlisten' }
+    yield { stream: 'stdout' as const, text: 'ing on 5173\n' }
+    return { value: { code: 0, signal: null } }
+  })
+  const fake = newFake({ worktrees: FEAT_TREE })
+  await setup($, on, fake)
+  const ui = await $.ui.mount(pane('terminal'))
+  await ui.press({ key: 'worktrees' })
+  await ui.press({ key: `worktree:${FEAT_PATH}` })
+  await ui.press({ key: 'worktree-logs' })
+  expect(spawned).toEqual([['./worktree.sh', 'logs', 'feat']])
+  expect(await ui.find({ type: 'Text', text: /vite ready/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /listening on 5173/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /the log ended \(exit 0\)/ })).toBeDefined()
+  await ui.press({ key: 'worktree-logs-stop' })
+  expect(await ui.find({ type: 'Text', text: /vite ready/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Button', key: 'worktree-logs' })).toBeDefined()
   await ui.unmount()
 })

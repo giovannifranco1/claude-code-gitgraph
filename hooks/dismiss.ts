@@ -8,6 +8,7 @@ export const CLOSED = {
   isRenaming: false,
   isDeleting: false,
   isForce: false,
+  isDeletingRemote: false,
   push: null,
   editingRemote: null,
   isAddingRemote: false,

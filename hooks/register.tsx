@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { ClientElements, Elements, EngineInterface, ProcessRunResult, Register, RenderChildren, RenderSurface } from 'claude-code'
 
-import type { Badge, BadgeKind, BadgeStyle, Cell, Change, Changelog, Columns, Compare, Comparison, CommitDetail, ConfigScope, Diff, DiffLine, DiffSource, FileStat, FlowConfig, FlowConflict, FlowInfo, FlowInitForm, FlowKind, FlowOptions, FlowTopic, FlowView, Graph, GraphRow, Ref, RepoSettings, Repos, Screen, View, Worktree, WorktreeForm } from '../types'
+import type { CheckLine, Contract, EnvCommand, EnvStatus, WorktreeEnv, Badge, BadgeKind, BadgeStyle, Cell, Change, Changelog, Columns, Compare, Comparison, CommitDetail, ConfigScope, Diff, DiffLine, DiffSource, FileStat, FlowConfig, FlowConflict, FlowInfo, FlowInitForm, FlowKind, FlowOptions, FlowStep, FlowTopic, FlowView, Graph, GraphRow, Ref, RepoSettings, Repos, Screen, View, Worktree, WorktreeForm } from '../types'
 import { parseChangelog, versionOf } from './changelog'
 import { diffKey, diffRuns, parseDiff, sourceLabel } from './diff'
 import { compareRuns, parseCount, rangeKey } from './compare'
@@ -9,15 +9,16 @@ import { conflictOrigin, conflictPrompt, conflictToast } from './conflict'
 import { backOf, CLOSED, dismissModal, FLOW_CLOSED, hasModal } from './dismiss'
 import { badgeParts, badgesOf, branchOf, diffBar, fitBadges, plainPillWidth, syncText, withSync, withWorktrees } from './badges'
 import { addArgs, branchWorktrees, countChanges, createPrompt, type FormOn, formTarget, currentWorktree, excludeEntry, formInput, formProblem, isInside, mainPath, newForm, parseWorktrees, relativeTo, removeArgs, withExclude, WORKTREE_ARGS, WORKTREE_DIR_KEY, worktreeDir, worktreeDirArgs, DEFAULT_WORKTREE_DIR } from './worktree'
+import { appendChunk, checkResult, commandArgv, CONTRACT_FILE, type Env, envArgv, envFor, envVars, hostOf, parseContract, parseEnvStatus, stripAnsi } from './contract'
 import { isBranchNameCandidate } from './detect'
 import { absTime, fitGraph, HASH_W, relTime, short, truncate, truncateMiddle, wrapWords } from './format'
 import { layout, NODES } from './lanes'
 import { clampTop, findCommit, isHashQuery, topOf, visibleRange, widestIn, windowAt, wrapRows } from './virtual'
-import { conflictedFiles, detailArgs, detailOf, isPseudoRow, isStashRow, localsOf, LOG_FORMAT, mergedArgs, parseChanges, parseMerged, parseNumstat, parseStashes, parseTracks, REFS_ARGS, STASH_ARGS, TRACK_ARGS, parseLog, parseStatus, parseSync, remotesOf, UNCOMMITTED, withStashes, withUncommitted } from './log'
-import { basesOf, defaultTagMessage, finishArgs, mainOf, finishPushArgs, flowArgs, flowCliOf, nextVersion, parseFlowConfig, resumeArgs, topicFor, topicOf, typeOf } from './flow'
+import { conflictedFiles, deadOf, detailArgs, detailOf, isPseudoRow, isStashRow, localsOf, LOG_FORMAT, mergedArgs, parseChanges, parseMerged, parseNumstat, parseStashes, parseTracks, REFS_ARGS, STASH_ARGS, TRACK_ARGS, parseLog, parseStatus, parseSync, remotesOf, UNCOMMITTED, withStashes, withUncommitted } from './log'
+import { basesOf, defaultTagMessage, finishSteps, mainOf, unmergedArgs, flowArgs, flowCliOf, nextVersion, parseFlowConfig, resumeStep, topicFor, topicOf, typeOf } from './flow'
 import { BRANCH_REFS_ARGS, branchNamesOf, DEFAULT_FORM, initArgs, initFormError, initFormFor, staleBaseArgs, trimForm } from './flowinit'
 import { cleanMessage, COMMIT_SYSTEM, commitPrompt, commitRuns, contextArgs, newFiles } from './commit'
-import { checkoutArgs, defaultPushRemotes, deleteBranchArgs, type MenuItem, menuFor, menuGroups, pushRuns, renameArgs, type ResetMode, resetArgs, stashArgs, STASH_DONE, stashRunArgs, type StashVerb } from './menu'
+import { checkoutArgs, defaultPushRemotes, deleteBranchSteps, type MenuItem, menuFor, menuGroups, pushRuns, renameArgs, type ResetMode, resetArgs, stashArgs, STASH_DONE, stashRunArgs, type StashVerb } from './menu'
 import { drawPill, type PillProps, type PillSegment, shade } from './pilldraw'
 import { BRANCH_ARGS, FIND_ARGS, UPSTREAM_ARGS, parseBranch, parseUpstream, parseRepos, pickActive, branchColumn, repoLabel } from './repos'
 import { addRemotePlan, isRemoteUrl, parseRemotes, userConfigArgs } from './settings'
@@ -71,7 +72,7 @@ const ICONS = {
     release: '\uf02b',
     hotfix: '\uf06d',
     actions: '\uf142',
-    head: '\uf058',
+    head: '○',
     tag: '\uf02b',
     flow: '\uf126',
     // Material Design's ghost: Font Awesome's (\uf6e2) is not in Nerd Fonts 3.
@@ -81,7 +82,7 @@ const ICONS = {
     // Octicons' git compare (nf-oct-git_compare): the commit marked for compare.
     compare: '',
   },
-  plain: { on: '◉', off: '○', fetch: '☁', refresh: '↻', settings: '⚙', search: '⌕', changelog: '☰', feature: '✦', bugfix: '✱', release: '◆', hotfix: '▲', actions: '⋯', head: '✔', tag: '◆', flow: '⑂', ghost: '◌', compare: '①', worktree: '⧉' },
+  plain: { on: '◉', off: '○', fetch: '☁', refresh: '↻', settings: '⚙', search: '⌕', changelog: '☰', feature: '✦', bugfix: '✱', release: '◆', hotfix: '▲', actions: '⋯', head: '○', tag: '◆', flow: '⑂', ghost: '◌', compare: '①', worktree: '⧉' },
 }
 // No git the pane runs opens an editor (merge, rebase or tag messages) or asks for a password.
 const GIT_ENV = { GIT_TERMINAL_PROMPT: '0', GIT_EDITOR: 'true', GIT_MERGE_AUTOEDIT: 'no' }
@@ -95,15 +96,17 @@ const NERD_FONT_CHECK = 'ls ~/Library/Fonts /Library/Fonts ~/.local/share/fonts 
 
 const DEFAULT_FLOW: FlowView = { starting: null, finishing: null, opts: { isNoFf: true, isPush: true, isKeep: true }, tagMessage: null, conflict: null, init: null, confirming: null, isMenuOpen: false }
 const EMPTY_GRAPH: Graph = { status: 'idle', rows: [], head: '', branch: '', conflicts: 0, remotes: [], hasMore: false }
-const DEFAULT_VIEW: View = { scope: 'all', limit: PAGE, selected: null, confirm: null, menu: null, isRenaming: false, isDeleting: false, isForce: false, push: null, running: null, screen: 'graph', configScope: 'local', editingRemote: null, isAddingRemote: false, remoteDraft: '', scrollTo: null, isSearching: false, search: '', commitDraft: '', isSuggesting: false, uncommittedForm: null, diff: null, compare: null, compareMark: null, worktreeSelected: null, worktreeRemoving: null, worktreeForm: null, commitStep: 'files', commitFiles: [], refresh: 'idle', isOpen: false, flow: DEFAULT_FLOW, isActionsOpen: false, notice: null }
+const DEFAULT_VIEW: View = { scope: 'all', limit: PAGE, selected: null, confirm: null, menu: null, isRenaming: false, isDeleting: false, isForce: false, isDeletingRemote: false, push: null, running: null, screen: 'graph', configScope: 'local', editingRemote: null, isAddingRemote: false, remoteDraft: '', scrollTo: null, isSearching: false, search: '', commitDraft: '', isSuggesting: false, uncommittedForm: null, diff: null, compare: null, compareMark: null, worktreeSelected: null, worktreeRemoving: null, worktreeRunning: null, worktreeForm: null, commitStep: 'files', commitFiles: [], refresh: 'idle', isOpen: false, flow: DEFAULT_FLOW, isActionsOpen: false, notice: null }
 
-const graphState = atom({ plugin: 'gitgraph', key: 'graph' } as const, EMPTY_GRAPH)
+// Tagged with the shape of Graph: one an older version kept (`merged` as a list of names, say)
+// reads as absent after a reload, and the next load fills it again.
+const graphState = atom({ plugin: 'gitgraph', key: 'graph' } as const, EMPTY_GRAPH, { shape: 'graph-2' })
 // Bumped with every graph write: renders read this small number and keep the graph
 // itself in `graphCache`, so a scroll step does not carry the whole graph across.
 const versionState = atom({ plugin: 'gitgraph', key: 'graphVersion' } as const, 0)
 // Tagged with the shape of View: a view an older version kept (without fields added
 // since) reads as absent after an update, instead of breaking the render.
-const viewState = atom({ plugin: 'gitgraph', key: 'view' } as const, DEFAULT_VIEW, { shape: 'view-16' })
+const viewState = atom({ plugin: 'gitgraph', key: 'view' } as const, DEFAULT_VIEW, { shape: 'view-17' })
 const detailState = atom({ plugin: 'gitgraph', key: 'detail' } as const, null as CommitDetail | null)
 const roundState = atom({ plugin: 'gitgraph', key: 'isRound' } as const, false)
 const nerdState = atom({ plugin: 'gitgraph', key: 'hasNerdFont' } as const, false)
@@ -117,6 +120,9 @@ const settingsState = atom({ plugin: 'gitgraph', key: 'settings' } as const, nul
 const diffState = atom({ plugin: 'gitgraph', key: 'diff' } as const, null as Diff | null)
 // The worktrees screen's changed-file counts by worktree (-1: unreadable), null while git runs.
 const worktreeChangesState = atom({ plugin: 'gitgraph', key: 'worktreeChanges' } as const, null as Record<string, number> | null)
+// What the worktrees screen shows of the environment contract: each worktree's status, the
+// last check, the logs being followed.
+const worktreeEnvState = atom({ plugin: 'gitgraph', key: 'worktreeEnv' } as const, { check: null, logs: null } as WorktreeEnv)
 // The compare screen's answers, null until git is done; while they are another comparison's, it waits.
 const compareState = atom({ plugin: 'gitgraph', key: 'compare' } as const, null as Comparison | null)
 // Loaded when the pane opens and after git flow actions, not with every graph load.
@@ -147,6 +153,9 @@ const firstLine = (text: string) => text.split('\n').find(l => l.trim() !== '') 
 // Runs git in a repo. Network commands may wait on a remote: a longer timeout.
 const gitIn = ($: EngineInterface, cwd: string, args: string[], isNetwork = false) =>
   $.process.run(['git', ...args], { cwd, timeoutMs: isNetwork ? NETWORK_TIMEOUT_MS : GIT_TIMEOUT_MS, env: GIT_ENV })
+
+// A text file's content; null when it is not there or cannot be read.
+const readTextFile = ($: EngineInterface, path: string): Promise<string | null> => $.fs.read(path).then(t => (typeof t === 'string' ? t : null), () => null)
 
 // Runs in the repo the pane shows.
 async function git($: EngineInterface, args: string[], isNetwork = false) {
@@ -214,7 +223,7 @@ function cacheOf(version: number, graph: Graph): GraphCache {
     maxCells: graph.rows.reduce((n, r) => Math.max(n, r.cells.length), 1),
     indexOf: new Map(graph.rows.map((r, i) => [r.commit.hash, i])),
     branchColors: new Map(graph.rows.flatMap(r => r.commit.refs.flatMap(ref => (ref.kind === 'head' || ref.kind === 'branch' ? [[ref.name, laneColor(r.cells)] as const] : [])))),
-    dead: new Set(graph.merged ?? []),
+    dead: deadOf(graph.merged, graph.rows.map(r => r.commit)),
   }
 }
 
@@ -226,6 +235,8 @@ async function setView($: EngineInterface, change: (v: View) => View): Promise<V
   let before!: View
   const view = await update($, viewState, v => ((before = v), change(v)))
   if (view.isOpen && hasModal(view) !== hasModal(before)) await openPane($, view)
+  // The logs followed belong to the worktrees screen: leaving it ends them.
+  if (logsStream && before.screen === 'worktrees' && view.screen !== 'worktrees') await stopLogs($)
   return view
 }
 
@@ -242,7 +253,7 @@ async function setGraph($: EngineInterface, change: (g: Graph) => Graph): Promis
 // A commit's badges as the pane draws them: remotes alone only with all branches on, merged ones
 // gone, a local branch with how far it is from its upstream.
 const rowBadges = (refs: Ref[], graph: Graph, view: View, dead: Set<string>) =>
-  withWorktrees(withSync(badgesOf(refs, graph.locals, view.scope === 'all', dead), graph.tracks ?? {}), graph.openBranches ?? {})
+  withWorktrees(withSync(badgesOf(refs, graph.locals, view.scope === 'all', dead), graph.tracks ?? {}), graph.openBranches ?? {}, graph.envStatus)
 
 async function readCache($: EngineInterface): Promise<GraphCache> {
   const version = await read($, versionState)
@@ -263,13 +274,18 @@ async function load($: EngineInterface, known?: RepoState): Promise<void> {
   try {
     // The stashes are rows of their own (STASH_ARGS): `--all` leaves `refs/stash` out, or the
     // latest would show as git's commits for it (its work, index and untracked files).
-    const [log, status, refs, track, stashes, trees] = await Promise.all([
+    // gitgraph.json is read with the batch, from the main worktree of the last load (it rarely
+    // moves); read again below only when it did.
+    const knownMain = mainPath((await read($, graphState)).worktrees)
+    const contractPath = (main: string) => `${main}/${CONTRACT_FILE}`
+    const [log, status, refs, track, stashes, trees, knownText] = await Promise.all([
       git($, ['log', ...(view.scope === 'all' ? ['--exclude=refs/stash', '--all'] : ['--branches', 'HEAD']), '--date-order', `-n${view.limit + 1}`, LOG_FORMAT]),
       known?.status ?? git($, STATUS_ARGS),
       known?.refs ?? git($, REFS_ARGS),
       git($, TRACK_ARGS),
       git($, STASH_ARGS),
       git($, WORKTREE_ARGS),
+      knownMain ? readTextFile($, contractPath(knownMain)) : null,
     ])
     if (!isCurrent()) return
     if (status.exitCode !== 0) {
@@ -284,21 +300,26 @@ async function load($: EngineInterface, known?: RepoState): Promise<void> {
     const bases = basesOf((await read($, flowState))?.config)
     const mergedKey = `${bases.join()}\0${refs.stdout}`
     const before = await read($, graphState)
-    let merged = before.mergedKey === mergedKey ? (before.merged ?? []) : null
+    let merged = before.mergedKey === mergedKey ? (before.merged ?? null) : null
     if (merged === null) {
       const query = mergedArgs(bases, locals)
       const out = query ? await git($, query) : null
       if (!isCurrent()) return
-      merged = out?.exitCode === 0 ? parseMerged(out.stdout, refs.stdout, bases) : []
+      merged = out?.exitCode === 0 ? parseMerged(out.stdout, refs.stdout, bases) : { remotes: {}, tips: [] }
     }
     const commits = parseLog(log.exitCode === 0 ? log.stdout : '', remotes)
     const loaded = commits.slice(0, view.limit)
     const shown = withUncommitted(withStashes(loaded, stashes.exitCode === 0 ? parseStashes(stashes.stdout) : []), head, dirty)
-    const cells = layout(shown, PALETTE.length)
+    const cells = layout(shown, PALETTE.length, head)
     const worktrees = trees.exitCode === 0 ? parseWorktrees(trees.stdout) : []
     const worktree = currentWorktree(worktrees, head, branch)?.path ?? ''
+    // The environment contract, from the main worktree's gitgraph.json (none: basic worktrees).
+    const main = mainPath(worktrees)
+    const text = main === knownMain ? knownText : main ? await readTextFile($, contractPath(main)) : null
+    if (!isCurrent()) return
+    const { contract, problem: contractProblem } = parseContract(text)
     signature = signatureOf(status.stdout, refs.stdout)
-    await setGraph($, (): Graph => ({
+    await setGraph($, (g): Graph => ({
       status: 'ready',
       rows: shown.map((commit, i) => ({ commit, cells: cells[i] ?? [] })),
       head,
@@ -315,8 +336,13 @@ async function load($: EngineInterface, known?: RepoState): Promise<void> {
       worktrees,
       worktree,
       openBranches: branchWorktrees(worktrees, worktree),
+      contract,
+      contractProblem,
+      envStatus: g.envStatus,
       hasMore: commits.length > view.limit,
     }))
+    // the badges' up mark: the environments' status, asked again when old, not waited for
+    if (contract?.commands.status && Date.now() - statusAskedAt > STATUS_MAX_AGE_MS) void refreshStatus($, await readGraph($), worktrees.map(w => w.path))
   } catch (err) {
     if (isCurrent()) await setGraph($, (g): Graph => ({ ...g, status: 'error', error: String(err) }))
   } finally {
@@ -534,28 +560,35 @@ async function runActions($: EngineInterface, runs: string[][], done: string, la
   await withRunning($, label, done, work, asNotice)
 }
 
-// A step of a git flow action; its failure reads `git flow feature start failed: …`
-// unless `failed` says otherwise.
-type FlowStep = { args: string[]; isNetwork?: boolean; failed?: string }
-
 const stepName = (args: string[]) => (args[0] === 'flow' ? `git flow ${args.slice(1, 3).join(' ')}` : `git ${args[0]}`)
 
-// Runs the steps in order and stops at the first that fails. When the stop left unmerged
-// files, `conflict` is kept to continue or abort; any other outcome clears it.
-async function runFlow($: EngineInterface, steps: FlowStep[], done: string, label: string, conflict?: FlowConflict): Promise<void> {
+// Runs the steps in order and stops at the first that fails (`flowEnv` before a git flow one),
+// telling `onStop` which one it was.
+const stepsWork = ($: EngineInterface, steps: FlowStep[], flowEnv: string[] = [], onStop?: (index: number) => void) => async () => {
+  for (const [i, step] of steps.entries()) {
+    const env = [...((step.isFlow ?? step.args[0] === 'flow') ? flowEnv : []), ...(step.config ?? [])]
+    const out = await git($, [...env, ...step.args], step.isNetwork)
+    if (out.exitCode !== 0) {
+      onStop?.(i)
+      return [`${step.failed ?? `${stepName(step.args)} failed`}: ${firstLine(out.stderr || out.stdout)}`]
+    }
+  }
+  return []
+}
+
+// Runs a git flow action's steps, stopping at the first that fails. When the stop left
+// unmerged files, the step's conflict is kept to continue or abort, with the steps after it to
+// run once it goes on; any other outcome clears it.
+async function runFlow($: EngineInterface, steps: FlowStep[], done: string, label: string): Promise<void> {
   // git flow gets the remote the pane pushes to: where the repo sets none and has no
   // origin, git-flow-next would look for an origin that is not there.
   const remote = (await readFlowConfig($))?.remote ?? 'origin'
   const flowEnv = ['-c', `core.hooksPath=${$.plugin.root}/${NO_HOOKS}`, '-c', `gitflow.origin=${remote}`]
-  const failures = await withRunning($, label, done, async () => {
-    for (const step of steps) {
-      const out = await git($, step.args[0] === 'flow' ? [...flowEnv, ...step.args] : step.args, step.isNetwork)
-      if (out.exitCode !== 0) return [`${step.failed ?? `${stepName(step.args)} failed`}: ${firstLine(out.stderr || out.stdout)}`]
-    }
-    return []
-  })
+  let at = -1
+  const failures = await withRunning($, label, done, stepsWork($, steps, flowEnv, i => (at = i)))
   if (failures === null) return
-  const stopped = failures.length > 0 && (await readGraph($)).conflicts > 0 ? (conflict ?? null) : null
+  const step = steps[at]
+  const stopped: FlowConflict | null = failures.length > 0 && step?.stops && (await readGraph($)).conflicts > 0 ? { ...step.stops, then: steps.slice(at + 1) } : null
   await setFlow($, f => ({ ...f, ...FLOW_CLOSED, conflict: stopped }))
   await loadFlow($)
 }
@@ -596,17 +629,21 @@ async function finishTopic($: EngineInterface, topic: FlowTopic): Promise<void> 
   if (!config) return
   const { opts, tagMessage } = view.flow
   const canPush = opts.isPush && graph.remotes.includes(config.remote)
-  const steps: FlowStep[] = [{ args: finishArgs(topic, config, opts, tagMessage), isNetwork: true }]
-  if (canPush) steps.push({ args: finishPushArgs(topic, config), isNetwork: true, failed: `Finished ${topic.branch}, but the push to ${config.remote} failed` })
+  const [onRemote, unmerged] = await Promise.all([
+    git($, ['rev-parse', '--verify', '--quiet', `refs/remotes/${config.remote}/${topic.branch}`]),
+    git($, unmergedArgs(typeOf(config, topic.kind)?.parent ?? '')),
+  ])
+  const open = unmerged.exitCode === 0 ? unmerged.stdout.split('\n').filter(Boolean) : []
+  const steps = finishSteps(topic, config, opts, tagMessage, { unmerged: open, isOnRemote: onRemote.exitCode === 0, canPush })
   const pushed = canPush ? `, pushed to ${config.remote}` : opts.isPush ? ` (no remote ${config.remote} to push to)` : ''
-  await runFlow($, steps, `Finished ${topic.branch}${pushed} ✓`, `Finishing ${topic.branch}…`, { op: 'finish', topic })
+  await runFlow($, steps, `Finished ${topic.branch}${pushed} ✓`, `Finishing ${topic.branch}…`)
 }
 
 async function updateTopic($: EngineInterface, topic: FlowTopic): Promise<void> {
   const config = await readFlowConfig($)
   const type = config && typeOf(config, topic.kind)
   if (type)
-    await runFlow($, [{ args: flowArgs('update', topic) }], `${topic.branch} updated from ${type.parent} ✓`, `Updating ${topic.branch}…`, { op: type.strategy, topic })
+    await runFlow($, [{ args: flowArgs('update', topic), stops: { op: type.strategy, topic } }], `${topic.branch} updated from ${type.parent} ✓`, `Updating ${topic.branch}…`)
 }
 
 // Opens the dialog asking for an update; again on the same one, closes it.
@@ -661,7 +698,7 @@ async function runInit($: EngineInterface): Promise<void> {
 let changelogRead: Promise<Changelog> | null = null
 
 async function readChangelog($: EngineInterface): Promise<Changelog> {
-  const readText = (path: string) => $.fs.read(`${$.plugin.root}/${path}`).then(text => (typeof text === 'string' ? text : ''), () => '')
+  const readText = async (path: string) => (await readTextFile($, `${$.plugin.root}/${path}`)) ?? ''
   const [md, manifest] = await Promise.all([readText('CHANGELOG.md'), readText('.claude-plugin/plugin.json')])
   return { versions: parseChangelog(md), installed: versionOf(manifest) }
 }
@@ -711,17 +748,21 @@ async function openWorktrees($: EngineInterface, select: string | null = null, f
   ])
   // The one the pane shows has its changes from the last load already.
   const graph = await readGraph($)
-  const list = (graph.worktrees ?? []).filter(w => !w.isPrunable && w.path !== graph.worktree)
+  const list = (graph.worktrees ?? []).filter(w => !w.isMain && !w.isPrunable && w.path !== graph.worktree)
+  // The contract's status of each worktree runs with the counts: the one command run unasked.
+  const statusAsked = refreshStatus($, graph, (graph.worktrees ?? []).filter(w => !w.isMain).map(w => w.path))
   const outs = await Promise.all(list.map(w => gitIn($, w.path, ['status', '--porcelain'])))
   const counts = Object.fromEntries(list.map((w, i) => [w.path, outs[i]?.exitCode === 0 ? countChanges(outs[i].stdout) : -1]))
   await update($, worktreeChangesState, () => (graph.worktree ? { ...counts, [graph.worktree]: graph.changes?.length ?? 0 } : counts))
+  await statusAsked
 }
 
 // Opens the new worktree form, a dialog over whatever the pane shows (the graph or the
 // worktrees screen), its folder the repo's (Settings) or Claude Code's `.claude/worktrees`.
 async function openWorktreeForm($: EngineInterface, target: FormOn): Promise<void> {
-  const [configured, home] = await Promise.all([git($, ['config', '--local', '--get', WORKTREE_DIR_KEY]), $.env.get('HOME')])
-  const form = newForm(target, worktreeDir(configured.exitCode === 0 ? configured.stdout : ''), home ?? '')
+  const [configured, home, { contract }] = await Promise.all([git($, ['config', '--local', '--get', WORKTREE_DIR_KEY]), $.env.get('HOME'), readGraph($)])
+  // The contract's folder first: its `new` puts the worktree there.
+  const form = newForm(target, contract?.dir ?? worktreeDir(configured.exitCode === 0 ? configured.stdout : ''), home ?? '')
   await setView($, (v): View => ({ ...v, ...CLOSED, worktreeForm: form }))
 }
 
@@ -743,7 +784,7 @@ async function excludeFolder($: EngineInterface, main: string, path: string): Pr
   if ((await git($, ['check-ignore', '-q', path])).exitCode === 0) return false
   const file = (await git($, ['rev-parse', '--path-format=absolute', '--git-path', 'info/exclude'])).stdout.trim()
   if (!file) return false
-  const text = await $.fs.read(file).then(t => (typeof t === 'string' ? t : ''), () => '')
+  const text = (await readTextFile($, file)) ?? ''
   const next = withExclude(text, excludeEntry(main, path))
   if (next === null) return false
   await $.fs.write(file, next)
@@ -758,7 +799,8 @@ async function createWorktree($: EngineInterface): Promise<void> {
   const form = view.worktreeForm
   if (!form) return
   const main = mainPath(graph.worktrees)
-  const problem = formProblem(form, main)
+  const byContract = graph.contract?.commands.new
+  const problem = formProblem(form, main, graph.contract != null)
   const fail = (message: string) => setForm($, f => ({ ...f, error: message }))
   if ('error' in problem) return void (await fail(problem.error))
   if (problem.warning && view.confirm !== 'worktree-create') return void (await setView($, v => ({ ...v, confirm: 'worktree-create' })))
@@ -767,9 +809,13 @@ async function createWorktree($: EngineInterface): Promise<void> {
   const [ref, isTakenPath] = await Promise.all(['newBranch' in target ? git($, ['check-ref-format', '--branch', target.newBranch]) : null, isTaken($, path)])
   if (ref && ref.exitCode !== 0) return void (await fail(`Not a valid branch name: ${form.newBranch}`))
   if (isTakenPath) return void (await fail(`${path} already exists and is not empty`))
-  const isExcluded = isInside(main, path) && (await excludeFolder($, main, path))
+  // The contract's `new` creates it the project's way (its environment too): the script keeps
+  // its own folder out of the status.
+  const isExcluded = !byContract && isInside(main, path) && (await excludeFolder($, main, path))
   await setView($, v => ({ ...v, worktreeForm: null, confirm: null }))
-  await runAction($, addArgs(target), `Created worktree ${relativeTo(main, path)}${isExcluded ? ` (${excludeEntry(main, path)} added to .git/info/exclude)` : ''}`)
+  const done = `Created worktree ${relativeTo(main, path)}`
+  if (byContract) await runEnvCommand($, main, commandArgv(byContract, envVars(form.slug, target)), 'new', `Creating ${form.slug}…`, done)
+  else await runAction($, addArgs(target), `${done}${isExcluded ? ` (${excludeEntry(main, path)} added to .git/info/exclude)` : ''}`)
   // Made (the load after the run lists it): the worktrees screen, the new one's actions open.
   if ((await readGraph($)).worktrees?.some(w => w.path === path)) await openWorktrees($, path)
 }
@@ -781,18 +827,174 @@ async function askClaudeToCreate($: EngineInterface): Promise<void> {
   const form = view.worktreeForm
   if (!form) return
   const main = mainPath(graph.worktrees)
-  const problem = formProblem(form, main)
+  const problem = formProblem(form, main, graph.contract != null)
   if ('error' in problem) return void (await setForm($, f => ({ ...f, error: problem.error })))
   await setView($, v => ({ ...v, worktreeForm: null, confirm: null }))
   await $.prompt.submit({ text: createPrompt(formTarget(form, problem.path, graph.locals ?? []), main) })
   $.ui.toast('Asked Claude to create the worktree')
 }
 
+// Removes a worktree: by the contract's `remove` when it declares one (its environment goes
+// too), else by git.
 async function removeWorktree($: EngineInterface, path: string, isForce: boolean): Promise<void> {
-  const main = mainPath((await readGraph($)).worktrees)
+  const [graph, cmd] = await Promise.all([readGraph($), envCommand($, path, 'remove', isForce)])
+  const main = mainPath(graph.worktrees)
   await setView($, v => ({ ...v, worktreeRemoving: null, worktreeSelected: null }))
-  await runAction($, removeArgs(path, isForce), `Removed worktree ${relativeTo(main, path)}`)
+  if ((await read($, worktreeEnvState)).logs?.path === path) await stopLogs($)
+  const done = `Removed worktree ${relativeTo(main, path)}`
+  if (cmd) await runEnvCommand($, main, cmd.argv, 'remove', `Removing ${cmd.env.slug}…`, done)
+  else await runAction($, removeArgs(path, isForce), done)
   if ((await read($, viewState)).screen === 'worktrees') await openWorktrees($)
+}
+
+// A project's environment command may build and start services: up to ten minutes; `status`
+// only asks, and runs unasked: half a minute.
+const ENV_TIMEOUT_MS = 10 * 60 * 1000
+const STATUS_TIMEOUT_MS = 30 * 1000
+
+// A worktree's environment and the main worktree its commands run in; null without one.
+async function envOf($: EngineInterface, path: string): Promise<{ env: Env; main: string } | null> {
+  const graph = await readGraph($)
+  const main = mainPath(graph.worktrees)
+  const env = envFor(graph.contract, main, path)
+  return env ? { env, main } : null
+}
+
+// A worktree's environment command, ready to run in the main worktree; null without one.
+async function envCommand($: EngineInterface, path: string, name: EnvCommand, isForce = false) {
+  const found = await envOf($, path)
+  const argv = found && envArgv(found.env, name, isForce)
+  return found && argv ? { ...found, argv } : null
+}
+
+// Runs a contract command in the main worktree; a command that cannot start is a failed run.
+const runInMain = ($: EngineInterface, main: string, argv: string[], timeoutMs = ENV_TIMEOUT_MS): Promise<{ exitCode: number; stdout: string; stderr: string }> =>
+  $.process.run(argv, { cwd: main, timeoutMs }).catch((err: unknown) => ({ exitCode: -1, stdout: '', stderr: String(err) }))
+
+const envFailure = (name: string, out: { stdout: string; stderr: string }) => `${name} failed: ${firstLine(stripAnsi(out.stderr || out.stdout))}`
+
+// Runs a contract command under the action lock (spinner, notice, toast, reload).
+async function runEnvCommand($: EngineInterface, main: string, argv: string[], name: string, label: string, done: string): Promise<string[] | null> {
+  return withRunning($, label, done, async () => {
+    const out = await runInMain($, main, argv)
+    return out.exitCode === 0 ? [] : [envFailure(name, out)]
+  }, true)
+}
+
+// When the environments' status was last asked: a load asks again once it is older than this.
+let statusAskedAt = 0
+const STATUS_MAX_AGE_MS = 30 * 1000
+
+// Asks the contract's `status` of each worktree with an environment, all at once.
+async function refreshStatus($: EngineInterface, graph: Graph, paths: string[]): Promise<void> {
+  const main = mainPath(graph.worktrees)
+  const asked = paths.flatMap(path => {
+    const env = envFor(graph.contract, main, path)
+    const argv = env && envArgv(env, 'status')
+    return argv ? [{ path, argv }] : []
+  })
+  if (asked.length === 0) return
+  statusAskedAt = Date.now()
+  const outs = await Promise.all(asked.map(a => runInMain($, main, a.argv, STATUS_TIMEOUT_MS)))
+  const found = Object.fromEntries(asked.map((a, i) => [a.path, parseEnvStatus(outs[i] ?? { exitCode: -1, stdout: '' })]))
+  await setGraph($, g => ({ ...g, envStatus: { ...g.envStatus, ...found } }))
+}
+
+// Runs a worktree's environment action with its spinner under that worktree alone; nothing
+// while another action runs (one at a time).
+async function inWorktree($: EngineInterface, path: string, work: () => Promise<void>): Promise<void> {
+  if (isRunning) return
+  await setView($, v => ({ ...v, worktreeRunning: path }))
+  try {
+    await work()
+  } finally {
+    await setView($, v => ({ ...v, worktreeRunning: null }))
+  }
+}
+
+// Brings a worktree's environment up or down, then asks its status again.
+async function runUpDown($: EngineInterface, path: string, command: 'up' | 'down'): Promise<void> {
+  const found = await envCommand($, path, command)
+  if (!found) return
+  const { argv } = found
+  await inWorktree($, path, async () => {
+    const failures = await runEnvCommand($, found.main, argv, command, `Running ${command} ${found.env.slug}…`, `${found.env.slug} is ${command}`)
+    if (failures !== null) await refreshStatus($, await readGraph($), [path])
+  })
+}
+
+// Runs the contract's `check` and keeps its lines for the screen.
+async function runCheck($: EngineInterface, path: string): Promise<void> {
+  const found = await envCommand($, path, 'check')
+  if (!found) return
+  const { argv } = found
+  await inWorktree($, path, async () => {
+    await update($, worktreeEnvState, e => ({ ...e, check: null }))
+    let lines: CheckLine[] = []
+    await withRunning($, `Checking ${found.env.slug}…`, `Checked ${found.env.slug}`, async () => {
+      const out = await runInMain($, found.main, argv)
+      const result = checkResult(out)
+      if (!result) return [envFailure('check', out)]
+      lines = result
+      return []
+    })
+    await update($, worktreeEnvState, e => ({ ...e, check: { path, lines } }))
+  })
+}
+
+// The logs followed: the running command's stream (a process handle, not something the render
+// reads), ended by Stop, by following another worktree's, or by leaving the screen.
+let logsStream: AsyncGenerator<unknown, unknown> | null = null
+const LOG_KEEP = 200
+
+async function stopLogs($: EngineInterface): Promise<void> {
+  const stream = logsStream
+  logsStream = null
+  await update($, worktreeEnvState, e => ({ ...e, logs: null }))
+  await stream?.return(undefined).catch(() => undefined)
+}
+
+// Follows the contract's `logs` of a worktree: its lines as they come (appendChunk), then how
+// it ended. A log may never end: the press does not wait on it.
+async function followLogs($: EngineInterface, path: string): Promise<void> {
+  const found = await envCommand($, path, 'logs')
+  if (!found) return
+  const { argv } = found
+  await stopLogs($)
+  await update($, worktreeEnvState, e => ({ ...e, logs: { path, lines: [], exit: null } }))
+  const stream = $.process.spawn({ argv, cwd: found.main })
+  logsStream = stream
+  let log = { lines: [] as string[], partial: '' }
+  const show = (exit: number | null) => update($, worktreeEnvState, e => (e.logs?.path === path ? { ...e, logs: { path, lines: log.lines, exit } } : e))
+  let exit = -1
+  try {
+    for (;;) {
+      const next = await stream.next()
+      if (logsStream !== stream) return
+      if (next.done) {
+        exit = next.value.code ?? -1
+        break
+      }
+      const before = log.lines
+      log = appendChunk(log, next.value.text, LOG_KEEP)
+      if (log.lines !== before) await show(null)
+    }
+  } catch (err) {
+    if (logsStream !== stream) return
+    log = appendChunk(log, String(err), LOG_KEEP)
+  }
+  logsStream = null
+  if (log.partial) log = appendChunk(log, '\n', LOG_KEEP)
+  await show(exit)
+}
+
+// Opens a link in the browser: macOS's `open`, else `xdg-open`.
+async function openLink($: EngineInterface, url: string): Promise<void> {
+  for (const opener of ['open', 'xdg-open']) {
+    const out = await $.process.run([opener, url]).catch(() => null)
+    if (out?.exitCode === 0) return void $.ui.toast(`Opened ${hostOf(url)}`)
+  }
+  $.ui.toast(`Could not open ${url}`)
 }
 
 const compareKey = ({ from, to }: Compare) => rangeKey(from, to)
@@ -948,23 +1150,25 @@ function pillBg({ branchColors, mainColor }: Ctx, badge: Badge, lane: string): s
 
 // A ref's pill. A tag, or a gone branch alone, is its icon on the color, then the name on its
 // dark shade; any other is its name on the color, then its remotes on the dark shade, the
-// checked-out branch (and a gone one with its remote: the ghost there) with an icon first;
-// a branch open in another worktree ends with its mark on the dark shade.
+// checked-out branch with a hollow dot before the pill, a gone one with its remote the ghost
+// first;
+// a branch open in another worktree ends with its mark on the dark shade, and a green dot
+// while its environment is up.
 function pillProps(ctx: Ctx, badge: Badge, lane: string): PillProps {
   const { isRound, icons } = ctx
   const { name, remotes } = badgeParts(badge)
   const bg = pillBg(ctx, badge, lane)
   const dark = shade(bg, SHADE)
   const isBold = badge.kind === 'head' || badge.kind === 'detached'
-  const icon = badge.kind === 'head' ? icons.head : badge.kind === 'tag' ? icons.tag : badge.worktree ? icons.worktree : badge.isGone ? icons.ghost : ''
-  // The icon inside the name's segment: the checked-out branch's check.
-  const isPinned = badge.kind === 'head' || (badge.isGone === true && remotes !== '')
+  const icon = badge.kind === 'tag' ? icons.tag : badge.worktree ? icons.worktree : badge.isGone ? icons.ghost : ''
+  // The icon inside the name's segment: a gone branch's ghost, by its remote.
+  const isPinned = badge.isGone === true && remotes !== ''
   const fg = badge.kind === 'remote' && !badge.isGone ? LIGHT_FG : BADGE_FG
   const segments: PillSegment[] = badge.worktree
     ? // the worktree mark last, on the dark shade in the pill's color, after the remotes
       [
         { text: name, bg, fg },
-        { text: remotes, bg: dark, fg: LIGHT_FG, icon: { text: icon, fg: bg, isAfter: true } },
+        { text: remotes, bg: dark, fg: LIGHT_FG, icon: { text: icon, fg: bg, isAfter: true, ...(badge.isUp && { dot: 'success' }) } },
       ]
     : icon && !isPinned
       ? [
@@ -975,7 +1179,8 @@ function pillProps(ctx: Ctx, badge: Badge, lane: string): PillProps {
           isPinned ? { text: `  ${name}`, bg, fg, isBold, icon: { text: icon, fg: dark } } : { text: name, bg, fg, isBold },
           ...(remotes ? [{ text: remotes, bg: dark, fg: LIGHT_FG }] : []),
         ]
-  return { segments, isRound }
+  // the checked-out branch: a hollow dot before the pill, outside it, in its color
+  return { segments, isRound, ...(badge.kind === 'head' && { mark: { text: icons.head, fg: bg } }) }
 }
 
 // The pill ./pill.tsx draws, for surfaces without `Client`.
@@ -1342,7 +1547,7 @@ function menuEntry($: EngineInterface, ctx: Ctx, badge: Badge, item: MenuItem): 
     return {
       label: item.label,
       isActive: view.isDeleting,
-      onPress: () => setView($, v => ({ ...v, isDeleting: !v.isDeleting, isForce: false, isRenaming: false, push: null, confirm: null })),
+      onPress: () => setView($, v => ({ ...v, isDeleting: !v.isDeleting, isForce: false, isDeletingRemote: false, isRenaming: false, push: null, confirm: null })),
     }
   if (item.worktree === 'show') return { label: item.label, isActive: false, onPress: () => openWorktrees($, graph.openBranches?.[badge.label] ?? null) }
   if (item.worktree === 'new') return { label: item.label, isActive: false, onPress: () => openWorktreeForm($, { kind: 'branch', branch: badge.label }) }
@@ -1433,22 +1638,35 @@ function buttonRows(ctx: Ctx, key: string, items: BarItem[]) {
   ))
 }
 
-// The form a menu item opened: the push's remotes, the delete's force, the new name.
+// Deletes a local branch and, asked, the branch of its name on each of its remotes after it,
+// stopping at the first failure.
+async function deleteBranch($: EngineInterface, branch: string, remotes: string[]): Promise<void> {
+  const { isForce, isDeletingRemote } = await read($, viewState)
+  const on = isDeletingRemote ? remotes : []
+  const done = `Deleted ${[branch, ...on.map(r => `${r}/${branch}`)].join(', ')}`
+  await withRunning($, `Deleting ${branch}…`, done, stepsWork($, deleteBranchSteps(branch, isForce, on)))
+}
+
+// The delete's switches: force, and, with remotes holding the branch, deleting it there too.
+function deleteSwitches($: EngineInterface, ctx: Ctx, remotes: string[]) {
+  const { view } = ctx
+  return [
+    switchButton(ctx, 'menu-opt-force', 'force (deletes unmerged work)', view.isForce, () => setView($, v => ({ ...v, isForce: !v.isForce }))),
+    ...(remotes.length ? [switchButton(ctx, 'menu-opt-remote', `also on ${remotes.join(', ')}`, view.isDeletingRemote, () => setView($, v => ({ ...v, isDeletingRemote: !v.isDeletingRemote })))] : []),
+  ]
+}
+
+// The form a menu item opened: the push's remotes, the delete's switches, the new name.
 function menuItemForm($: EngineInterface, ctx: Ctx, badge: Badge, item: MenuItem): RenderChildren[] {
   const { view, Input } = ctx
   if (item.pushArgs && view.push) return renderPushChooser($, ctx, badge, item)
   const branch = item.deleteBranch
-  if (branch !== undefined && view.isDeleting)
-    return [
-      line(
-        ctx,
-        [
-          switchButton(ctx, 'menu-opt-force', 'force (deletes unmerged work)', view.isForce, () => setView($, v => ({ ...v, isForce: !v.isForce }))),
-          confirmButton($, ctx, 'menu-delete-run', `delete-branch:${branch}`, `Delete ${branch}`, () => runAction($, deleteBranchArgs(branch, view.isForce), `Deleted ${branch}`)),
-        ],
-        2,
-      ),
-    ]
+  if (branch !== undefined && view.isDeleting) {
+    const remotes = item.deleteRemotes ?? []
+    const run = confirmButton($, ctx, 'menu-delete-run', `delete-branch:${branch}`, `Delete ${branch}`, () => deleteBranch($, branch, remotes))
+    // with the remote switch too, the button gets a row of its own
+    return remotes.length ? [line(ctx, deleteSwitches($, ctx, remotes), 2), line(ctx, run)] : [line(ctx, [...deleteSwitches($, ctx, remotes), run], 2)]
+  }
   if (item.isRename && view.isRenaming && Input)
     return [line(ctx, <Input key="rename" label="New name" value={badge.label} submitLabel="rename" autoFocus onSubmit={value => renameBranch($, badge.label, value)} />)]
   return []
@@ -1489,18 +1707,20 @@ function menuFormDialog($: EngineInterface, ctx: Ctx, badge: Badge): Omit<Dialog
     const { remotes, actions } = pushParts($, ctx, badge, push)
     return { title: `Push ${badge.label}`, rows: [remotes], actions }
   }
-  const branch = items.find(i => i.deleteBranch !== undefined)?.deleteBranch
+  const del = items.find(i => i.deleteBranch !== undefined)
+  const branch = del?.deleteBranch
+  const remotes = del?.deleteRemotes ?? []
   if (view.isDeleting && branch !== undefined)
     return {
       title: `Delete ${branch}`,
-      rows: [line(ctx, switchButton(ctx, 'menu-opt-force', 'force (deletes unmerged work)', view.isForce, () => setView($, v => ({ ...v, isForce: !v.isForce }))))],
+      rows: deleteSwitches($, ctx, remotes).map(s => line(ctx, s)),
       actions: line(
         ctx,
         [
-          <Button key="menu-delete-run" variant="primary" autoFocus onPress={() => runAction($, deleteBranchArgs(branch, view.isForce), `Deleted ${branch}`)}>
+          <Button key="menu-delete-run" variant="primary" autoFocus onPress={() => deleteBranch($, branch, remotes)}>
             Delete
           </Button>,
-          closeButton(ctx, 'menu-delete-cancel', () => setView($, v => ({ ...v, isDeleting: false, isForce: false })), 'cancel'),
+          closeButton(ctx, 'menu-delete-cancel', () => setView($, v => ({ ...v, isDeleting: false, isForce: false, isDeletingRemote: false })), 'cancel'),
         ],
         2,
       ),
@@ -1902,27 +2122,33 @@ function screenHeader($: EngineInterface, ctx: Ctx, screen: Exclude<Screen, 'gra
 }
 
 // The worktrees screen: New worktree, then a row per worktree (the one the pane shows
-// marked), each opening its actions under it; the new worktree form floats over it.
-function renderWorktrees($: EngineInterface, ctx: Ctx, changes: Record<string, number> | null, scroll: PaneScroll) {
+// says current), each opening its actions under it; the new worktree form floats over it.
+function renderWorktrees($: EngineInterface, ctx: Ctx, changes: Record<string, number> | null, env: WorktreeEnv, scroll: PaneScroll) {
   const { els: { Box, Text, Button }, graph, view, icons } = ctx
-  const list = graph.worktrees ?? []
-  const main = mainPath(list)
+  const main = mainPath(graph.worktrees)
+  // The main worktree is the repo's own folder, not one made apart: left out.
+  const list = (graph.worktrees ?? []).filter(w => !w.isMain)
+  const none = list.length === 0 ? [line(ctx, <Text color={MUTED}>No worktrees yet</Text>)] : []
   const rows = list.flatMap(w => {
     const n = changes?.[w.path]
-    const info = [w.branch ?? `detached ${short(w.head)}`, n !== undefined && n > 0 ? `${n} changed` : '', w.isMain ? 'main worktree' : '', w.isLocked ? 'locked' : '', w.isPrunable ? 'prunable' : ''].filter(Boolean).join(' · ')
+    const info = [w.branch ?? `detached ${short(w.head)}`, w.path === graph.worktree ? 'current' : '', n !== undefined && n > 0 ? `${n} changed` : '', w.isLocked ? 'locked' : '', w.isPrunable ? 'prunable' : ''].filter(Boolean).join(' · ')
+    const status = graph.envStatus?.[w.path]
     const toggle = () => setView($, v => ({ ...v, worktreeSelected: v.worktreeSelected === w.path ? null : w.path, worktreeRemoving: null, isForce: false }))
     const row = line(
       ctx,
       <Button key={`worktree:${w.path}`} plain onPress={toggle}>
         <Text wrap="truncate-end">
-          <Text weight={view.worktreeSelected === w.path ? 'bold' : undefined}>{`${w.path === graph.worktree ? '●' : ' '} ${relativeTo(main, w.path)}`}</Text>
+          <Text weight={view.worktreeSelected === w.path ? 'bold' : undefined}>{relativeTo(main, w.path)}</Text>
           <Text color={MUTED}>{`  ${info}`}</Text>
+          {status && <Text color={status === 'up' ? 'success' : MUTED}>{`  ${STATUS_MARK[status]}`}</Text>}
         </Text>
       </Button>,
     )
-    return view.worktreeSelected === w.path ? [row, ...worktreeActions($, ctx, w, n ?? 0, main), blank(ctx)] : [row]
+    return view.worktreeSelected === w.path ? [row, blank(ctx), ...worktreeActions($, ctx, w, n ?? 0, main, env), blank(ctx)] : [row]
   })
-  const header = screenHeader($, ctx, 'worktrees', `${icons.worktree} Worktrees`)
+  // A contract that is wrong or too new says so; the basic worktrees go on.
+  const problem = graph.contractProblem ? wrapWords(graph.contractProblem, ctx.cols - 2).map(l => line(ctx, <Text color="warning">{l}</Text>)) : []
+  const header = [...screenHeader($, ctx, 'worktrees', `${icons.worktree} Worktrees`), ...problem]
   const create = line(
     ctx,
     [
@@ -1933,7 +2159,7 @@ function renderWorktrees($: EngineInterface, ctx: Ctx, changes: Record<string, n
     ],
     2,
   )
-  const body = [...header, create, blank(ctx), ...rows]
+  const body = [...header, create, blank(ctx), ...none, ...rows]
   const form = view.worktreeForm ? worktreeFormDialog($, ctx, view.worktreeForm, main) : null
   // On a docked terminal pane the form floats over the list; elsewhere it opens above it.
   if (ctx.isPinned && form)
@@ -1946,6 +2172,13 @@ function renderWorktrees($: EngineInterface, ctx: Ctx, changes: Record<string, n
   return <Box flexDirection="column">{form ? [...header, framed(ctx, PALETTE[0] ?? MUTED, 0, dialogRows(ctx, form)).node, ...rows] : body}</Box>
 }
 
+// A worktree's environment, by the contract's status; a check's lines by their mark; the
+// logs' last lines shown.
+const STATUS_MARK: Record<EnvStatus, string> = { up: '● up', down: '○ down', unknown: '? unknown' }
+const CHECK_MARK = { ok: '✓', failed: '✗', shared: '–', info: ' ' } as const
+const CHECK_COLOR = { ok: 'success', failed: 'error', shared: MUTED, info: MUTED } as const
+const LOG_ROWS = 12
+
 // The new worktree form, as a dialog: what it is on, the branch (new at a commit; existing or
 // new from the screen), the name and the path; the problem or the warning, broken to the
 // dialog's width; create (create anyway, armed, when warned), ask Claude, cancel.
@@ -1955,7 +2188,8 @@ function worktreeFormDialog($: EngineInterface, ctx: Ctx, form: WorktreeForm, ma
   const title = form.kind === 'branch' ? `New worktree on ${form.branch}` : form.kind === 'commit' ? `New worktree at ${short(form.hash)}, on a new branch` : 'New worktree'
   const cancel = closeButton(ctx, 'worktree-form-cancel', () => setView($, v => ({ ...v, worktreeForm: null, confirm: null })), 'cancel')
   if (!Input || view.running) return { title, width, rows: [view.running ? renderRunning(ctx, 'worktree-form-spinner') : blank(ctx)], actions: line(ctx, cancel) }
-  const problem = formProblem(form, main)
+  const { contract } = ctx.graph
+  const problem = formProblem(form, main, contract != null)
   const warning = 'warning' in problem ? problem.warning : undefined
   const field = (key: string, label: string, name: 'newBranch' | 'slug' | 'path', value: string, placeholder: string) =>
     line(ctx, <Input key={key} label={label} value={value} placeholder={placeholder} submitLabel="create" onInput={text => setForm($, f => formInput(f, name, text))} onSubmit={() => createWorktree($)} />)
@@ -1967,7 +2201,8 @@ function worktreeFormDialog($: EngineInterface, ctx: Ctx, form: WorktreeForm, ma
     rows: [
       ...(form.kind !== 'branch' ? [field('worktree-branch', 'Branch', 'newBranch', form.newBranch, form.kind === 'head' ? 'existing or new branch' : 'branch-name')] : []),
       field('worktree-slug', 'Name', 'slug', form.slug, 'worktree-name'),
-      field('worktree-path', 'Path', 'path', form.path, `${form.dir}/<name>`),
+      // The contract's `new` puts it in its folder: the path is the script's, not typed.
+      ...(contract?.commands.new ? [line(ctx, <Text color={MUTED} wrap="truncate-end">{`Path ${form.path} · by ${CONTRACT_FILE}`}</Text>)] : [field('worktree-path', 'Path', 'path', form.path, `${form.dir}/<name>`)]),
       ...(message ? wrapWords(message.text, width - 4).map(l => line(ctx, <Text color={message.color}>{l}</Text>)) : []),
     ],
     actions: line(
@@ -1988,9 +2223,11 @@ function worktreeFormDialog($: EngineInterface, ctx: Ctx, form: WorktreeForm, ma
 
 // A worktree's actions: copy its folder, remove it (not the main one); removing confirms, and
 // a worktree with changes takes force.
-function worktreeActions($: EngineInterface, ctx: Ctx, w: Worktree, changed: number, main: string): RenderChildren[] {
+function worktreeActions($: EngineInterface, ctx: Ctx, w: Worktree, changed: number, main: string, env: WorktreeEnv): RenderChildren[] {
   const { els: { Text, Button }, view } = ctx
-  if (view.running) return [renderRunning(ctx, 'worktree-spinner')]
+  // An action runs: its spinner under its worktree; another worktree says to wait for it.
+  if (view.running && view.worktreeRunning === w.path) return [renderRunning(ctx, 'worktree-spinner')]
+  if (view.running) return [line(ctx, <Text color={MUTED}>{`${view.running} Its actions come back once it is done.`}</Text>)]
   if (view.worktreeRemoving === w.path) {
     const isDirty = changed > 0
     return [
@@ -2012,11 +2249,32 @@ function worktreeActions($: EngineInterface, ctx: Ctx, w: Worktree, changed: num
       ),
     ]
   }
-  const item = (id: string, label: string, onPress: Entry['onPress']): ListItem => ({ id, key: `worktree-${id}`, entry: { label, isActive: false, onPress } })
+  const item = (id: string, label: string, onPress: Entry['onPress'], after?: RenderChildren[]): ListItem => ({ id, key: `worktree-${id}`, entry: { label, isActive: false, onPress }, after })
+  // The contract's actions, each only when declared; none outside the contract's folder.
+  const wenv = envFor(ctx.graph.contract, main, w.path)
+  const has = (name: EnvCommand) => wenv?.commands[name] !== undefined
+  const links = wenv?.links ?? []
+  const check = env.check?.path === w.path ? env.check.lines : null
+  const logs = env.logs?.path === w.path ? env.logs : null
+  const checkRows = (check ?? []).map(c => line(ctx, <Text wrap="truncate-end" color={CHECK_COLOR[c.mark]}>{`    ${CHECK_MARK[c.mark]} ${c.text}`}</Text>))
+  const logRows = logs
+    ? [
+        ...(logs.lines.length ? logs.lines.slice(-LOG_ROWS) : ['waiting for output…']).map(l => line(ctx, <Text wrap="truncate-end" color={MUTED}>{`    ${l}`}</Text>)),
+        ...(logs.exit !== null ? [line(ctx, <Text color={logs.exit === 0 ? MUTED : 'error'}>{`    the log ended (exit ${logs.exit})`}</Text>)] : []),
+      ]
+    : []
   return entryList(ctx, 'worktree', [
+    links.map((url, i) => item(`link-${i}`, `↗ ${hostOf(url)}`, () => openLink($, url))),
+    [
+      ...(has('up') ? [item('up', 'Up', () => runUpDown($, w.path, 'up'))] : []),
+      ...(has('down') ? [item('down', 'Down', () => runUpDown($, w.path, 'down'))] : []),
+      ...(has('logs') ? [logs ? item('logs-stop', 'Stop logs', () => stopLogs($), logRows) : item('logs', 'Logs', async () => void followLogs($, w.path))] : []),
+      // a check shown has Hide check (no second run); Check runs it again
+      ...(has('check') ? [check ? item('check-hide', 'Hide check', () => update($, worktreeEnvState, e => ({ ...e, check: null })), checkRows) : item('check', 'Check', () => runCheck($, w.path))] : []),
+    ],
     [
       item('copy', 'Copy path', pe => copyText($, w.path, `Copied ${w.path}`, pe.surface)),
-      ...(w.isMain ? [] : [item('remove', 'Remove…', () => setView($, v => ({ ...v, worktreeRemoving: w.path, isForce: false })))]),
+      item('remove', 'Remove…', () => setView($, v => ({ ...v, worktreeRemoving: w.path, isForce: false }))),
     ],
   ])
 }
@@ -2246,14 +2504,14 @@ function flowFormRows($: EngineInterface, ctx: Ctx): RenderChildren[] {
 function conflictRows($: EngineInterface, ctx: Ctx, conflict: FlowConflict) {
   const { Text, Button } = ctx.els
   return [
-    line(ctx, <Text color="warning">{`Conflict in ${conflict.op} of ${conflict.topic.branch}: resolve the files, then`}</Text>),
+    line(ctx, <Text color="warning">{`Conflict in ${conflict.into ? `merge of ${conflict.topic.branch} into ${conflict.into}` : `${conflict.op} of ${conflict.topic.branch}`}: resolve the files, then`}</Text>),
     line(
       ctx,
       [
-        <Button key="flow-continue" variant="primary" autoFocus onPress={() => runFlow($, [{ args: resumeArgs(conflict, '--continue') }], 'Continued ✓', 'Continuing…', conflict)}>
+        <Button key="flow-continue" variant="primary" autoFocus onPress={() => runFlow($, [resumeStep(conflict, '--continue'), ...(conflict.then ?? [])], 'Continued ✓', 'Continuing…')}>
           Continue
         </Button>,
-        confirmButton($, ctx, 'flow-abort', 'flow-abort', 'Abort', () => runFlow($, [{ args: resumeArgs(conflict, '--abort') }], 'Aborted', 'Aborting…')),
+        confirmButton($, ctx, 'flow-abort', 'flow-abort', 'Abort', () => runFlow($, [resumeStep(conflict, '--abort')], 'Aborted', 'Aborting…')),
         <Button key="conflict-claude" plain onPress={() => askClaudeToResolve($, conflictOrigin(conflict))}>
           ✨ Ask Claude
         </Button>,
@@ -2617,7 +2875,7 @@ async function renderPane($: EngineInterface, els: Ctx['els'], surface: string, 
   if (view.screen === 'changelog') return renderChangelog($, base, await read($, changelogState))
   if (view.screen === 'diff') return renderDiff($, base, view.diff, await read($, diffState))
   if (view.screen === 'compare') return renderCompare($, base, view.compare, await read($, compareState))
-  if (view.screen === 'worktrees') return renderWorktrees($, base, await read($, worktreeChangesState), scroll)
+  if (view.screen === 'worktrees') return renderWorktrees($, base, await read($, worktreeChangesState), await read($, worktreeEnvState), scroll)
   if (view.screen === 'settings') return renderSettings($, base, await read($, settingsState))
   // The graph column is as wide as the rows in the window need: laid out once to find the
   // window, then again at that width (a wide stretch far off no longer widens it all).

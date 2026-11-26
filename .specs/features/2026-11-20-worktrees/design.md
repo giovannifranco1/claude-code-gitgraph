@@ -21,7 +21,6 @@ O grafo ganha só o **indicador no badge** da branch aberta noutra worktree (WT-
 ```
 ⧉ Worktrees                                              ← graph
 ──────────────────────────────────────────────────────────────────
-● gitgraph                main                      main worktree
   .claude/worktrees/login feature/login   3 changed
       Open in Claude   Copy path   Remove…
   .claude/worktrees/fix   (detached a1b2c3d)

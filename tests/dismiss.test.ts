@@ -4,7 +4,7 @@ import type { FlowView, View } from '../types'
 import { dismissModal, hasModal } from '../hooks/dismiss'
 
 const FLOW: FlowView = { starting: null, finishing: null, opts: { isNoFf: false, isPush: false, isKeep: false }, tagMessage: null, conflict: null, init: null, confirming: null, isMenuOpen: false }
-const VIEW: View = { scope: 'all', limit: 200, selected: null, confirm: null, menu: null, isRenaming: false, isDeleting: false, isForce: false, push: null, running: null, screen: 'graph', configScope: 'local', editingRemote: null, isAddingRemote: false, remoteDraft: '', scrollTo: null, isSearching: false, search: '', commitDraft: '', isSuggesting: false, uncommittedForm: null, diff: null, compare: null, compareMark: null, worktreeSelected: null, worktreeRemoving: null, worktreeForm: null, commitStep: 'files', commitFiles: [], refresh: 'idle', isOpen: true, flow: FLOW, isActionsOpen: false, notice: null }
+const VIEW: View = { scope: 'all', limit: 200, selected: null, confirm: null, menu: null, isRenaming: false, isDeleting: false, isForce: false, isDeletingRemote: false, push: null, running: null, screen: 'graph', configScope: 'local', editingRemote: null, isAddingRemote: false, remoteDraft: '', scrollTo: null, isSearching: false, search: '', commitDraft: '', isSuggesting: false, uncommittedForm: null, diff: null, compare: null, compareMark: null, worktreeSelected: null, worktreeRemoving: null, worktreeRunning: null, worktreeForm: null, commitStep: 'files', commitFiles: [], refresh: 'idle', isOpen: true, flow: FLOW, isActionsOpen: false, notice: null }
 const MENU: View['menu'] = { hash: 'aaaaaaa1', badge: { kind: 'branch', label: 'feat', remotes: [] } }
 
 test('ESC-01 with no modal open there is nothing to dismiss', async () => {
