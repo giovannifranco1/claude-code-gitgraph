@@ -4,6 +4,8 @@ Mudanças do Git Graph (`gitgraph`) por versão, no formato [Keep a Changelog](h
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-11-26
+
 ### Adicionado
 
 - Worktrees: o ícone de worktree no header abre a tela **Worktrees**, uma linha por worktree criada à parte, sem a pasta principal do repositório (caminho, branch, `current` na que o painel mostra, arquivos mudados, locked/prunable); clicar numa abre **Copy path** e **Remove…** (confirma; com mudanças, só com **force**; a branch fica). **＋ New worktree** na tela (numa branch que existe, ou numa nova a partir do HEAD), **New worktree…** no menu de uma branch local e **New worktree here…** nas ações de um commit (numa branch nova) abrem o form num modal: nome (a partir da branch), **Path** (acompanha o nome até ser editado; pode ser uma pasta já criada, vazia) e, no commit, a branch nova. **Create** roda o `git worktree add`; **✨ Ask Claude** pede ao Claude para criar com o mesmo comando. Um caminho fora da pasta do repositório avisa o que deixa de funcionar (a sessão do Claude não alcança a pasta) e pede **Create anyway**; dentro do repositório e não ignorada, a pasta vai para o `.git/info/exclude`, para a worktree não aparecer nas Uncommitted changes. A branch aberta noutra worktree ganha o ícone de worktree no badge, e o menu dela **Show worktree**. Nas Settings, **Worktree folder** define onde as worktrees novas deste repositório vão (padrão `.claude/worktrees`).
